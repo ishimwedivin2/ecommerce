@@ -1204,7 +1204,7 @@ export const ApiService = {
       db.set('mock_users', users);
       return { success: true, message: "Role assigned successfully" };
     },
-    async getAuditLogs() {
+    async getAuditLogsLegacy() {
       if (isBackendOnline) return await request('/api/admin/audit');
       return { success: true, data: db.get('mock_audits') };
     },
@@ -1458,5 +1458,203 @@ export const ApiService = {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-  }
+  },
+
+  // ── Dashboard convenience methods ─────────────────────
+  async getAdminStats() {
+    if (isBackendOnline) return await request('/api/analytics/dashboard/kpis');
+    const orders = db.get('mock_orders');
+    const revenue = orders.filter(o=>o.status!=='CANCELLED').reduce((s,o)=>s+o.totalAmount,0);
+    return { totalRevenue:revenue, totalOrders:orders.length, totalCustomers:db.get('mock_users').filter(u=>(u.roles||[]).includes('ROLE_CUSTOMER')).length, averageOrderValue:orders.length?revenue/orders.length:0, conversionRate:3.2, refundRate:2.1 };
+  },
+  async getTopProducts({ limit=5 }={}) {
+    if (isBackendOnline) return await request(`/api/analytics/top-products?limit=${limit}`);
+    return db.get('mock_products').slice(0,limit).map(p=>({ ...p, revenue:(p.price||0)*(Math.random()*50+10|0) }));
+  },
+  async getRevenueByMonth() {
+    if (isBackendOnline) return await request('/api/analytics/revenue/monthly');
+    const months=['Jan','Feb','Mar','Apr','May','Jun','Jul'];
+    return months.map((m,i)=>({ month:m, revenue:8000+Math.random()*14000 }));
+  },
+  async getOrdersByStatus() {
+    if (isBackendOnline) return await request('/api/analytics/orders/by-status');
+    const orders = db.get('mock_orders');
+    const counts = {};
+    orders.forEach(o=>{ counts[o.status]=(counts[o.status]||0)+1; });
+    return Object.entries(counts).map(([label,value])=>({ label, value }));
+  },
+  async getFinanceStats() {
+    if (isBackendOnline) return await request('/api/analytics/finance');
+    const orders = db.get('mock_orders');
+    const revenue = orders.filter(o=>o.status!=='CANCELLED').reduce((s,o)=>s+o.totalAmount,0);
+    return { totalRevenue:revenue, totalExpenses:revenue*0.55, totalRefunds:revenue*0.02, taxRate:8, taxCollected:revenue*0.08 };
+  },
+  async getInventory({ page=0, size=30 }={}) {
+    if (isBackendOnline) return await request(`/api/inventory?page=${page}&size=${size}`);
+    const items = db.get('mock_inventory');
+    return { content:items, totalElements:items.length, page, size };
+  },
+  async adjustInventory(id, { adjustmentType, quantity, reason }={}) {
+    if (isBackendOnline) return await request(`/api/inventory/${id}/adjust`, { method:'POST', body:JSON.stringify({ adjustmentType, quantity, reason }) });
+    const inv = db.get('mock_inventory');
+    const item = inv.find(i=>i.id===id||i.productId===id);
+    if (item) {
+      if (adjustmentType==='SET') item.quantity=quantity;
+      else if (adjustmentType==='REMOVE') item.quantity=Math.max(0,item.quantity-quantity);
+      else item.quantity=(item.quantity||0)+quantity;
+      db.set('mock_inventory',inv);
+    }
+    return { success:true };
+  },
+  async getReturns({ page=0, size=20, status='' }={}) {
+    if (isBackendOnline) return await request(`/api/returns?page=${page}&size=${size}${status?'&status='+status:''}`);
+    const items = db.get('mock_returns_list')||[];
+    const filtered = status ? items.filter(r=>r.status===status) : items;
+    return { content:filtered, totalElements:filtered.length };
+  },
+  async approveReturn(id) {
+    if (isBackendOnline) return await request(`/api/returns/${id}/approve`, { method:'POST' });
+    const items = db.get('mock_returns_list')||[]; const r=items.find(x=>x.id===id); if(r) r.status='APPROVED'; db.set('mock_returns_list',items); return { success:true };
+  },
+  async rejectReturn(id) {
+    if (isBackendOnline) return await request(`/api/returns/${id}/reject`, { method:'POST' });
+    const items = db.get('mock_returns_list')||[]; const r=items.find(x=>x.id===id); if(r) r.status='REJECTED'; db.set('mock_returns_list',items); return { success:true };
+  },
+  async getShipments({ page=0, size=20 }={}) {
+    if (isBackendOnline) return await request(`/api/shipments?page=${page}&size=${size}`);
+    const items = db.get('mock_shipments')||[];
+    return { content:items, totalElements:items.length };
+  },
+  async getCoupons({ page=0, size=20 }={}) {
+    if (isBackendOnline) return await request(`/api/finance/coupons?page=${page}&size=${size}`);
+    const items = db.get('mock_coupons')||[{ id:'cpn-1', code:'LUZ24', discountType:'PERCENTAGE', discountValue:10, usageCount:12, usageLimit:100, active:true, expiryDate:'2026-12-31' }];
+    return { content:items, totalElements:items.length };
+  },
+  async getCoupon(id) {
+    if (isBackendOnline) return await request(`/api/finance/coupons/${id}`);
+    const items = db.get('mock_coupons')||[]; return items.find(c=>c.id===id)||{ id };
+  },
+  async createCoupon(data) {
+    if (isBackendOnline) return await request('/api/finance/coupons', { method:'POST', body:JSON.stringify(data) });
+    const items = db.get('mock_coupons')||[]; items.unshift({ ...data, id:'cpn-'+Date.now(), usageCount:0 }); db.set('mock_coupons',items); return { success:true };
+  },
+  async updateCoupon(id, data) {
+    if (isBackendOnline) return await request(`/api/finance/coupons/${id}`, { method:'PUT', body:JSON.stringify(data) });
+    const items = db.get('mock_coupons')||[]; const i=items.findIndex(c=>c.id===id); if(i>=0) items[i]={...items[i],...data}; db.set('mock_coupons',items); return { success:true };
+  },
+  async deleteCoupon(id) {
+    if (isBackendOnline) return await request(`/api/finance/coupons/${id}`, { method:'DELETE' });
+    const items = (db.get('mock_coupons')||[]).filter(c=>c.id!==id); db.set('mock_coupons',items); return { success:true };
+  },
+  async getBanners() {
+    if (isBackendOnline) return await request('/api/banners');
+    return db.get('mock_banners')||[];
+  },
+  async getBanner(id) {
+    if (isBackendOnline) return await request(`/api/banners/${id}`);
+    const items = db.get('mock_banners')||[]; return items.find(b=>b.id===id)||{ id };
+  },
+  async createBanner(data) {
+    if (isBackendOnline) return await request('/api/banners', { method:'POST', body:JSON.stringify(data) });
+    const items = db.get('mock_banners')||[]; items.push({ ...data, id:'ban-'+Date.now() }); db.set('mock_banners',items); return { success:true };
+  },
+  async updateBanner(id, data) {
+    if (isBackendOnline) return await request(`/api/banners/${id}`, { method:'PUT', body:JSON.stringify(data) });
+    const items = db.get('mock_banners')||[]; const i=items.findIndex(b=>b.id===id); if(i>=0) items[i]={...items[i],...data}; db.set('mock_banners',items); return { success:true };
+  },
+  async deleteBanner(id) {
+    if (isBackendOnline) return await request(`/api/banners/${id}`, { method:'DELETE' });
+    const items = (db.get('mock_banners')||[]).filter(b=>b.id!==id); db.set('mock_banners',items); return { success:true };
+  },
+  async getCustomers({ page=0, size=20 }={}) {
+    if (isBackendOnline) return await request(`/api/admin/users?role=ROLE_CUSTOMER&page=${page}&size=${size}`);
+    const users = (db.get('mock_users')||[]).filter(u=>(u.roles||[]).includes('ROLE_CUSTOMER'));
+    return { content:users, totalElements:users.length };
+  },
+  async getCustomer(id) {
+    if (isBackendOnline) return await request(`/api/admin/users/${id}`);
+    return (db.get('mock_users')||[]).find(u=>u.id===id)||{ id };
+  },
+  async getSupportTickets({ page=0, size=30, status='' }={}) {
+    if (isBackendOnline) return await request(`/api/support/tickets?page=${page}&size=${size}${status?'&status='+status:''}`);
+    const items = db.get('mock_tickets')||[];
+    const filtered = status ? items.filter(t=>t.status===status) : items;
+    return { content:filtered, totalElements:filtered.length };
+  },
+  async getSupportTicket(id) {
+    if (isBackendOnline) return await request(`/api/support/tickets/${id}`);
+    return (db.get('mock_tickets')||[]).find(t=>t.id===id)||{ id, messages:[] };
+  },
+  async replyToTicket(id, { message }={}) {
+    if (isBackendOnline) return await request(`/api/support/tickets/${id}/reply`, { method:'POST', body:JSON.stringify({ message }) });
+    return { success:true };
+  },
+  async resolveTicket(id) {
+    if (isBackendOnline) return await request(`/api/support/tickets/${id}/resolve`, { method:'POST' });
+    const items = db.get('mock_tickets')||[]; const t=items.find(x=>x.id===id); if(t) t.status='RESOLVED'; db.set('mock_tickets',items); return { success:true };
+  },
+  async getUsers({ page=0, size=20 }={}) {
+    if (isBackendOnline) return await request(`/api/admin/users?page=${page}&size=${size}`);
+    const users = db.get('mock_users')||[];
+    return { content:users, totalElements:users.length };
+  },
+  async getUser(id) {
+    if (isBackendOnline) return await request(`/api/admin/users/${id}`);
+    return (db.get('mock_users')||[]).find(u=>u.id===id)||{ id };
+  },
+  async createUser(data) {
+    if (isBackendOnline) return await request('/api/admin/users', { method:'POST', body:JSON.stringify(data) });
+    const users = db.get('mock_users')||[]; users.unshift({ ...data, id:'usr-'+Date.now(), createdAt:new Date().toISOString(), status:'ACTIVE' }); db.set('mock_users',users); return { success:true };
+  },
+  async updateUser(id, data) {
+    if (isBackendOnline) return await request(`/api/admin/users/${id}`, { method:'PUT', body:JSON.stringify(data) });
+    const users = db.get('mock_users')||[]; const i=users.findIndex(u=>u.id===id); if(i>=0) users[i]={...users[i],...data}; db.set('mock_users',users); return { success:true };
+  },
+  async blockUser(id) {
+    if (isBackendOnline) return await request(`/api/admin/users/${id}/block`, { method:'POST' });
+    const users = db.get('mock_users')||[]; const u=users.find(x=>x.id===id); if(u) u.status='BLOCKED'; db.set('mock_users',users); return { success:true };
+  },
+  async unblockUser(id) {
+    if (isBackendOnline) return await request(`/api/admin/users/${id}/unblock`, { method:'POST' });
+    const users = db.get('mock_users')||[]; const u=users.find(x=>x.id===id); if(u) u.status='ACTIVE'; db.set('mock_users',users); return { success:true };
+  },
+  async getAuditLogs({ page=0, size=30 }={}) {
+    if (isBackendOnline) return await request(`/api/admin/audit?page=${page}&size=${size}`);
+    const logs = db.get('mock_audits')||[];
+    return { content:logs, totalElements:logs.length };
+  },
+  async getProduct(id) {
+    if (isBackendOnline) return await request(`/api/products/${id}`);
+    return (db.get('mock_products')||[]).find(p=>p.id===id)||{ id };
+  },
+  async createProduct(data) {
+    if (isBackendOnline) return await request('/api/products', { method:'POST', body:JSON.stringify(data) });
+    const products = db.get('mock_products')||[]; products.unshift({ ...data, id:'prod-'+Date.now(), createdAt:new Date().toISOString() }); db.set('mock_products',products); return { success:true };
+  },
+  async updateProduct(id, data) {
+    if (isBackendOnline) return await request(`/api/products/${id}`, { method:'PUT', body:JSON.stringify(data) });
+    const products = db.get('mock_products')||[]; const i=products.findIndex(p=>p.id===id); if(i>=0) products[i]={...products[i],...data}; db.set('mock_products',products); return { success:true };
+  },
+  async deleteProduct(id) {
+    if (isBackendOnline) return await request(`/api/products/${id}`, { method:'DELETE' });
+    const products = (db.get('mock_products')||[]).filter(p=>p.id!==id); db.set('mock_products',products); return { success:true };
+  },
+  async getOrder(id) {
+    if (isBackendOnline) return await request(`/api/orders/${id}`);
+    return (db.get('mock_orders')||[]).find(o=>o.id===id)||{ id, items:[], totalAmount:0 };
+  },
+  async updateOrderStatus(id, { status }={}) {
+    if (isBackendOnline) return await request(`/api/orders/${id}/status`, { method:'PATCH', body:JSON.stringify({ status }) });
+    const orders = db.get('mock_orders')||[]; const o=orders.find(x=>x.id===id); if(o) o.status=status; db.set('mock_orders',orders); return { success:true };
+  },
+  async getOrders({ page=0, size=20, status='' }={}) {
+    if (isBackendOnline) return await request(`/api/orders?page=${page}&size=${size}${status?'&status='+status:''}`);
+    const orders = db.get('mock_orders')||[];
+    const filtered = status ? orders.filter(o=>o.status===status) : orders;
+    return { content:filtered, totalElements:filtered.length };
+  },
+  async getCategories() {
+    if (isBackendOnline) return await request('/api/categories');
+    return db.get('mock_categories')||[];
+  },
 };
