@@ -1,0 +1,13 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "ecommerce",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "cwd": "C:\\Users\\USER\\Desktop\\Fyp\\ecommerce",
+      "port": 5173,
+      "autoPort": true
+    }
+  ]
+}

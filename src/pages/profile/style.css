@@ -1,0 +1,109 @@
+/* ── Order Row Card ───────────────────────────────────── */
+.order-row-card {
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  margin-bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.order-row-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* ── Order Progress Pipeline ──────────────────────────── */
+.order-progress-container { overflow-x: auto; padding-bottom: 4px; }
+.order-progress-bar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  position: relative;
+  min-width: 500px;
+  padding: 16px 0 8px;
+}
+.order-progress-line {
+  position: absolute;
+  top: 26px;
+  left: 8%;
+  right: 8%;
+  height: 3px;
+  background: var(--border);
+  z-index: 0;
+}
+.order-progress-line-active {
+  position: absolute;
+  top: 26px;
+  left: 8%;
+  height: 3px;
+  background: linear-gradient(90deg, var(--primary), #ff8c00);
+  z-index: 1;
+  transition: width 0.4s ease;
+}
+
+.progress-step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  z-index: 2;
+  flex: 1;
+}
+.progress-step-circle {
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  background: white;
+  border: 2.5px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-light);
+  transition: all 0.3s;
+}
+.progress-step span {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-light);
+  text-align: center;
+  white-space: nowrap;
+}
+.progress-step.active .progress-step-circle {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: white;
+  box-shadow: 0 0 0 4px rgba(255,107,0,0.2);
+}
+.progress-step.active span { color: var(--primary); font-weight: 700; }
+.progress-step.completed .progress-step-circle {
+  background: var(--success);
+  border-color: var(--success);
+  color: white;
+}
+.progress-step.completed span { color: var(--success); }
+
+/* ── Status Badges ────────────────────────────────────── */
+.status-badge {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+}
+.status-badge.created { background: #f1f5f9; color: #64748b; }
+.status-badge.paid { background: #ecfdf5; color: #059669; }
+.status-badge.picked, .status-badge.packed { background: #eff6ff; color: #2563eb; }
+.status-badge.dispatched { background: #fdf4ff; color: #9333ea; }
+.status-badge.delivered { background: #ecfdf5; color: #15803d; }
+.status-badge.cancelled { background: #fff5f5; color: #dc2626; }
+.status-badge.pending { background: #fffbeb; color: #d97706; }
+
+.orders-list { display: flex; flex-direction: column; gap: 16px; }
