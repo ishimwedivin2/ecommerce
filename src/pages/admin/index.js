@@ -37,6 +37,18 @@ const I = {
   store: `<svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>`,
 };
 
+// ── Response helpers ──────────────────────────────────────
+// All backend responses are wrapped in ApiResponse { success, message, data, timestamp }.
+// `data` is either a plain array (List) or a Spring Page object { content, totalElements }.
+function extractList(res) {
+  const d = res?.data ?? res;
+  return Array.isArray(d) ? d : (d?.content || []);
+}
+function extractTotal(res, arr) {
+  const d = res?.data ?? res;
+  return d?.totalElements ?? arr.length ?? 0;
+}
+
 // ── Role helpers ──────────────────────────────────────────
 function getUser() { return ApiService.getCurrentUser() || {}; }
 function isAdmin() { const u = getUser(); return (u.roles||[]).some(r => r==='ROLE_ADMIN'); }
@@ -83,6 +95,9 @@ let activeTab = 'analytics';
 let sidebarCollapsed = false;
 let badges = { orders: 0, returns: 0, tickets: 0 };
 let drawerOpen = false;
+let _couponCache = [];
+let _bannerCache = [];
+let _userCache   = [];
 
 // ── Main render ───────────────────────────────────────────
 export async function render(state) {
@@ -209,7 +224,7 @@ function bindShell() {
 
 // ── Drawer helpers ────────────────────────────────────────
 function openDrawer(type, data) {
-  const titles = { product:'Product', order:'Order Detail', coupon:'Coupon', banner:'Banner', user:'User', customer:'Customer', adjust:'Adjust Stock', ticket:'Support Ticket' };
+  const titles = { product:'Product', order:'Order Detail', coupon:'Coupon', banner:'Banner', user:'User', customer:'Customer', adjust:'Adjust Stock', ticket:'Support Ticket', shipment:'Shipment', 'shipment-status':'Shipment Status', 'return-action':'Return Review' };
   document.getElementById('d-drawer-title').textContent = (data?'Edit ':'New ') + (titles[type]||type);
   document.getElementById('d-drawer-body').innerHTML = drawerBody(type, data);
   document.getElementById('d-drawer-footer').innerHTML = drawerFooter(type, data);
@@ -253,9 +268,9 @@ async function loadBadges() {
       ApiService.getReturns({ status:'PENDING', size:1 }),
       ApiService.getSupportTickets({ status:'OPEN', size:1 }),
     ]);
-    badges.orders  = orders.value?.totalElements  || 0;
-    badges.returns = returns.value?.totalElements || 0;
-    badges.tickets = tickets.value?.totalElements || 0;
+    badges.orders  = extractList(orders.value).filter(o => o.status === 'PENDING').length;
+    badges.returns = extractList(returns.value).filter(r => r.status === 'PENDING').length;
+    badges.tickets = extractList(tickets.value).filter(t => t.status === 'OPEN').length;
     document.querySelectorAll('.dash-nav-item[data-tab="orders"] .dash-nav-badge').forEach(el => { if(badges.orders) el.textContent = badges.orders; });
     if (badges.orders || badges.returns || badges.tickets) {
       const dot = document.getElementById('notif-dot');
@@ -292,29 +307,40 @@ const TAB = {};
 // ── Analytics ────────────────────────────────────────────
 TAB.analytics = async () => {
   let stats = { revenue:0, orders:0, customers:0, aov:0, convRate:0, refundRate:0 };
-  let topProds = [];
   let revenueByMonth = [];
   let ordersByStatus = [];
+  let topProducts = [];
   try {
-    const [ds, tp, rb, os] = await Promise.allSettled([
+    const [ds, rm, obs, tp] = await Promise.allSettled([
       ApiService.getAdminStats(),
-      ApiService.getTopProducts({ limit:5 }),
       ApiService.getRevenueByMonth(),
       ApiService.getOrdersByStatus(),
+      ApiService.getTopProducts(),
     ]);
-    if(ds.value) stats = { ...stats, ...ds.value };
-    if(tp.value) topProds = tp.value;
-    if(rb.value) revenueByMonth = rb.value;
-    if(os.value) ordersByStatus = os.value;
+    if (ds.status === 'fulfilled' && ds.value) stats = { ...stats, ...(ds.value.data || ds.value) };
+    if (rm.status === 'fulfilled' && rm.value) {
+      const raw = rm.value.data || rm.value;
+      if (Array.isArray(raw)) revenueByMonth = raw.map(d => ({ month: (d.month||'').slice(5), revenue: d.revenue||0 }));
+    }
+    if (obs.status === 'fulfilled' && obs.value) {
+      const raw = obs.value.data || obs.value;
+      if (raw && typeof raw === 'object') {
+        ordersByStatus = Object.entries(raw).map(([label, value]) => ({ label, value: Number(value)||0 }));
+      }
+    }
+    if (tp.status === 'fulfilled' && tp.value) {
+      const raw = tp.value.data || tp.value;
+      if (Array.isArray(raw)) topProducts = raw;
+    }
   } catch(_){}
 
   const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  const barData = revenueByMonth.length ? revenueByMonth : months.slice(0,7).map((m,i)=>({ month:m, revenue: 8000+Math.random()*12000 }));
+  const barData = revenueByMonth.length ? revenueByMonth : months.slice(0,7).map((m)=>({ month:m, revenue:0 }));
   const maxRev = Math.max(...barData.map(d=>d.revenue||0), 1);
 
   const donutColors = ['#FF6B00','#3B82F6','#10B981','#8B5CF6','#F59E0B'];
   const catData = ordersByStatus.length ? ordersByStatus : [
-    {label:'Delivered',value:45},{label:'Processing',value:25},{label:'Pending',value:15},{label:'Cancelled',value:10},{label:'Returned',value:5}
+    {label:'Delivered',value:0},{label:'Processing',value:0},{label:'Pending',value:0},{label:'Cancelled',value:0},{label:'Returned',value:0}
   ];
   const totalCat = catData.reduce((a,b)=>a+(b.value||0),0)||1;
   let donutPaths = ''; let legendHtml = ''; let off = 0;
@@ -332,13 +358,9 @@ TAB.analytics = async () => {
     return `<div class="dash-bar-col"><div class="dash-bar" style="height:${Math.max(pct,3)}%" title="${fmt.money(d.revenue)}"></div><div class="dash-bar-lbl">${d.month||''}</div></div>`;
   }).join('');
 
-  const topProdsHtml = topProds.length ? topProds.map(p=>`
-    <div class="d-widget-row">
-      <span>${p.name||p.productName||'Product'}</span>
-      <span class="td-b">${fmt.money(p.revenue||p.totalRevenue||0)}</span>
-    </div>`).join('') :
-    ['Wireless Earbuds','Smart Watch','Laptop Stand','Desk Lamp','Phone Case'].map((n,i)=>`
-    <div class="d-widget-row"><span>${n}</span><span style="font-weight:700">${fmt.money(1200-i*180)}</span></div>`).join('');
+  const topProdsHtml = topProducts.length
+    ? topProducts.map(p => `<div class="d-widget-row"><span>${p.productName||'—'}</span><span style="font-weight:700">${fmt.money(p.revenue||0)}</span></div>`).join('')
+    : `<div class="d-widget-row" style="color:var(--text-muted)">No sales data for this period</div>`;
 
   return `
   <div class="dash-page-hd">
@@ -401,8 +423,8 @@ TAB.orders = async () => {
   let orders = []; let total = 0;
   try {
     const res = await ApiService.getOrders({ page:0, size:20 });
-    orders = res.content || res || [];
-    total  = res.totalElements || orders.length;
+    orders = extractList(res);
+    total  = extractTotal(res, orders);
   } catch(_){}
 
   const rows = orders.length ? orders.map(o => `
@@ -453,8 +475,8 @@ TAB.products = async () => {
   let products = []; let total = 0;
   try {
     const res = await ApiService.getProducts({ page:0, size:20 });
-    products = res.content || res || [];
-    total    = res.totalElements || products.length;
+    products = extractList(res);
+    total    = extractTotal(res, products);
   } catch(_){}
 
   const rows = products.length ? products.map(p => `
@@ -504,7 +526,7 @@ TAB.inventory = async () => {
   let items = [];
   try {
     const res = await ApiService.getInventory({ page:0, size:30 });
-    items = res.content || res || [];
+    items = extractList(res);
   } catch(_){}
 
   const rows = items.length ? items.map(item => {
@@ -564,24 +586,25 @@ TAB.returns = async () => {
   let items = []; let total = 0;
   try {
     const res = await ApiService.getReturns({ page:0, size:20 });
-    items = res.content || res || [];
-    total = res.totalElements || items.length;
+    items = extractList(res);
+    total = extractTotal(res, items);
   } catch(_){}
 
   const rows = items.length ? items.map(r => `
     <tr>
-      <td class="td-m">#${r.id||'—'}</td>
-      <td class="td-m">#${r.orderId||'—'}</td>
+      <td class="td-m">#${(r.id||'—').toString().slice(-8)}</td>
+      <td class="td-m">#${(r.orderId||'—').toString().slice(-8)}</td>
       <td class="td-b">${r.customerName||'Customer'}</td>
       <td>${r.reason||'Not specified'}</td>
-      <td>${fmt.money(r.refundAmount||r.amount||0)}</td>
+      <td>${fmt.money(r.refundedAmount||r.refundAmount||r.amount||0)}</td>
       <td>${statusBdg(r.status||'PENDING')}</td>
       <td class="td-sm">${fmt.date(r.createdAt)}</td>
-      <td style="display:flex;gap:5px">
+      <td style="display:flex;gap:5px;flex-wrap:wrap">
         ${r.status==='PENDING'||!r.status ? `
-          <button class="btn-d btn-d-success btn-d-sm" data-action="approve-return" data-id="${r.id}">Approve</button>
-          <button class="btn-d btn-d-danger btn-d-sm"  data-action="reject-return"  data-id="${r.id}">Reject</button>
-        ` : `<button class="btn-d btn-d-sec btn-d-sm" data-action="view-return" data-id="${r.id}">View</button>`}
+          <button class="btn-d btn-d-success btn-d-sm" data-action="approve-return" data-id="${r.id}" data-notes="">Approve</button>
+          <button class="btn-d btn-d-danger btn-d-sm"  data-action="reject-return"  data-id="${r.id}" data-notes="">Reject</button>
+        ` : ''}
+        <button class="btn-d btn-d-sec btn-d-sm" data-action="view-return" data-id="${r.id}">${I.eye} View</button>
       </td>
     </tr>`).join('') :
     `<tr><td colspan="8"><div class="d-empty"><div class="d-empty-ico">↩️</div><div class="d-empty-ttl">No return requests</div></div></td></tr>`;
@@ -595,8 +618,11 @@ TAB.returns = async () => {
     <div class="dash-tcard-hd">
       <span class="dash-tcard-title">Return Requests</span><span class="dash-tcard-count">${total}</span>
       <div class="dash-tcard-acts">
-        <select class="dash-sel" id="return-status-filter"><option value="">All</option><option>PENDING</option><option>APPROVED</option><option>REJECTED</option></select>
-        <button class="btn-d btn-d-sec btn-d-sm" id="btn-filter-returns">${I.search}</button>
+        <select class="dash-sel" id="return-status-filter">
+          <option value="">All Statuses</option>
+          <option>PENDING</option><option>APPROVED</option><option>REJECTED</option><option>REFUNDED</option><option>COMPLETED</option>
+        </select>
+        <button class="btn-d btn-d-sec btn-d-sm" id="btn-filter-returns">${I.search} Filter</button>
       </div>
     </div>
     <table class="dt">
@@ -611,33 +637,50 @@ TAB.shipments = async () => {
   let items = []; let total = 0;
   try {
     const res = await ApiService.getShipments({ page:0, size:20 });
-    items = res.content || res || [];
-    total = res.totalElements || items.length;
+    items = extractList(res);
+    total = extractTotal(res, items);
   } catch(_){}
 
-  const rows = items.length ? items.map(s => `
+  const rows = items.length ? items.map(s => {
+    const isActive = !['DELIVERED','CANCELLED'].includes(s.status);
+    const isAdmin_ = isAdmin();
+    return `
     <tr>
       <td class="td-m">${s.trackingNumber||s.tracking||'—'}</td>
-      <td class="td-m">#${s.orderId||'—'}</td>
-      <td class="td-b">${s.recipientName||s.customerName||'Customer'}</td>
+      <td class="td-m">#${(s.orderId||'—').toString().slice(-8)}</td>
+      <td class="td-b">${s.recipientName||s.customerName||'—'}</td>
       <td>${s.carrier||'—'}</td>
-      <td>${statusBdg(s.status||'IN_TRANSIT')}</td>
-      <td class="td-sm">${fmt.date(s.estimatedDelivery||s.eta)}</td>
-      <td><button class="btn-d btn-d-sec btn-d-sm" data-action="view-shipment" data-id="${s.id}">${I.eye} Track</button></td>
-    </tr>`).join('') :
+      <td>${statusBdg(s.status||'PENDING')}</td>
+      <td class="td-sm">${fmt.date(s.estimatedDeliveryDate||s.estimatedDelivery||s.eta)}</td>
+      <td style="display:flex;gap:5px;flex-wrap:wrap">
+        <button class="btn-d btn-d-sec btn-d-sm" data-action="view-shipment" data-id="${s.id}">${I.eye} Detail</button>
+        ${isActive ? `<button class="btn-d btn-d-primary btn-d-sm" data-action="update-shipment-status" data-id="${s.id}" data-status="${s.status||'PENDING'}">Update Status</button>` : ''}
+        ${isAdmin_ && isActive ? `<button class="btn-d btn-d-danger btn-d-sm" data-action="cancel-shipment" data-id="${s.id}">Cancel</button>` : ''}
+      </td>
+    </tr>`;
+  }).join('') :
     `<tr><td colspan="7"><div class="d-empty"><div class="d-empty-ico">🚚</div><div class="d-empty-ttl">No shipments found</div></div></td></tr>`;
 
   return `
   <div class="dash-page-hd">
     <div><div class="dash-page-title">Shipments</div><div class="dash-page-sub">${total} shipments</div></div>
+    <div class="dash-page-acts">
+      <button class="btn-d btn-d-primary" id="btn-create-shipment">${I.plus} Create Shipment</button>
+    </div>
   </div>
   <div class="dash-tcard">
-    <div class="dash-tcard-hd"><span class="dash-tcard-title">Active Shipments</span><span class="dash-tcard-count">${total}</span>
-      <div class="dash-tcard-acts"><input class="dash-inp" placeholder="Search tracking…" style="width:180px"></div>
+    <div class="dash-tcard-hd"><span class="dash-tcard-title">All Shipments</span><span class="dash-tcard-count">${total}</span>
+      <div class="dash-tcard-acts">
+        <select class="dash-sel" id="shipment-status-filter">
+          <option value="">All Statuses</option>
+          <option>PENDING</option><option>IN_TRANSIT</option><option>OUT_FOR_DELIVERY</option><option>DELIVERED</option><option>CANCELLED</option>
+        </select>
+        <button class="btn-d btn-d-sec btn-d-sm" id="btn-filter-shipments">${I.search} Filter</button>
+      </div>
     </div>
     <table class="dt">
       <thead><tr><th>Tracking #</th><th>Order</th><th>Recipient</th><th>Carrier</th><th>Status</th><th>ETA</th><th>Actions</th></tr></thead>
-      <tbody>${rows}</tbody>
+      <tbody id="shipments-tbody">${rows}</tbody>
     </table>
   </div>`;
 };
@@ -647,8 +690,9 @@ TAB.coupons = async () => {
   let coupons = []; let total = 0;
   try {
     const res = await ApiService.getCoupons({ page:0, size:20 });
-    coupons = res.content || res || [];
-    total   = res.totalElements || coupons.length;
+    coupons = extractList(res);
+    total   = extractTotal(res, coupons);
+    _couponCache = coupons;
   } catch(_){}
 
   const rows = coupons.length ? coupons.map(c => `
@@ -687,7 +731,8 @@ TAB.banners = async () => {
   let banners = [];
   try {
     const res = await ApiService.getBanners();
-    banners = res.content || res || [];
+    banners = extractList(res);
+    _bannerCache = banners;
   } catch(_){}
 
   const rows = banners.length ? banners.map(b => `
@@ -722,8 +767,8 @@ TAB.crm = async () => {
   let customers = []; let total = 0;
   try {
     const res = await ApiService.getCustomers({ page:0, size:20 });
-    customers = res.content || res || [];
-    total     = res.totalElements || customers.length;
+    customers = extractList(res);
+    total     = extractTotal(res, customers);
   } catch(_){}
 
   const rows = customers.length ? customers.map(c => `
@@ -765,7 +810,7 @@ TAB.support = async () => {
   let tickets = [];
   try {
     const res = await ApiService.getSupportTickets({ page:0, size:30 });
-    tickets = res.content || res || [];
+    tickets = extractList(res);
   } catch(_){}
 
   const ticketListHtml = tickets.length ? tickets.map(t => `
@@ -797,9 +842,12 @@ TAB.support = async () => {
 
 // ── Finance ───────────────────────────────────────────────
 TAB.finance = async () => {
-  if (!isAdmin()) return `<div class="d-alert d-alert-err">Access denied. Admin only.</div>`;
+  if (!isAdmin() && !isEmployee()) return `<div class="d-alert d-alert-err">Access denied.</div>`;
   let stats = {};
-  try { stats = await ApiService.getFinanceStats() || {}; } catch(_){}
+  try {
+    const res = await ApiService.getFinanceStats();
+    stats = res.data || res || {};
+  } catch(_){}
 
   const revenue  = stats.totalRevenue||stats.revenue||0;
   const expenses = stats.totalExpenses||stats.expenses||0;
@@ -877,8 +925,9 @@ TAB.users = async () => {
   let users = []; let total = 0;
   try {
     const res = await ApiService.getUsers({ page:0, size:20 });
-    users = res.content || res || [];
-    total = res.totalElements || users.length;
+    users = extractList(res);
+    total = extractTotal(res, users);
+    _userCache = users;
   } catch(_){}
 
   const rows = users.length ? users.map(u => `
@@ -921,26 +970,37 @@ TAB.users = async () => {
 // ── Security ──────────────────────────────────────────────
 TAB.security = async () => {
   if (!isAdmin()) return `<div class="d-alert d-alert-err">Access denied.</div>`;
+  let s = {};
+  try {
+    const res = await ApiService.getSecuritySettings();
+    s = res.data || res || {};
+  } catch(_){}
+
   return `
   <div class="dash-page-hd"><div><div class="dash-page-title">Security Settings</div><div class="dash-page-sub">Authentication and access control</div></div></div>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
     <div class="dash-chart-card">
       <div class="dash-chart-hd">Password Policy</div>
-      <div class="f-field"><label class="f-lbl">Min Length</label><input class="f-inp" type="number" value="8" min="6" max="32"></div>
-      <div class="f-field"><label class="f-lbl">Require Uppercase</label><label class="d-toggle"><input type="checkbox" checked><span class="d-tog-slider"></span></label></div>
-      <div class="f-field"><label class="f-lbl">Require Numbers</label><label class="d-toggle"><input type="checkbox" checked><span class="d-tog-slider"></span></label></div>
-      <div class="f-field"><label class="f-lbl">Require Special Chars</label><label class="d-toggle"><input type="checkbox"><span class="d-tog-slider"></span></label></div>
-      <div class="f-field"><label class="f-lbl">Password Expiry (days)</label><input class="f-inp" type="number" value="90"></div>
-      <button class="btn-d btn-d-primary" style="margin-top:8px">Save Policy</button>
+      <div class="f-field"><label class="f-lbl">Min Length <small style="color:#94A3B8">(6–128)</small></label><input class="f-inp" type="number" id="sec-pwd-min" value="${s.passwordMinLength??8}" min="6" max="128"></div>
+      <div class="f-field"><label class="f-lbl">Require Uppercase</label><label class="d-toggle"><input type="checkbox" id="sec-pwd-upper" ${s.passwordRequireUppercase?'checked':''}><span class="d-tog-slider"></span></label></div>
+      <div class="f-field"><label class="f-lbl">Require Lowercase</label><label class="d-toggle"><input type="checkbox" id="sec-pwd-lower" ${s.passwordRequireLowercase?'checked':''}><span class="d-tog-slider"></span></label></div>
+      <div class="f-field"><label class="f-lbl">Require Digit</label><label class="d-toggle"><input type="checkbox" id="sec-pwd-digit" ${s.passwordRequireDigit?'checked':''}><span class="d-tog-slider"></span></label></div>
+      <div class="f-field"><label class="f-lbl">Require Special Character</label><label class="d-toggle"><input type="checkbox" id="sec-pwd-special" ${s.passwordRequireSpecialCharacter?'checked':''}><span class="d-tog-slider"></span></label></div>
+      <button class="btn-d btn-d-primary" style="margin-top:12px" id="btn-save-security">Save Settings</button>
+      <div id="sec-save-msg" style="margin-top:8px;font-size:12px;display:none"></div>
     </div>
     <div class="dash-chart-card">
-      <div class="dash-chart-hd">MFA Settings</div>
-      <div class="f-field"><label class="f-lbl">MFA Required for Admins</label><label class="d-toggle"><input type="checkbox" checked><span class="d-tog-slider"></span></label></div>
-      <div class="f-field"><label class="f-lbl">MFA Required for Employees</label><label class="d-toggle"><input type="checkbox"><span class="d-tog-slider"></span></label></div>
-      <div class="f-field"><label class="f-lbl">Session Timeout (minutes)</label><input class="f-inp" type="number" value="60"></div>
-      <div class="f-field"><label class="f-lbl">Max Failed Login Attempts</label><input class="f-inp" type="number" value="5"></div>
-      <div class="f-field"><label class="f-lbl">Lockout Duration (minutes)</label><input class="f-inp" type="number" value="15"></div>
-      <button class="btn-d btn-d-primary" style="margin-top:8px">Save Settings</button>
+      <div class="dash-chart-hd">Session & Lockout</div>
+      <div class="f-field"><label class="f-lbl">MFA Required</label><label class="d-toggle"><input type="checkbox" id="sec-mfa" ${s.mfaRequired?'checked':''}><span class="d-tog-slider"></span></label></div>
+      <div class="f-field"><label class="f-lbl">Session Timeout <small style="color:#94A3B8">(5–43200 min)</small></label><input class="f-inp" type="number" id="sec-session" value="${s.sessionTimeoutMinutes??60}" min="5" max="43200"></div>
+      <div class="f-field"><label class="f-lbl">Max Failed Attempts <small style="color:#94A3B8">(1–20)</small></label><input class="f-inp" type="number" id="sec-max-fail" value="${s.maxFailedLoginAttempts??5}" min="1" max="20"></div>
+      <div class="f-field"><label class="f-lbl">Lockout Duration <small style="color:#94A3B8">(1–1440 min)</small></label><input class="f-inp" type="number" id="sec-lockout" value="${s.lockoutDurationMinutes??15}" min="1" max="1440"></div>
+      <div class="dash-chart-hd" style="margin-top:18px;margin-bottom:10px">Unlock User</div>
+      <div style="display:flex;gap:8px">
+        <input class="f-inp" id="sec-unlock-uid" placeholder="User ID to unlock…" style="flex:1">
+        <button class="btn-d btn-d-sec" id="btn-unlock-user">Unlock</button>
+      </div>
+      <div id="sec-unlock-msg" style="margin-top:8px;font-size:12px;display:none"></div>
     </div>
   </div>`;
 };
@@ -951,8 +1011,8 @@ TAB.audit = async () => {
   let logs = []; let total = 0;
   try {
     const res = await ApiService.getAuditLogs({ page:0, size:30 });
-    logs  = res.content || res || [];
-    total = res.totalElements || logs.length;
+    logs  = extractList(res);
+    total = extractTotal(res, logs);
   } catch(_){}
 
   const rows = logs.length ? logs.map(l => `
@@ -987,29 +1047,64 @@ TAB.audit = async () => {
 // ── System ────────────────────────────────────────────────
 TAB.system = async () => {
   if (!isAdmin()) return `<div class="d-alert d-alert-err">Access denied.</div>`;
+  let configs = []; let backups = [];
+  try {
+    const [cfgRes, bkpRes] = await Promise.all([
+      ApiService.getSystemConfigurations(),
+      ApiService.getBackups()
+    ]);
+    configs = cfgRes.data || cfgRes || [];
+    backups = bkpRes.data || bkpRes || [];
+  } catch(_){}
+
+  const lastBackup = backups[0];
+  const backupRows = backups.slice(0,5).map(b => `
+    <div class="d-widget-row" style="align-items:flex-start">
+      <div style="font-size:12px">
+        <div style="font-weight:600">${fmt.date(b.createdAt)}</div>
+        <div style="color:#94A3B8">${b.status||'COMPLETED'}</div>
+      </div>
+      <button class="btn-d btn-d-sec btn-d-sm" data-action="restore-backup" data-id="${b.id}" style="margin-left:auto">Restore</button>
+    </div>`).join('') || '<div style="color:#94A3B8;font-size:12px;padding:8px 0">No backups yet</div>';
+
+  const configRows = Array.isArray(configs) && configs.length ? configs.map(c => `
+    <div class="d-widget-row" style="align-items:flex-start;gap:6px">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:11px;font-weight:600;color:#475569">${c.configKey||c.key||'—'}</div>
+        <div style="font-size:12px;color:#64748B;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${c.sensitive ? '••••••••' : (c.configValue||c.value||'—')}</div>
+      </div>
+      <button class="btn-d btn-d-sec btn-d-sm btn-d-ico" data-action="edit-config" data-key="${c.configKey||c.key}" data-value="${c.sensitive?'':c.configValue||''}" data-category="${c.category||''}" data-desc="${c.description||''}">${I.edit}</button>
+    </div>`).join('') : '<div style="color:#94A3B8;font-size:12px;padding:8px 0">No configurations found</div>';
+
   return `
-  <div class="dash-page-hd"><div><div class="dash-page-title">System</div><div class="dash-page-sub">Backups, config & health</div></div></div>
+  <div class="dash-page-hd"><div><div class="dash-page-title">System</div><div class="dash-page-sub">Backups, configuration & health</div></div></div>
   <div class="d-widgets">
     <div class="d-widget">
       <div class="d-widget-ttl">System Health</div>
-      <div class="d-widget-row"><span>API Server</span><span class="bdg bdg-green">Online</span></div>
-      <div class="d-widget-row"><span>Database</span><span class="bdg bdg-green">Connected</span></div>
-      <div class="d-widget-row"><span>Email Service</span><span class="bdg bdg-yellow">Degraded</span></div>
-      <div class="d-widget-row"><span>Storage</span><span class="bdg bdg-green">OK</span></div>
+      <div class="d-widget-row"><span>API Server</span><span class="bdg ${ApiService.isOnline()?'bdg-green':'bdg-red'}">${ApiService.isOnline()?'Online':'Offline'}</span></div>
+      <div class="d-widget-row"><span>Auth Service</span><span class="bdg bdg-green">Active</span></div>
+      <div class="d-widget-row"><span>Last Backup</span><span style="font-size:12px">${lastBackup ? fmt.ago(lastBackup.createdAt) : 'Never'}</span></div>
+      <div class="d-widget-row"><span>Configurations</span><span>${configs.length} keys</span></div>
     </div>
     <div class="d-widget">
       <div class="d-widget-ttl">Backups</div>
-      <div class="d-widget-row"><span>Last Backup</span><span class="td-sm">2 hours ago</span></div>
-      <div class="d-widget-row"><span>Backup Size</span><span>2.4 GB</span></div>
-      <div class="d-widget-row"><span>Retention</span><span>30 days</span></div>
-      <button class="btn-d btn-d-primary" style="margin-top:10px;width:100%" id="btn-trigger-backup">Trigger Backup Now</button>
+      <button class="btn-d btn-d-primary" style="width:100%;margin-bottom:12px" id="btn-trigger-backup">
+        <span id="backup-btn-txt">Trigger Backup Now</span>
+      </button>
+      <div id="backup-status-msg" style="font-size:12px;margin-bottom:10px;display:none"></div>
+      <div style="font-size:11px;font-weight:700;color:#64748B;margin-bottom:6px">BACKUP HISTORY</div>
+      <div id="backup-history">${backupRows}</div>
     </div>
     <div class="d-widget">
-      <div class="d-widget-ttl">Configuration</div>
-      <div class="f-field"><label class="f-lbl">Store Name</label><input class="f-inp" value="Luz Technology"></div>
-      <div class="f-field"><label class="f-lbl">Support Email</label><input class="f-inp" value="support@luz.tech"></div>
-      <div class="f-field"><label class="f-lbl">Maintenance Mode</label><label class="d-toggle"><input type="checkbox"><span class="d-tog-slider"></span></label></div>
-      <button class="btn-d btn-d-primary" style="margin-top:8px">Save Config</button>
+      <div class="d-widget-ttl">Configuration Keys</div>
+      <div id="config-list" style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px">${configRows}</div>
+      <div style="font-size:11px;font-weight:700;color:#64748B;margin-bottom:6px">EDIT CONFIGURATION</div>
+      <div class="f-field"><label class="f-lbl">Key</label><input class="f-inp" id="sys-cfg-key" placeholder="e.g. STORE_NAME"></div>
+      <div class="f-field"><label class="f-lbl">Value</label><input class="f-inp" id="sys-cfg-val" placeholder="Value…"></div>
+      <div class="f-field"><label class="f-lbl">Category</label><input class="f-inp" id="sys-cfg-cat" placeholder="e.g. general"></div>
+      <div class="f-field"><label class="f-lbl">Description</label><input class="f-inp" id="sys-cfg-desc" placeholder="Optional description…"></div>
+      <button class="btn-d btn-d-primary" style="margin-top:8px" id="btn-save-config">Save Configuration</button>
+      <div id="sys-cfg-msg" style="margin-top:8px;font-size:12px;display:none"></div>
     </div>
   </div>`;
 };
@@ -1019,7 +1114,7 @@ TAB.pos = async () => {
   let products = [];
   try {
     const res = await ApiService.getProducts({ page:0, size:50, status:'ACTIVE' });
-    products = res.content || res || [];
+    products = extractList(res);
   } catch(_){}
 
   const prodHtml = products.length ? products.map(p => `
@@ -1048,6 +1143,22 @@ TAB.pos = async () => {
           <div class="pos-total-row"><span>Tax (8%)</span><span class="amount" id="pos-tax">$0.00</span></div>
           <div class="pos-total-row grand"><span>Total</span><span id="pos-total">$0.00</span></div>
         </div>
+        <div class="f-field" style="margin-bottom:8px">
+          <label class="f-lbl" style="font-size:11px">Payment Method <span style="color:#EF4444">*</span></label>
+          <select class="f-sel" id="pos-payment-method" style="width:100%">
+            <option value="">— Select method —</option>
+            <option value="CASH">Cash</option>
+            <option value="MTN_MOBILE_MONEY">MTN Mobile Money</option>
+            <option value="AIRTEL_MONEY">Airtel Money</option>
+            <option value="CARD">Bank Card</option>
+            <option value="PAYPAL">PayPal</option>
+          </select>
+        </div>
+        <div class="f-field" style="margin-bottom:10px">
+          <label class="f-lbl" style="font-size:11px">Payment Reference <small style="color:#94A3B8">(optional)</small></label>
+          <input class="f-inp" id="pos-payment-ref" placeholder="Transaction / receipt number…">
+        </div>
+        <div id="pos-checkout-err" style="font-size:12px;color:#EF4444;margin-bottom:6px;display:none"></div>
         <div style="display:flex;gap:7px">
           <button class="btn-d btn-d-sec" style="flex:1" id="pos-clear">Clear</button>
           <button class="btn-d btn-d-primary" style="flex:2" id="pos-checkout">Charge ${fmt.money(0)}</button>
@@ -1097,6 +1208,27 @@ function drawerBody(type, data) {
   if (type === 'order') return `
     <div class="d-alert d-alert-info">Loading order details…</div>`;
 
+  if (type === 'shipment') return `
+    <div class="f-field"><label class="f-lbl">Order ID <span style="color:#EF4444">*</span></label><input class="f-inp" id="d-shp-order" value="${data?.orderId||''}" placeholder="UUID of order…"></div>
+    <div class="f-row">
+      <div class="f-field"><label class="f-lbl">Carrier <span style="color:#EF4444">*</span></label><input class="f-inp" id="d-shp-carrier" value="${data?.carrier||''}" placeholder="e.g. DHL, Luz Logistics"></div>
+      <div class="f-field"><label class="f-lbl">Tracking Number</label><input class="f-inp" id="d-shp-tracking" value="${data?.trackingNumber||''}" placeholder="Optional"></div>
+    </div>
+    <div class="f-field"><label class="f-lbl">Estimated Delivery Date</label><input class="f-inp" type="datetime-local" id="d-shp-eta" value="${data?.estimatedDeliveryDate||''}"></div>`;
+
+  if (type === 'shipment-status') return `
+    <div class="d-alert d-alert-info" style="margin-bottom:14px">Updating shipment status</div>
+    <div class="f-field"><label class="f-lbl">New Status <span style="color:#EF4444">*</span></label>
+      <select class="f-sel" id="d-shp-status">
+        ${['PENDING','IN_TRANSIT','OUT_FOR_DELIVERY','DELIVERED'].map(st=>`<option value="${st}" ${(data?.status||'')=== st?'selected':''}>${st.replace(/_/g,' ')}</option>`).join('')}
+      </select>
+    </div>
+    <div class="f-field"><label class="f-lbl">Actual Delivery Date <small style="color:#94A3B8">(if delivered)</small></label><input class="f-inp" type="datetime-local" id="d-shp-delivered"></div>`;
+
+  if (type === 'return-action') return `
+    <div class="d-alert d-alert-info" style="margin-bottom:14px">${data?.action === 'approve' ? 'Approving return request' : 'Rejecting return request'}</div>
+    <div class="f-field"><label class="f-lbl">Admin Notes <small style="color:#94A3B8">(optional)</small></label><textarea class="f-ta" id="d-ret-notes" placeholder="Reason or instructions for the customer…" style="min-height:80px">${data?.adminNotes||''}</textarea></div>`;
+
   return `<div class="d-empty"><div class="d-empty-ico">📝</div><div class="d-empty-ttl">Form coming soon</div></div>`;
 }
 
@@ -1137,7 +1269,11 @@ async function saveDrawer(type, data) {
         usageLimit:      parseInt(document.getElementById('d-coup-limit')?.value)||null,
         expiryDate:      document.getElementById('d-coup-exp')?.value||null,
       };
-      data ? await ApiService.updateCoupon(data.id, payload) : await ApiService.createCoupon(payload);
+      if (data?.id) {
+        await ApiService.updateCoupon(data.id, payload);
+      } else {
+        await ApiService.createCoupon(payload);
+      }
     } else if (type === 'banner') {
       const payload = {
         title:        document.getElementById('d-ban-title')?.value,
@@ -1150,19 +1286,53 @@ async function saveDrawer(type, data) {
       };
       data ? await ApiService.updateBanner(data.id, payload) : await ApiService.createBanner(payload);
     } else if (type === 'adjust') {
-      const adjType = document.getElementById('adj-type')?.value;
+      const adjType = document.getElementById('adj-type')?.value || 'MANUAL';
       const qty     = parseInt(document.getElementById('adj-qty')?.value)||0;
-      const reason  = document.getElementById('adj-reason')?.value;
-      await ApiService.adjustInventory(data.id, { adjustmentType:adjType, quantity:qty, reason });
+      const reason  = document.getElementById('adj-reason')?.value || 'Manual adjustment';
+      await ApiService.adjustInventory(data.id, { adjustmentType: adjType, quantity: qty, reason });
     } else if (type === 'user') {
+      const fn       = document.getElementById('d-usr-fn')?.value?.trim();
+      const ln       = document.getElementById('d-usr-ln')?.value?.trim();
+      const email    = document.getElementById('d-usr-email')?.value?.trim();
+      const pw       = document.getElementById('d-usr-pw')?.value;
+      const roleName = document.getElementById('d-usr-role')?.value;
+      if (data?.id) {
+        // Update profile fields
+        await ApiService.updateUser(data.id, { firstName: fn, lastName: ln });
+        // Update role if changed
+        if (roleName) await ApiService.admin.replaceRoles(data.id, [roleName]);
+      } else {
+        if (!fn || !ln || !email || !pw) throw new Error('First name, last name, email and password are required');
+        await ApiService.createUser({ firstName: fn, lastName: ln, email, password: pw, roleName: roleName || 'ROLE_CUSTOMER' });
+      }
+    } else if (type === 'shipment') {
+      const eta = document.getElementById('d-shp-eta')?.value;
       const payload = {
-        firstName: document.getElementById('d-usr-fn')?.value,
-        lastName:  document.getElementById('d-usr-ln')?.value,
-        email:     document.getElementById('d-usr-email')?.value,
-        password:  document.getElementById('d-usr-pw')?.value,
-        roles:     [document.getElementById('d-usr-role')?.value],
+        orderId:               document.getElementById('d-shp-order')?.value?.trim(),
+        carrier:               document.getElementById('d-shp-carrier')?.value?.trim(),
+        trackingNumber:        document.getElementById('d-shp-tracking')?.value?.trim() || null,
+        estimatedDeliveryDate: eta || null,
       };
-      data ? await ApiService.updateUser(data.id, payload) : await ApiService.createUser(payload);
+      if (!payload.orderId) throw new Error('Order ID is required');
+      if (!payload.carrier) throw new Error('Carrier is required');
+      await ApiService.createShipment(payload);
+    } else if (type === 'shipment-status') {
+      const status = document.getElementById('d-shp-status')?.value;
+      const delivered = document.getElementById('d-shp-delivered')?.value;
+      if (!status) throw new Error('Status is required');
+      await ApiService.updateShipmentStatus(data.id, { status, actualDeliveryDate: delivered || null });
+    } else if (type === 'return-action') {
+      const adminNotes = document.getElementById('d-ret-notes')?.value || '';
+      if (data.action === 'approve') {
+        await ApiService.approveReturn(data.id, adminNotes);
+        showToast('Return approved', 'success');
+      } else {
+        await ApiService.rejectReturn(data.id, adminNotes);
+        showToast('Return rejected', 'success');
+      }
+      closeDrawer();
+      setTimeout(() => loadTab('returns'), 300);
+      return;
     }
     closeDrawer();
     showToast('Saved successfully', 'success');
@@ -1181,23 +1351,78 @@ function bindTab(tab) {
   page.addEventListener('click', async e => {
     const el = e.target.closest('[data-action]');
     if (!el) return;
-    const { action, id, name, type: rtype, format } = el.dataset;
+    const { action, id, name, type: rtype, format, key, value, category, desc, status } = el.dataset;
 
     if (action === 'edit-product') { const p = await ApiService.getProduct(id).catch(()=>({id})); openDrawer('product', p); }
     else if (action === 'delete-product') { if(confirm('Delete this product?')) { await ApiService.deleteProduct(id).catch(()=>{}); loadTab('products'); } }
-    else if (action === 'edit-coupon')  { const c = await ApiService.getCoupon(id).catch(()=>({id})); openDrawer('coupon', c); }
+    else if (action === 'edit-coupon') {
+      try {
+        const raw = await ApiService.getCoupon(id).then(r => r.data || r);
+        // Map entity field names to the frontend form field names
+        const c = { ...raw, discountType: raw.type, discountValue: raw.amount, minimumPurchase: raw.minimumOrderAmount };
+        openDrawer('coupon', c);
+      } catch(_) {
+        const c = _couponCache.find(x => x.id === id) || { id };
+        openDrawer('coupon', c);
+      }
+    }
     else if (action === 'delete-coupon') { if(confirm('Delete coupon?')) { await ApiService.deleteCoupon(id).catch(()=>{}); loadTab('coupons'); } }
-    else if (action === 'edit-banner')  { const b = await ApiService.getBanner(id).catch(()=>({id})); openDrawer('banner', b); }
+    else if (action === 'edit-banner') {
+      try { const b = await ApiService.getBanner(id).then(r => r.data || r); openDrawer('banner', b); }
+      catch(_) { const b = _bannerCache.find(x => x.id === id) || { id }; openDrawer('banner', b); }
+    }
     else if (action === 'delete-banner') { if(confirm('Delete banner?')) { await ApiService.deleteBanner(id).catch(()=>{}); loadTab('banners'); } }
     else if (action === 'adjust-stock') { openDrawer('adjust', { id, name }); }
-    else if (action === 'approve-return') { await ApiService.approveReturn(id).catch(()=>{}); showToast('Return approved'); loadTab('returns'); }
-    else if (action === 'reject-return')  { await ApiService.rejectReturn(id).catch(()=>{}); showToast('Return rejected'); loadTab('returns'); }
-    else if (action === 'block-user')   { await ApiService.blockUser(id).catch(()=>{}); showToast('User blocked'); loadTab('users'); }
-    else if (action === 'unblock-user') { await ApiService.unblockUser(id).catch(()=>{}); showToast('User unblocked'); loadTab('users'); }
+    else if (action === 'approve-return') { openDrawer('return-action', { id, action:'approve' }); }
+    else if (action === 'reject-return')  { openDrawer('return-action', { id, action:'reject' }); }
+    else if (action === 'view-return')    { viewReturnDetail(id); }
+    else if (action === 'block-user') {
+      if (!confirm('Block this user? They will be unable to log in.')) return;
+      try { await ApiService.blockUser(id); showToast('User blocked'); loadTab('users'); }
+      catch(e) { showToast(e.message, 'error'); }
+    }
+    else if (action === 'unblock-user') {
+      try { await ApiService.unblockUser(id); showToast('User unblocked'); loadTab('users'); }
+      catch(e) { showToast(e.message, 'error'); }
+    }
     else if (action === 'download-report') { downloadReport(rtype, format); }
     else if (action === 'view-order')    { viewOrderDetail(id); }
     else if (action === 'view-customer') { viewCustomer(id); }
-    else if (action === 'edit-user')     { const u = await ApiService.getUser(id).catch(()=>({id})); openDrawer('user', u); }
+    else if (action === 'edit-user') {
+      try { const u = await ApiService.getUser(id).then(r => r.data || r); openDrawer('user', u); }
+      catch(_) { const u = _userCache.find(x => x.id === id) || { id }; openDrawer('user', u); }
+    }
+    else if (action === 'view-shipment') { viewShipmentDetail(id); }
+    else if (action === 'update-shipment-status') { openDrawer('shipment-status', { id, status }); }
+    else if (action === 'cancel-shipment') {
+      if (confirm('Cancel this shipment? This cannot be undone.')) {
+        el.disabled = true;
+        try {
+          await ApiService.cancelShipment(id);
+          showToast('Shipment cancelled', 'success');
+          loadTab('shipments');
+        } catch(err) { showToast(err.message||'Cancel failed', 'error'); el.disabled = false; }
+      }
+    }
+    else if (action === 'restore-backup') {
+      if (confirm('Restore from this backup? Current data will be replaced.')) {
+        el.disabled = true; el.textContent = 'Restoring…';
+        try {
+          await ApiService.restoreBackup(id);
+          showToast('Restore started successfully', 'success');
+        } catch(err) { showToast(err.message||'Restore failed', 'error'); el.disabled = false; el.textContent = 'Restore'; }
+      }
+    }
+    else if (action === 'edit-config') {
+      const keyEl = document.getElementById('sys-cfg-key');
+      const valEl = document.getElementById('sys-cfg-val');
+      const catEl = document.getElementById('sys-cfg-cat');
+      const dscEl = document.getElementById('sys-cfg-desc');
+      if (keyEl) keyEl.value = key || '';
+      if (valEl) valEl.value = value || '';
+      if (catEl) catEl.value = category || '';
+      if (dscEl) dscEl.value = desc || '';
+    }
   });
 
   // Tab-specific bindings
@@ -1211,7 +1436,68 @@ function bindTab(tab) {
   if (tab === 'users')    document.getElementById('btn-add-user')?.addEventListener('click',    () => openDrawer('user', null));
   if (tab === 'support')  bindSupportTab();
   if (tab === 'pos')      bindPOS();
-  if (tab === 'system')   document.getElementById('btn-trigger-backup')?.addEventListener('click', async () => { showToast('Backup started…'); });
+  if (tab === 'security') bindSecurityTab();
+  if (tab === 'system')   bindSystemTab();
+  if (tab === 'returns') {
+    document.getElementById('btn-filter-returns')?.addEventListener('click', async () => {
+      const status = document.getElementById('return-status-filter')?.value || '';
+      const tbody = document.getElementById('returns-tbody');
+      if (!tbody) return;
+      tbody.innerHTML = `<tr><td colspan="8"><div class="d-empty"><div class="d-empty-ico">⏳</div><div class="d-empty-ttl">Loading…</div></div></td></tr>`;
+      try {
+        const res = await ApiService.getReturns({ page:0, size:20, status });
+        const items = extractList(res);
+        tbody.innerHTML = items.length ? items.map(r => `
+          <tr>
+            <td class="td-m">#${(r.id||'—').toString().slice(-8)}</td>
+            <td class="td-m">#${(r.orderId||'—').toString().slice(-8)}</td>
+            <td class="td-b">${r.customerName||'Customer'}</td>
+            <td>${r.reason||'—'}</td>
+            <td>${fmt.money(r.refundedAmount||r.refundAmount||0)}</td>
+            <td>${statusBdg(r.status||'PENDING')}</td>
+            <td class="td-sm">${fmt.date(r.createdAt)}</td>
+            <td style="display:flex;gap:5px;flex-wrap:wrap">
+              ${r.status==='PENDING'||!r.status ? `
+                <button class="btn-d btn-d-success btn-d-sm" data-action="approve-return" data-id="${r.id}">Approve</button>
+                <button class="btn-d btn-d-danger btn-d-sm" data-action="reject-return" data-id="${r.id}">Reject</button>
+              ` : ''}
+              <button class="btn-d btn-d-sec btn-d-sm" data-action="view-return" data-id="${r.id}">${I.eye} View</button>
+            </td>
+          </tr>`).join('') :
+          `<tr><td colspan="8"><div class="d-empty"><div class="d-empty-ico">↩️</div><div class="d-empty-ttl">No results</div></div></td></tr>`;
+      } catch(err) { tbody.innerHTML = `<tr><td colspan="8"><div class="d-alert d-alert-err">${err.message}</div></td></tr>`; }
+    });
+  }
+  if (tab === 'shipments') {
+    document.getElementById('btn-create-shipment')?.addEventListener('click', () => openDrawer('shipment', null));
+    document.getElementById('btn-filter-shipments')?.addEventListener('click', async () => {
+      const status = document.getElementById('shipment-status-filter')?.value || '';
+      const tbody = document.getElementById('shipments-tbody');
+      if (!tbody) return;
+      tbody.innerHTML = `<tr><td colspan="7"><div class="d-empty"><div class="d-empty-ico">⏳</div><div class="d-empty-ttl">Loading…</div></div></td></tr>`;
+      try {
+        const res = await ApiService.getShipments({ page:0, size:20, status });
+        const items = extractList(res);
+        tbody.innerHTML = items.length ? items.map(s => {
+          const isActive = !['DELIVERED','CANCELLED'].includes(s.status);
+          return `<tr>
+            <td class="td-m">${s.trackingNumber||'—'}</td>
+            <td class="td-m">#${(s.orderId||'—').toString().slice(-8)}</td>
+            <td class="td-b">${s.recipientName||s.customerName||'—'}</td>
+            <td>${s.carrier||'—'}</td>
+            <td>${statusBdg(s.status||'PENDING')}</td>
+            <td class="td-sm">${fmt.date(s.estimatedDeliveryDate||s.estimatedDelivery)}</td>
+            <td style="display:flex;gap:5px;flex-wrap:wrap">
+              <button class="btn-d btn-d-sec btn-d-sm" data-action="view-shipment" data-id="${s.id}">${I.eye} Detail</button>
+              ${isActive ? `<button class="btn-d btn-d-primary btn-d-sm" data-action="update-shipment-status" data-id="${s.id}" data-status="${s.status||'PENDING'}">Update</button>` : ''}
+              ${isAdmin() && isActive ? `<button class="btn-d btn-d-danger btn-d-sm" data-action="cancel-shipment" data-id="${s.id}">Cancel</button>` : ''}
+            </td>
+          </tr>`;
+        }).join('') :
+          `<tr><td colspan="7"><div class="d-empty"><div class="d-empty-ico">🚚</div><div class="d-empty-ttl">No shipments found</div></div></td></tr>`;
+      } catch(err) { tbody.innerHTML = `<tr><td colspan="7"><div class="d-alert d-alert-err">${err.message}</div></td></tr>`; }
+    });
+  }
 }
 
 async function loadCategories() {
@@ -1277,6 +1563,198 @@ async function viewCustomer(id) {
   document.getElementById('d-btn-cancel')?.addEventListener('click', closeDrawer);
   document.getElementById('d-overlay').classList.add('open');
   document.getElementById('d-drawer').classList.add('open');
+}
+
+// ── Return detail ─────────────────────────────────────────
+async function viewReturnDetail(id) {
+  let ret = {};
+  try { const res = await ApiService.returns.getAll(); ret = (res.content||res||[]).find(r=>r.id===id)||{}; } catch(_){}
+  document.getElementById('d-drawer-title').textContent = `Return #${(id||'').toString().slice(-8)}`;
+  const canRefund = ret.status === 'APPROVED' && !ret.refundedAmount;
+  const canComplete = ret.status === 'APPROVED' && ret.refundedAmount;
+  document.getElementById('d-drawer-body').innerHTML = `
+    <div class="d-alert d-alert-info" style="margin-bottom:14px">
+      <b>Order:</b> #${(ret.orderId||'—').toString().slice(-8)} &nbsp;|&nbsp;
+      <b>Status:</b> ${ret.status||'PENDING'}
+    </div>
+    <div class="d-widget" style="margin-bottom:14px">
+      <div class="d-widget-ttl">Details</div>
+      <div class="fin-metric"><span class="fin-metric-lbl">Reason</span><span>${ret.reason||'—'}</span></div>
+      <div class="fin-metric"><span class="fin-metric-lbl">Refunded</span><span>${fmt.money(ret.refundedAmount||0)}</span></div>
+      <div class="fin-metric"><span class="fin-metric-lbl">Admin Notes</span><span>${ret.adminNotes||'—'}</span></div>
+      <div class="fin-metric"><span class="fin-metric-lbl">Created</span><span>${fmt.date(ret.createdAt)}</span></div>
+    </div>
+    ${canRefund ? `
+      <div class="dash-chart-hd" style="margin-bottom:8px">Process Refund</div>
+      <div class="f-field"><label class="f-lbl">Refund Amount</label><input class="f-inp" type="number" id="ret-refund-amt" placeholder="0.00" step="0.01"></div>
+      <div class="f-field"><label class="f-lbl">Admin Notes</label><textarea class="f-ta" id="ret-refund-notes" style="min-height:60px"></textarea></div>
+      <button class="btn-d btn-d-primary" id="btn-process-refund" style="width:100%;margin-bottom:10px">Process Refund</button>
+    ` : ''}
+    ${canComplete ? `
+      <div class="dash-chart-hd" style="margin-bottom:8px">Complete Return</div>
+      <div class="f-field"><label class="f-lbl">Final Refund Amount</label><input class="f-inp" type="number" id="ret-complete-amt" value="${ret.refundedAmount||0}" step="0.01"></div>
+      <div class="f-field"><label class="f-lbl">Refund Reference</label><input class="f-inp" id="ret-complete-ref" placeholder="Transaction reference…"></div>
+      <div class="f-field"><label class="f-lbl">Admin Notes</label><textarea class="f-ta" id="ret-complete-notes" style="min-height:60px"></textarea></div>
+      <button class="btn-d btn-d-success" id="btn-complete-return" style="width:100%;margin-bottom:10px">Mark Complete</button>
+    ` : ''}
+    <button class="btn-d btn-d-sec" id="btn-sync-refund" style="width:100%;margin-bottom:6px;font-size:12px">Sync Refund Status</button>
+    <div id="ret-action-msg" style="font-size:12px;margin-top:6px;display:none"></div>`;
+
+  const msgEl = () => document.getElementById('ret-action-msg');
+  const showMsg = (txt, ok=true) => { const el=msgEl(); if(el){ el.textContent=txt; el.style.color=ok?'#065F46':'#991B1B'; el.style.display=''; } };
+
+  document.getElementById('btn-process-refund')?.addEventListener('click', async () => {
+    const amt = parseFloat(document.getElementById('ret-refund-amt')?.value)||0;
+    const notes = document.getElementById('ret-refund-notes')?.value||'';
+    if (!amt) { showMsg('Enter a refund amount', false); return; }
+    try {
+      await ApiService.returns.refund(id, amt, notes);
+      showMsg('Refund submitted'); setTimeout(()=>{ closeDrawer(); loadTab('returns'); },1200);
+    } catch(e) { showMsg(e.message||'Failed', false); }
+  });
+
+  document.getElementById('btn-complete-return')?.addEventListener('click', async () => {
+    const refundedAmount = parseFloat(document.getElementById('ret-complete-amt')?.value)||0;
+    const refundReference = document.getElementById('ret-complete-ref')?.value||'';
+    const adminNotes = document.getElementById('ret-complete-notes')?.value||'';
+    try {
+      await ApiService.returns.complete(id, { refundedAmount, refundReference, adminNotes });
+      showMsg('Return completed'); setTimeout(()=>{ closeDrawer(); loadTab('returns'); },1200);
+    } catch(e) { showMsg(e.message||'Failed', false); }
+  });
+
+  document.getElementById('btn-sync-refund')?.addEventListener('click', async () => {
+    try { await ApiService.syncRefundStatus(id); showMsg('Refund status synced'); } catch(e) { showMsg(e.message||'Sync failed', false); }
+  });
+
+  document.getElementById('d-drawer-footer').innerHTML = `<button class="btn-d btn-d-sec" id="d-btn-cancel" style="width:100%">Close</button>`;
+  document.getElementById('d-btn-cancel')?.addEventListener('click', closeDrawer);
+  document.getElementById('d-overlay').classList.add('open');
+  document.getElementById('d-drawer').classList.add('open');
+}
+
+// ── Shipment detail ───────────────────────────────────────
+async function viewShipmentDetail(id) {
+  let s = {};
+  try { const res = await ApiService.getShipment(id); s = res.data || res || {}; } catch(_){}
+  document.getElementById('d-drawer-title').textContent = `Shipment ${s.trackingNumber||id}`;
+  document.getElementById('d-drawer-body').innerHTML = `
+    <div class="d-widget" style="margin-bottom:14px">
+      <div class="d-widget-ttl">Shipment Info</div>
+      <div class="fin-metric"><span class="fin-metric-lbl">Tracking #</span><span>${s.trackingNumber||'—'}</span></div>
+      <div class="fin-metric"><span class="fin-metric-lbl">Order</span><span>#${(s.orderId||'—').toString().slice(-8)}</span></div>
+      <div class="fin-metric"><span class="fin-metric-lbl">Carrier</span><span>${s.carrier||'—'}</span></div>
+      <div class="fin-metric"><span class="fin-metric-lbl">Status</span><span>${statusBdg(s.status||'—')}</span></div>
+      <div class="fin-metric"><span class="fin-metric-lbl">ETA</span><span>${fmt.date(s.estimatedDeliveryDate||s.estimatedDelivery)}</span></div>
+      <div class="fin-metric"><span class="fin-metric-lbl">Delivered</span><span>${s.actualDeliveryDate ? fmt.date(s.actualDeliveryDate) : '—'}</span></div>
+      <div class="fin-metric"><span class="fin-metric-lbl">Recipient</span><span>${s.recipientName||s.customerName||'—'}</span></div>
+    </div>`;
+  document.getElementById('d-drawer-footer').innerHTML = `<button class="btn-d btn-d-sec" id="d-btn-cancel" style="flex:1">Close</button>`;
+  document.getElementById('d-btn-cancel')?.addEventListener('click', closeDrawer);
+  document.getElementById('d-overlay').classList.add('open');
+  document.getElementById('d-drawer').classList.add('open');
+}
+
+// ── Security tab bindings ─────────────────────────────────
+function bindSecurityTab() {
+  document.getElementById('btn-save-security')?.addEventListener('click', async () => {
+    const btn = document.getElementById('btn-save-security');
+    const msgEl = document.getElementById('sec-save-msg');
+    const showMsg = (txt, ok=true) => { if(msgEl){ msgEl.textContent=txt; msgEl.style.color=ok?'#065F46':'#991B1B'; msgEl.style.display=''; } };
+
+    const minLen = parseInt(document.getElementById('sec-pwd-min')?.value)||8;
+    if (minLen < 6 || minLen > 128) { showMsg('Min length must be 6–128', false); return; }
+    const session = parseInt(document.getElementById('sec-session')?.value)||60;
+    if (session < 5 || session > 43200) { showMsg('Session timeout must be 5–43200', false); return; }
+    const maxFail = parseInt(document.getElementById('sec-max-fail')?.value)||5;
+    if (maxFail < 1 || maxFail > 20) { showMsg('Max failed attempts must be 1–20', false); return; }
+    const lockout = parseInt(document.getElementById('sec-lockout')?.value)||15;
+    if (lockout < 1 || lockout > 1440) { showMsg('Lockout must be 1–1440', false); return; }
+
+    const payload = {
+      mfaRequired:                    document.getElementById('sec-mfa')?.checked ?? false,
+      passwordMinLength:              minLen,
+      passwordRequireUppercase:       document.getElementById('sec-pwd-upper')?.checked ?? true,
+      passwordRequireLowercase:       document.getElementById('sec-pwd-lower')?.checked ?? true,
+      passwordRequireDigit:           document.getElementById('sec-pwd-digit')?.checked ?? true,
+      passwordRequireSpecialCharacter:document.getElementById('sec-pwd-special')?.checked ?? false,
+      maxFailedLoginAttempts:         maxFail,
+      lockoutDurationMinutes:         lockout,
+      sessionTimeoutMinutes:          session,
+    };
+
+    btn.disabled = true; btn.textContent = 'Saving…';
+    try {
+      await ApiService.saveSecuritySettings(payload);
+      showMsg('Settings saved successfully');
+    } catch(e) { showMsg(e.message||'Save failed', false); }
+    finally { btn.disabled = false; btn.textContent = 'Save Settings'; }
+  });
+
+  document.getElementById('btn-unlock-user')?.addEventListener('click', async () => {
+    const uid = document.getElementById('sec-unlock-uid')?.value?.trim();
+    const msgEl = document.getElementById('sec-unlock-msg');
+    const showMsg = (txt, ok=true) => { if(msgEl){ msgEl.textContent=txt; msgEl.style.color=ok?'#065F46':'#991B1B'; msgEl.style.display=''; } };
+    if (!uid) { showMsg('Enter a User ID', false); return; }
+    const btn = document.getElementById('btn-unlock-user');
+    btn.disabled = true; btn.textContent = 'Unlocking…';
+    try {
+      await ApiService.unlockUser(uid);
+      showMsg(`User ${uid} unlocked`);
+      document.getElementById('sec-unlock-uid').value = '';
+    } catch(e) { showMsg(e.message||'Unlock failed', false); }
+    finally { btn.disabled = false; btn.textContent = 'Unlock'; }
+  });
+}
+
+// ── System tab bindings ───────────────────────────────────
+function bindSystemTab() {
+  document.getElementById('btn-trigger-backup')?.addEventListener('click', async () => {
+    const btn = document.getElementById('btn-trigger-backup');
+    const txt = document.getElementById('backup-btn-txt');
+    const msgEl = document.getElementById('backup-status-msg');
+    btn.disabled = true; if(txt) txt.textContent = 'Starting backup…';
+    if(msgEl){ msgEl.style.display=''; msgEl.style.color='#1E40AF'; msgEl.textContent='Contacting backup service…'; }
+    try {
+      const res = await ApiService.triggerBackup();
+      const bkp = res.data || res || {};
+      if(msgEl){ msgEl.style.color='#065F46'; msgEl.textContent=`Backup created at ${new Date().toLocaleTimeString()}`; }
+      const hist = document.getElementById('backup-history');
+      if(hist) hist.insertAdjacentHTML('afterbegin', `
+        <div class="d-widget-row">
+          <div style="font-size:12px"><div style="font-weight:600">Just now</div><div style="color:#94A3B8">${bkp.status||'COMPLETED'}</div></div>
+          <button class="btn-d btn-d-sec btn-d-sm" data-action="restore-backup" data-id="${bkp.id||''}" style="margin-left:auto">Restore</button>
+        </div>`);
+    } catch(e) {
+      if(msgEl){ msgEl.style.color='#991B1B'; msgEl.textContent=e.message||'Backup failed'; }
+    } finally { btn.disabled=false; if(txt) txt.textContent='Trigger Backup Now'; }
+  });
+
+  document.getElementById('btn-save-config')?.addEventListener('click', async () => {
+    const btn = document.getElementById('btn-save-config');
+    const msgEl = document.getElementById('sys-cfg-msg');
+    const showMsg = (txt, ok=true) => { if(msgEl){ msgEl.textContent=txt; msgEl.style.color=ok?'#065F46':'#991B1B'; msgEl.style.display=''; } };
+
+    const key   = document.getElementById('sys-cfg-key')?.value?.trim();
+    const value = document.getElementById('sys-cfg-val')?.value?.trim();
+    const cat   = document.getElementById('sys-cfg-cat')?.value?.trim()||null;
+    const desc  = document.getElementById('sys-cfg-desc')?.value?.trim()||null;
+
+    if (!key)   { showMsg('Key is required', false); return; }
+    if (!value) { showMsg('Value is required', false); return; }
+
+    btn.disabled = true; btn.textContent = 'Saving…';
+    try {
+      await ApiService.saveSystemConfiguration(key, { configValue: value, category: cat, description: desc, sensitive: false });
+      showMsg(`Configuration "${key}" saved`);
+      document.getElementById('sys-cfg-key').value  = '';
+      document.getElementById('sys-cfg-val').value  = '';
+      document.getElementById('sys-cfg-cat').value  = '';
+      document.getElementById('sys-cfg-desc').value = '';
+      setTimeout(() => loadTab('system'), 1500);
+    } catch(e) { showMsg(e.message||'Save failed', false); }
+    finally { btn.disabled=false; btn.textContent='Save Configuration'; }
+  });
 }
 
 // ── Support tab ───────────────────────────────────────────
@@ -1348,10 +1826,38 @@ function bindPOS() {
   });
 
   document.getElementById('pos-clear')?.addEventListener('click', () => { posCart = []; renderCart(); });
-  document.getElementById('pos-checkout')?.addEventListener('click', () => {
-    if (!posCart.length) return;
-    showToast(`Sale of ${fmt.money(posTotal())} processed!`, 'success');
-    posCart = []; renderCart();
+  document.getElementById('pos-checkout')?.addEventListener('click', async () => {
+    const errEl = document.getElementById('pos-checkout-err');
+    const hide  = () => { if(errEl) errEl.style.display='none'; };
+    const show  = (msg) => { if(errEl){ errEl.textContent=msg; errEl.style.display=''; } };
+    hide();
+
+    if (!posCart.length) { show('Add at least one product to the cart.'); return; }
+
+    const paymentMethod = document.getElementById('pos-payment-method')?.value;
+    if (!paymentMethod) { show('Payment method is required.'); return; }
+
+    const paymentReference = document.getElementById('pos-payment-ref')?.value?.trim() || null;
+    const payload = {
+      paymentMethod,
+      paymentReference,
+      items: posCart.map(item => ({ productId: item.id, quantity: item.qty })),
+    };
+
+    const btn = document.getElementById('pos-checkout');
+    btn.disabled = true; btn.textContent = 'Processing…';
+    try {
+      const res = await ApiService.posCheckout(payload);
+      const receipt = res.data || res || {};
+      posCart = []; renderCart();
+      showPOSReceipt(receipt);
+    } catch(e) {
+      show(e.message || 'Checkout failed. Please try again.');
+    } finally {
+      btn.disabled = false;
+      const total = posTotal();
+      btn.textContent = `Charge ${fmt.money(total + total * 0.08)}`;
+    }
   });
 
   document.getElementById('pos-search')?.addEventListener('input', e => {
@@ -1384,6 +1890,38 @@ function renderCart() {
   document.getElementById('pos-total').textContent = fmt.money(total);
   const btn = document.getElementById('pos-checkout');
   if (btn) btn.textContent = `Charge ${fmt.money(total)}`;
+}
+
+// ── POS receipt modal ─────────────────────────────────────
+function showPOSReceipt(receipt) {
+  const items = receipt.items || [];
+  const el = document.createElement('div');
+  el.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:10000;display:flex;align-items:center;justify-content:center';
+  el.innerHTML = `
+    <div style="background:#fff;border-radius:14px;padding:28px 24px;width:380px;max-width:95vw;box-shadow:0 20px 60px rgba(0,0,0,0.25)">
+      <div style="text-align:center;margin-bottom:16px">
+        <div style="font-size:28px">🧾</div>
+        <div style="font-size:16px;font-weight:800;margin-top:4px">Sale Complete</div>
+        <div style="font-size:12px;color:#64748B">Order #${receipt.orderNumber||receipt.orderId||'—'}</div>
+      </div>
+      <div style="border-top:1px dashed #E2E8F0;border-bottom:1px dashed #E2E8F0;padding:12px 0;margin-bottom:14px">
+        ${items.length ? items.map(i=>`
+          <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px">
+            <span>${i.productName||'Product'} × ${i.quantity}</span>
+            <span>${fmt.money(i.subTotal||((i.unitPrice||0)*(i.quantity||1)))}</span>
+          </div>`).join('') : '<div style="font-size:13px;color:#94A3B8;text-align:center">Items processed successfully.</div>'}
+      </div>
+      <div style="display:flex;justify-content:space-between;font-size:15px;font-weight:800;margin-bottom:8px">
+        <span>Total Charged</span><span style="color:#FF6B00">${fmt.money(receipt.totalAmount||0)}</span>
+      </div>
+      <div style="font-size:12px;color:#64748B;margin-bottom:4px">Payment: ${(receipt.paymentMethod||'—').replace(/_/g,' ')}</div>
+      ${receipt.paymentReference ? `<div style="font-size:12px;color:#64748B;margin-bottom:4px">Ref: ${receipt.paymentReference}</div>` : ''}
+      <div style="font-size:12px;color:#64748B;margin-bottom:16px">Cashier: ${receipt.cashierEmail||'—'}</div>
+      <button style="width:100%;padding:10px;background:#FF6B00;color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer;font-size:14px" id="pos-receipt-close">Done</button>
+    </div>`;
+  document.body.appendChild(el);
+  el.querySelector('#pos-receipt-close').onclick = () => el.remove();
+  el.onclick = (e) => { if(e.target === el) el.remove(); };
 }
 
 // ── Reports ───────────────────────────────────────────────

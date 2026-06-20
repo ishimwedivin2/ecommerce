@@ -147,7 +147,7 @@ export function bindEvents(state, helpers) {
       const order = orderRes.data;
 
       toast(`Initiating ${selectedPaymentMethod} Payment Gateway...`);
-      await ApiService.payments.initiate(order.id);
+      await ApiService.payments.initiate(order.id, selectedPaymentMethod);
 
       setState({ appliedCoupon: null });
       toast('Order placed & paid successfully!');

@@ -134,10 +134,6 @@ function renderLogin() {
         <button type="submit" class="auth-submit" id="btn-login-submit">Sign In</button>
       </form>
       ${securityRow()}
-      <div class="auth-demo-hint">
-        <strong>Demo:</strong> customer@luztechnology.com / SecurePassword123!<br>
-        <strong>Admin:</strong> admin@luztechnology.com / AdminPassword123!
-      </div>
       <div class="auth-switch">Don't have an account?
         <button data-tab="register">Create one free</button>
       </div>

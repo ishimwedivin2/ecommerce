@@ -45,8 +45,13 @@ export async function renderCategoryNav() {
   if (!container) return;
   if (appState.currentView === 'home') {
     container.style.display = 'block';
-    container.innerHTML = await CategoryNav.render();
-    CategoryNav.bindEvents(helpers);
+    try {
+      container.innerHTML = await CategoryNav.render();
+      CategoryNav.bindEvents(helpers);
+    } catch (e) {
+      console.error('CategoryNav render failed:', e);
+      container.innerHTML = '';
+    }
   } else {
     container.style.display = 'none';
   }
@@ -148,11 +153,11 @@ export async function renderChatWidget() {
 }
 
 export async function renderAll() {
-  await renderHeader();
-  await renderCategoryNav();
-  await renderView();
-  await renderAuthModal();
-  await renderChatWidget();
+  await renderHeader().catch(console.error);
+  await renderCategoryNav().catch(console.error);
+  await renderView().catch(console.error);
+  await renderAuthModal().catch(console.error);
+  await renderChatWidget().catch(console.error);
 }
 
 export function init() {
