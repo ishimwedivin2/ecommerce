@@ -7,7 +7,6 @@ import { showToast } from './toast.js';
 const EyeIcon = `<svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>`;
 const EyeOffIcon = `<svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>`;
 const CloseIcon = `<svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>`;
-const GoogleIcon = `<svg width="18" height="18" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>`;
 const LockIcon = `<svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>`;
 const ShieldIcon = `<svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>`;
 const BackIcon = `<svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19 12H5m7-7l-7 7 7 7"/></svg>`;
@@ -56,13 +55,6 @@ function strengthBars(pw) {
     </div>`;
 }
 
-function googleBtn(label) {
-  return `
-    <button type="button" class="auth-google-btn" id="btn-google">
-      ${GoogleIcon} ${label}
-    </button>`;
-}
-
 function securityRow() {
   return `
     <div class="auth-security-row">
@@ -105,8 +97,6 @@ function renderLogin() {
       <h2 class="auth-screen-title">Welcome back</h2>
       <p class="auth-screen-subtitle">Sign in to your Luz Technology account</p>
       <div id="auth-alert-login"></div>
-      ${googleBtn('Continue with Google')}
-      <div class="auth-divider">or sign in with email</div>
       <form id="form-login" novalidate>
         <div class="auth-fields">
           <div class="auth-field">
@@ -151,8 +141,6 @@ function renderRegister() {
       <h2 class="auth-screen-title">Create your account</h2>
       <p class="auth-screen-subtitle">Join thousands of happy Luz Technology customers</p>
       <div id="auth-alert-register"></div>
-      ${googleBtn('Sign up with Google')}
-      <div class="auth-divider">or register with email</div>
       <form id="form-register" novalidate>
         <div class="auth-fields">
           <div class="auth-fields--row">
@@ -394,11 +382,6 @@ export function bindEvents(helpers) {
   bindPwToggle('reset-new');
   bindPwToggle('reset-confirm');
 
-  // ── Google OAuth
-  document.getElementById('btn-google')?.addEventListener('click', () => {
-    window.location.href = 'http://localhost:8080/oauth2/authorization/google';
-  });
-
   // ════════════════════════════════════════════════════════════
   // LOGIN
   // ════════════════════════════════════════════════════════════
@@ -423,9 +406,16 @@ export function bindEvents(helpers) {
         setState({ pendingMfaToken: res.data.mfaToken, authModalMode: 'mfa' });
         renderAuthModal();
       } else {
-        setState({ authModalMode: null });
+        const user = ApiService.getCurrentUser();
+        const roles = (user?.roles || []).map(r => (r?.name || r || '').toString());
+        const isStaff = roles.some(r => ['ROLE_ADMIN','ROLE_EMPLOYEE','ROLE_SUPPORT_AGENT'].includes(r));
+        if (isStaff) {
+          setState({ authModalMode: null, currentView: 'admin' });
+        } else {
+          setState({ authModalMode: null });
+        }
         renderAll();
-        showToast('Welcome back! Signed in successfully.', 'success');
+        showToast(`Welcome back${user?.firstName ? ', ' + user.firstName : ''}!`, 'success');
       }
     } catch (err) {
       const msg = (err.message || '').toLowerCase();

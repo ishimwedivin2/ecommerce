@@ -340,7 +340,7 @@
 .hero-slides-track {
   display: flex;
   width: 100%;
-  transition: transform 1.1s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  transition: transform 0.9s cubic-bezier(0.25, 0.46, 0.45, 0.94);
   will-change: transform;
 }
 

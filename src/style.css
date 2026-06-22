@@ -2041,3 +2041,30 @@ input:focus, select:focus, textarea:focus {
     grid-template-columns: 1fr 1fr;
   }
 }
+
+/* ── Admin mode: hide storefront chrome ──────────────────── */
+body.admin-mode {
+  overflow: hidden;
+}
+body.admin-mode #app-category-nav-container,
+body.admin-mode .site-footer,
+body.admin-mode #support-chat-widget-mount {
+  display: none !important;
+}
+body.admin-mode #app {
+  height: 100vh;
+  overflow: hidden;
+  min-height: unset;
+}
+body.admin-mode #app-view-container {
+  height: 100vh;
+  overflow: hidden;
+  padding: 0;
+  max-width: unset;
+  margin: 0;
+}
+body.admin-mode .main-content {
+  padding: 0;
+  max-width: unset;
+  margin: 0;
+}

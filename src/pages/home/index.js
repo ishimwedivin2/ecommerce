@@ -342,7 +342,7 @@ function goToSlide(logicalIndex) {
 function startSliderAuto() {
   stopSliderAuto();
   if (allBanners.length > 1) {
-    slideInterval = setInterval(nextSlide, 5000);
+    slideInterval = setInterval(nextSlide, 8000);
   }
 }
 

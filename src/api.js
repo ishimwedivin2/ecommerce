@@ -101,6 +101,12 @@ export const ApiService = {
       return res;
     },
 
+    async changePassword({ currentPassword, newPassword }) {
+      return await request('/api/auth/change-password', {
+        method: 'POST',
+        body: JSON.stringify({ currentPassword, newPassword })
+      });
+    },
     async register(firstName, lastName, email, password) {
       return await request('/api/auth/register', {
         method: 'POST',
@@ -182,12 +188,15 @@ export const ApiService = {
     async get() {
       return await request('/api/users/profile');
     },
-    async update(firstName, lastName, phoneNumber, address) {
+    async update(data) {
       return await request('/api/users/profile', {
         method: 'PUT',
-        body: JSON.stringify({ firstName, lastName, phoneNumber, address })
+        body: JSON.stringify(data)
       });
-    }
+    },
+    async deleteAccount() {
+      return await request('/api/users/account', { method: 'DELETE' });
+    },
   },
 
   wishlist: {
@@ -219,13 +228,16 @@ export const ApiService = {
     async getFeatured() {
       return await request('/api/products/featured');
     },
-    async search(query, { page = 0, size = 20, categoryId, minPrice, maxPrice, sortBy } = {}) {
+    async search({ name, query, page = 0, size = 20, categoryId, minPrice, maxPrice, sortBy, sortDir, status } = {}) {
       const params = new URLSearchParams({ page, size });
-      if (query) params.set('name', query);
+      const q = name || query;
+      if (q) params.set('name', q);
       if (categoryId) params.set('categoryId', categoryId);
       if (minPrice != null) params.set('minPrice', minPrice);
       if (maxPrice != null) params.set('maxPrice', maxPrice);
       if (sortBy) params.set('sortBy', sortBy);
+      if (sortDir) params.set('sortDir', sortDir);
+      if (status) params.set('status', status);
       return await request(`/api/products/search?${params}`);
     },
     async getByCategory(categoryId, { page = 0, size = 20 } = {}) {
@@ -322,9 +334,12 @@ export const ApiService = {
     async getDetails(id) {
       return await request(`/api/orders/${id}`);
     },
+    async getTracking(id) {
+      return await request(`/api/orders/${id}/tracking`);
+    },
     async cancel(id) {
       return await request(`/api/orders/${id}/cancel`, { method: 'POST' });
-    }
+    },
   },
 
   // RETURNS
@@ -411,6 +426,19 @@ export const ApiService = {
         method: 'POST',
         body: JSON.stringify({ message })
       });
+    },
+    async getSessions(status) {
+      const qs = status ? `?status=${status}` : '';
+      return await request(`/api/support/live-chat/sessions${qs}`);
+    },
+    async assignSession(sessionId, agentId) {
+      return await request(`/api/support/live-chat/sessions/${sessionId}/assign`, {
+        method: 'POST',
+        body: JSON.stringify({ agentId })
+      });
+    },
+    async closeSession(sessionId) {
+      return await request(`/api/support/live-chat/sessions/${sessionId}/close`, { method: 'POST' });
     }
   },
 
@@ -542,28 +570,42 @@ export const ApiService = {
   // PAYMENTS
   payments: {
     async initiate(orderId, paymentMethod) {
-      return await request(`/api/payments/initiate/${orderId}?paymentMethod=${encodeURIComponent(paymentMethod)}`, {
-        method: 'POST'
-      });
-    }
+      return await request(
+        `/api/payments/initiate/${orderId}?paymentMethod=${encodeURIComponent(paymentMethod)}`,
+        { method: 'POST' }
+      );
+    },
+    async checkStatus(orderId) {
+      return await request(`/api/payments/status/${orderId}`);
+    },
   },
 
-  // RECEIPTS / PDF
+  // RECEIPTS
+  receipts: {
+    async get(orderId) {
+      return await request(`/api/receipts/orders/${orderId}`);
+    },
+    async downloadPdf(orderId, orderNumber) {
+      const t = token || localStorage.getItem('luz_jwt');
+      const res = await fetch(`${BASE_URL}/api/receipts/orders/${orderId}/pdf`, {
+        headers: { Authorization: `Bearer ${t}` }
+      });
+      if (!res.ok) throw new Error('Failed to generate receipt PDF');
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `LuzTech_Receipt_${orderNumber || orderId}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    },
+  },
+
+  // legacy alias kept so existing callers don't break
   async downloadReceiptPdf(orderId) {
-    const t = token || localStorage.getItem('luz_jwt');
-    const res = await fetch(`${BASE_URL}/api/receipts/orders/${orderId}/pdf`, {
-      headers: { Authorization: `Bearer ${t}` }
-    });
-    if (!res.ok) throw new Error('Failed to generate receipt PDF');
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `LuzTechnology_Receipt_${orderId}.pdf`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    return ApiService.receipts.downloadPdf(orderId, orderId);
   },
 
   // ── Dashboard analytics ──────────────────────────────────
@@ -645,6 +687,14 @@ export const ApiService = {
   },
   async getPOSReceipt(orderId) {
     return await request(`/api/pos/receipts/${orderId}`);
+  },
+  async getPOSHistory({ page = 0, size = 20 } = {}) {
+    return await request(`/api/pos/history?page=${page}&size=${size}`);
+  },
+  async getPOSSummary({ startDate, endDate } = {}) {
+    const end   = endDate   || new Date().toISOString().slice(0, 10);
+    const start = startDate || new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+    return await request(`/api/pos/summary?startDate=${start}&endDate=${end}`);
   },
 
   // ── Security Settings ────────────────────────────────────
@@ -774,6 +824,9 @@ export const ApiService = {
   },
   async deleteProduct(id) {
     return await request(`/api/products/${id}`, { method: 'DELETE' });
+  },
+  async setProductFeatured(id, featured) {
+    return await request(`/api/products/${id}/featured?featured=${featured}`, { method: 'PATCH' });
   },
 
   // ── Orders (admin flat methods) ──────────────────────────

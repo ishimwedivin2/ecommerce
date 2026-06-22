@@ -1,7 +1,7 @@
 /* ── Promo Banner ─────────────────────────────────────── */
 .promo-banner {
-  background: linear-gradient(90deg, var(--primary) 0%, #ff8c00 100%);
-  color: white;
+  background: #0F172A;
+  color: rgba(255,255,255,0.9);
   text-align: center;
   padding: 8px 48px;
   font-size: 13px;

@@ -153,11 +153,16 @@ export async function renderChatWidget() {
 }
 
 export async function renderAll() {
+  const isAdmin = appState.currentView === 'admin';
+  // Toggle admin-mode class — hides footer and chat widget on admin
+  document.body.classList.toggle('admin-mode', isAdmin);
   await renderHeader().catch(console.error);
   await renderCategoryNav().catch(console.error);
   await renderView().catch(console.error);
   await renderAuthModal().catch(console.error);
-  await renderChatWidget().catch(console.error);
+  if (!isAdmin) {
+    await renderChatWidget().catch(console.error);
+  }
 }
 
 export function init() {
