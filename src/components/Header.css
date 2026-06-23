@@ -3,8 +3,8 @@
   background: #0F172A;
   color: rgba(255,255,255,0.9);
   text-align: center;
-  padding: 8px 48px;
-  font-size: 13px;
+  padding: 5px 48px;
+  font-size: 12px;
   position: relative;
   font-weight: 500;
 }
@@ -28,7 +28,7 @@
   display: flex;
   align-items: center;
   gap: 20px;
-  padding: 14px 24px;
+  padding: 8px 24px;
   background: white;
   border-bottom: 1px solid var(--border);
   position: sticky;
@@ -40,8 +40,8 @@
 .logo-container {
   display: flex;
   align-items: center;
-  gap: 10px;
-  font-size: 22px;
+  gap: 8px;
+  font-size: 19px;
   font-weight: 800;
   color: var(--text-dark);
   cursor: pointer;
@@ -51,8 +51,8 @@
 }
 .logo-container span { color: var(--primary); }
 .logo-icon {
-  width: 36px;
-  height: 36px;
+  width: 30px;
+  height: 30px;
   background: var(--primary);
   color: white;
   border-radius: 10px;
@@ -100,6 +100,26 @@
   transition: background 0.2s;
 }
 .search-btn:hover { background: var(--primary-dark); }
+
+/* ── Header Nav ───────────────────────────────────────── */
+.header-nav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.header-nav-link {
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-dark);
+  cursor: pointer;
+  text-decoration: none;
+  transition: background 0.15s, color 0.15s;
+  white-space: nowrap;
+}
+.header-nav-link:hover { background: var(--bg-main); color: var(--primary); }
 
 /* ── Header Action Buttons ────────────────────────────── */
 .header-actions {

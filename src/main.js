@@ -9,13 +9,12 @@ const params = new URLSearchParams(window.location.search);
 if (params.get('view') === 'reset-password' && params.get('token')) {
   setState({ pendingResetToken: params.get('token'), authModalMode: 'reset' });
 } else {
-  // Auto-redirect staff to admin dashboard on page load if already signed in
+  // Auto-redirect staff to their specific dashboard on page load
   const user = ApiService.getCurrentUser();
   const roles = (user?.roles || []).map(r => (r?.name || r || '').toString());
-  const isStaff = roles.some(r => ['ROLE_ADMIN','ROLE_EMPLOYEE','ROLE_SUPPORT_AGENT'].includes(r));
-  if (isStaff) {
-    setState({ currentView: 'admin' });
-  }
+  if (roles.includes('ROLE_ADMIN')) setState({ currentView: 'admin' });
+  else if (roles.includes('ROLE_EMPLOYEE')) setState({ currentView: 'employee' });
+  else if (roles.includes('ROLE_SUPPORT_AGENT')) setState({ currentView: 'support-agent' });
 }
 
 init();

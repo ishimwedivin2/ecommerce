@@ -35,7 +35,7 @@ function renderStars(rating) {
 }
 
 function renderSlide(banner, product) {
-  const price = product ? `<div class="hero-price">£${parseFloat(product.price).toFixed(2)} <span>(incl. VAT)</span></div>` : '';
+  const price = product ? `<div class="hero-price">RWF ${Math.round(parseFloat(product.price)||0).toLocaleString('en-US')} <span>(incl. VAT)</span></div>` : '';
   const badge = banner.tagLabel ? `<span class="hero-tag">${banner.tagLabel}</span>` : '';
   const img = product ? getPrimaryImage(product) : (banner.imageUrl || '');
   const productId = product?.id || banner.productId || '';
@@ -143,9 +143,9 @@ function renderProductCard(p) {
         <h3 class="product-title" data-action="view-details" data-id="${p.id}">${p.name}</h3>
         <div class="product-rating">${renderStars(p.averageRating || p.rating || 4.5)} <span>(${p.reviewsCount || 0})</span></div>
         <div class="product-price-row">
-          ${p.discountPercentage ? `<span class="price-original">£${parseFloat(p.price).toFixed(2)}</span>
-            <span class="price-current">£${(parseFloat(p.price) * (1 - parseFloat(p.discountPercentage) / 100)).toFixed(2)}</span>` :
-            `<span class="price-current">£${parseFloat(p.price).toFixed(2)}</span>`}
+          ${p.discountPercentage ? `<span class="price-original">RWF ${Math.round(parseFloat(p.price)||0).toLocaleString('en-US')}</span>
+            <span class="price-current">RWF ${Math.round((parseFloat(p.price)||0) * (1 - parseFloat(p.discountPercentage) / 100)).toLocaleString('en-US')}</span>` :
+            `<span class="price-current">RWF ${Math.round(parseFloat(p.price)||0).toLocaleString('en-US')}</span>`}
           <span class="price-vat">(incl. VAT)</span>
         </div>
       </div>
@@ -174,10 +174,10 @@ export async function render(state) {
   ]);
 
   const banners = bannersRes.data || [];
-  const featuredProducts = featuredRes.data || [];
-  const products = productsRes.data || [];
-  const pagination = productsRes.pagination || {};
-  totalPages = pagination.totalPages || 1;
+  const featuredProducts = Array.isArray(featuredRes.data) ? featuredRes.data : (featuredRes.data?.content || []);
+  const productsPage = productsRes.data || {};
+  const products = Array.isArray(productsPage) ? productsPage : (productsPage.content || []);
+  totalPages = productsPage.totalPages || 1;
 
   const heroBannerHtml = buildHeroBanner(banners, featuredProducts);
 
@@ -185,7 +185,7 @@ export async function render(state) {
     <div class="trust-badges animate-fade-up">
       <div class="trust-badge-item">
         <div class="trust-badge-icon"><svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"></path></svg></div>
-        <div class="trust-badge-text"><strong>Free Shipping</strong><span>On orders over £50</span></div>
+        <div class="trust-badge-text"><strong>Free Shipping</strong><span>On orders over RWF 50,000</span></div>
       </div>
       <div class="trust-badge-item">
         <div class="trust-badge-icon"><svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path></svg></div>
@@ -246,7 +246,7 @@ export async function render(state) {
     <div class="section-header">
       <h2 class="section-title">
         All Products
-        <span class="section-count-badge">${pagination.totalElements || products.length} items</span>
+        <span class="section-count-badge">${productsPage.totalElements || products.length} items</span>
       </h2>
     </div>
 
@@ -357,9 +357,9 @@ async function loadMoreProducts(helpers) {
 
   currentPage++;
   const res = await ApiService.products.search({ ...currentFilters, page: currentPage, size: PAGE_SIZE });
-  const newProducts = res.data || [];
-  const pagination = res.pagination || {};
-  totalPages = pagination.totalPages || totalPages;
+  const resPage = res.data || {};
+  const newProducts = Array.isArray(resPage) ? resPage : (resPage.content || []);
+  totalPages = resPage.totalPages || totalPages;
 
   const grid = document.getElementById('product-grid');
   if (grid && newProducts.length > 0) {
@@ -472,13 +472,14 @@ export function bindEvents(state, helpers) {
       const [sortBy, sortDir] = sortSelect.value.split(',');
       currentPage = 0;
       const res = await ApiService.products.search({ ...currentFilters, page: 0, size: PAGE_SIZE, sortBy, sortDir });
+      const rp = res.data || {};
+      const sorted = Array.isArray(rp) ? rp : (rp.content || []);
+      totalPages = rp.totalPages || 1;
       const grid = document.getElementById('product-grid');
       if (grid) {
-        grid.innerHTML = (res.data || []).map(renderProductCard).join('');
+        grid.innerHTML = sorted.map(renderProductCard).join('');
         bindCardEvents(grid, helpers);
       }
-      const pagination = res.pagination || {};
-      totalPages = pagination.totalPages || 1;
       const container = document.getElementById('load-more-container');
       if (container) {
         container.style.display = totalPages > 1 ? 'flex' : 'none';

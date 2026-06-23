@@ -244,6 +244,10 @@ function openDrawer(type, data) {
   document.getElementById('d-drawer').classList.add('open');
   drawerOpen = true;
   bindDrawerEvents(type, data);
+  if (type === 'product') {
+    const selectedCatId = data?.categoryId || data?.category?.id || null;
+    loadCategories(selectedCatId);
+  }
 }
 function closeDrawer() {
   document.getElementById('d-overlay').classList.remove('open');
@@ -293,7 +297,7 @@ async function loadBadges() {
 
 // ── Formatters ────────────────────────────────────────────
 const fmt = {
-  money: v => '$' + Number(v||0).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ','),
+  money: v => 'RWF ' + Math.round(Number(v||0)).toLocaleString('en-US'),
   num:   v => Number(v||0).toLocaleString(),
   date:  v => v ? new Date(v).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '—',
   ago:   v => { if(!v) return '—'; const s=(Date.now()-new Date(v))/1000; if(s<60) return 'just now'; if(s<3600) return Math.floor(s/60)+'m ago'; if(s<86400) return Math.floor(s/3600)+'h ago'; return Math.floor(s/86400)+'d ago'; },
@@ -1392,8 +1396,30 @@ function drawerBody(type, data) {
     <div class="f-row"><div class="f-field"><label class="f-lbl">Product Name *</label><input class="f-inp" id="d-prod-name" value="${data?.name||''}"></div><div class="f-field"><label class="f-lbl">SKU</label><input class="f-inp" id="d-prod-sku" value="${data?.sku||''}"></div></div>
     <div class="f-field"><label class="f-lbl">Description</label><textarea class="f-ta" id="d-prod-desc">${data?.description||''}</textarea></div>
     <div class="f-row"><div class="f-field"><label class="f-lbl">Price *</label><input class="f-inp" type="number" id="d-prod-price" value="${data?.price||''}"></div><div class="f-field"><label class="f-lbl">Compare Price</label><input class="f-inp" type="number" id="d-prod-compare" value="${data?.comparePrice||''}"></div></div>
-    <div class="f-row"><div class="f-field"><label class="f-lbl">Stock Quantity</label><input class="f-inp" type="number" id="d-prod-stock" value="${data?.stock||0}"></div><div class="f-field"><label class="f-lbl">Category</label><select class="f-sel" id="d-prod-cat"><option value="">Select…</option></select></div></div>
-    <div class="f-field"><label class="f-lbl">Image URL</label><input class="f-inp" id="d-prod-img" value="${data?.imageUrl||''}"></div>
+    <div class="f-row">
+      <div class="f-field"><label class="f-lbl">Stock Quantity</label><input class="f-inp" type="number" id="d-prod-stock" value="${data?.stock||0}"></div>
+      <div class="f-field">
+        <label class="f-lbl">Category</label>
+        <div style="display:flex;gap:6px;align-items:center;">
+          <select class="f-sel" id="d-prod-cat" style="flex:1"><option value="">Select…</option></select>
+          <button type="button" id="d-prod-cat-add" title="Add new category" style="padding:6px 10px;background:#FF6B00;color:white;border:none;border-radius:6px;cursor:pointer;font-size:14px;line-height:1;">+</button>
+        </div>
+        <div id="d-prod-cat-new" style="display:none;margin-top:6px;">
+          <input class="f-inp" id="d-prod-cat-name" placeholder="New category name…" style="margin-bottom:4px;">
+          <button type="button" id="d-prod-cat-save" style="padding:5px 12px;background:#10b981;color:white;border:none;border-radius:6px;cursor:pointer;font-size:12px;">Save Category</button>
+          <button type="button" id="d-prod-cat-cancel" style="padding:5px 10px;background:#f1f5f9;color:#64748b;border:none;border-radius:6px;cursor:pointer;font-size:12px;margin-left:4px;">Cancel</button>
+        </div>
+      </div>
+    </div>
+    <div class="f-field">
+      <label class="f-lbl">Product Image</label>
+      <div id="d-prod-img-wrap" style="border:2px dashed #e2e8f0;border-radius:10px;padding:16px;text-align:center;cursor:pointer;background:#fafafa;transition:border-color .2s;" onclick="document.getElementById('d-prod-img-file').click()">
+        ${data?.imageUrl ? `<img id="d-prod-img-preview" src="${data.imageUrl.startsWith('/uploads/') ? 'http://localhost:8080' + data.imageUrl : data.imageUrl}" style="max-height:120px;max-width:100%;border-radius:6px;display:block;margin:0 auto 8px;">` : `<div id="d-prod-img-preview" style="font-size:32px;margin-bottom:6px;">📷</div>`}
+        <div style="font-size:12px;color:#94a3b8;">Click to choose an image from your computer</div>
+      </div>
+      <input type="file" id="d-prod-img-file" accept="image/*" style="display:none">
+      <input type="hidden" id="d-prod-img-url" value="${data?.imageUrl||''}">
+    </div>
     <div class="f-row"><div class="f-field"><label class="f-lbl">Status</label><select class="f-sel" id="d-prod-status"><option value="ACTIVE" ${data?.status==='ACTIVE'?'selected':''}>Active</option><option value="INACTIVE" ${data?.status==='INACTIVE'?'selected':''}>Inactive</option></select></div><div class="f-field"><label class="f-lbl">Featured</label><label class="d-toggle" style="margin-top:8px"><input type="checkbox" id="d-prod-featured" ${data?.featured?'checked':''}><span class="d-tog-slider"></span></label></div></div>`;
 
   if (type === 'coupon') return `
@@ -1457,6 +1483,68 @@ function drawerFooter(type, data) {
 function bindDrawerEvents(type, data) {
   document.getElementById('d-btn-cancel')?.addEventListener('click', closeDrawer);
   document.getElementById('d-btn-save')?.addEventListener('click', () => saveDrawer(type, data));
+
+  if (type === 'product') {
+    // Image file picker → preview
+    const fileInput = document.getElementById('d-prod-img-file');
+    const wrap      = document.getElementById('d-prod-img-wrap');
+    fileInput?.addEventListener('change', () => {
+      const file = fileInput.files[0];
+      if (!file) return;
+      const url = URL.createObjectURL(file);
+      const preview = document.getElementById('d-prod-img-preview');
+      if (preview.tagName === 'IMG') {
+        preview.src = url;
+      } else {
+        const img = document.createElement('img');
+        img.id = 'd-prod-img-preview';
+        img.src = url;
+        img.style.cssText = 'max-height:120px;max-width:100%;border-radius:6px;display:block;margin:0 auto 8px;';
+        preview.replaceWith(img);
+      }
+      document.getElementById('d-prod-img-url').value = '';
+    });
+    wrap?.addEventListener('dragover', e => { e.preventDefault(); wrap.style.borderColor = '#FF6B00'; });
+    wrap?.addEventListener('dragleave', () => { wrap.style.borderColor = '#e2e8f0'; });
+    wrap?.addEventListener('drop', e => {
+      e.preventDefault(); wrap.style.borderColor = '#e2e8f0';
+      const file = e.dataTransfer.files[0];
+      if (file && file.type.startsWith('image/')) {
+        const dt = new DataTransfer(); dt.items.add(file); fileInput.files = dt.files;
+        fileInput.dispatchEvent(new Event('change'));
+      }
+    });
+
+    // Add new category inline
+    const addBtn    = document.getElementById('d-prod-cat-add');
+    const newPanel  = document.getElementById('d-prod-cat-new');
+    const saveBtn   = document.getElementById('d-prod-cat-save');
+    const cancelBtn = document.getElementById('d-prod-cat-cancel');
+    addBtn?.addEventListener('click', () => { newPanel.style.display = 'block'; document.getElementById('d-prod-cat-name')?.focus(); });
+    cancelBtn?.addEventListener('click', () => { newPanel.style.display = 'none'; });
+    saveBtn?.addEventListener('click', async () => {
+      const name = document.getElementById('d-prod-cat-name')?.value.trim();
+      if (!name) return;
+      saveBtn.disabled = true; saveBtn.textContent = 'Saving…';
+      try {
+        const res = await fetch('http://localhost:8080/api/categories', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + localStorage.getItem('luz_jwt') },
+          body: JSON.stringify({ name })
+        }).then(r => r.json());
+        if (res.data?.id) {
+          const sel = document.getElementById('d-prod-cat');
+          const opt = document.createElement('option');
+          opt.value = res.data.id; opt.textContent = res.data.name; opt.selected = true;
+          sel.appendChild(opt);
+          _categoryCache.push(res.data);
+        }
+        newPanel.style.display = 'none';
+        document.getElementById('d-prod-cat-name').value = '';
+      } catch(e) { alert('Failed to create category'); }
+      saveBtn.disabled = false; saveBtn.textContent = 'Save Category';
+    });
+  }
 }
 
 async function saveDrawer(type, data) {
@@ -1464,18 +1552,54 @@ async function saveDrawer(type, data) {
   btn.disabled = true; btn.textContent = 'Saving…';
   try {
     if (type === 'product') {
-      const payload = {
-        name:        document.getElementById('d-prod-name')?.value,
-        sku:         document.getElementById('d-prod-sku')?.value,
-        description: document.getElementById('d-prod-desc')?.value,
-        price:       parseFloat(document.getElementById('d-prod-price')?.value)||0,
-        comparePrice:parseFloat(document.getElementById('d-prod-compare')?.value)||null,
-        stock:       parseInt(document.getElementById('d-prod-stock')?.value)||0,
-        imageUrl:    document.getElementById('d-prod-img')?.value,
-        status:      document.getElementById('d-prod-status')?.value,
-        featured:    document.getElementById('d-prod-featured')?.checked,
-      };
-      data ? await ApiService.updateProduct(data.id, payload) : await ApiService.createProduct(payload);
+      const fileInput  = document.getElementById('d-prod-img-file');
+      const file       = fileInput?.files?.[0];
+      const categoryId = document.getElementById('d-prod-cat')?.value || null;
+      const status     = document.getElementById('d-prod-status')?.value || 'ACTIVE';
+      const name       = document.getElementById('d-prod-name')?.value || '';
+      const sku        = document.getElementById('d-prod-sku')?.value || '';
+      const desc       = document.getElementById('d-prod-desc')?.value || '';
+      const price      = parseFloat(document.getElementById('d-prod-price')?.value) || 0;
+      const compare    = parseFloat(document.getElementById('d-prod-compare')?.value) || null;
+      const stock      = parseInt(document.getElementById('d-prod-stock')?.value) || 0;
+      const featured   = document.getElementById('d-prod-featured')?.checked;
+
+      if (file) {
+        // Upload via multipart
+        const fd = new FormData();
+        fd.append('file', file);
+        fd.append('name', name);
+        fd.append('sku', sku);
+        fd.append('description', desc);
+        fd.append('price', price);
+        fd.append('status', status);
+        if (categoryId) fd.append('categoryId', categoryId);
+
+        const res = await fetch('http://localhost:8080/api/products/upload', {
+          method: 'POST',
+          headers: { 'Authorization': 'Bearer ' + localStorage.getItem('luz_jwt') },
+          body: fd
+        }).then(r => r.json());
+
+        if (data && res.data?.id) {
+          // For update: also update the existing product's other fields
+          await ApiService.updateProduct(data.id, { name, sku, description: desc, price, comparePrice: compare, stock, status, featured, categoryId });
+          // Then upload image to existing product
+          const fd2 = new FormData(); fd2.append('file', file); fd2.append('isPrimary', 'true');
+          await fetch(`http://localhost:8080/api/products/${data.id}/images`, {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + localStorage.getItem('luz_jwt') },
+            body: fd2
+          });
+        }
+      } else {
+        const payload = {
+          name, sku, description: desc, price, comparePrice: compare, stock,
+          imageUrl: document.getElementById('d-prod-img-url')?.value,
+          status, featured, categoryId
+        };
+        data ? await ApiService.updateProduct(data.id, payload) : await ApiService.createProduct(payload);
+      }
     } else if (type === 'coupon') {
       const payload = {
         code:            (document.getElementById('d-coup-code')?.value||'').toUpperCase(),
@@ -1570,7 +1694,7 @@ function bindTab(tab) {
     if (!el) return;
     const { action, id, name, type: rtype, format, key, value, category, desc, status } = el.dataset;
 
-    if (action === 'edit-product') { const p = await ApiService.getProduct(id).catch(()=>({id})); openDrawer('product', p); }
+    if (action === 'edit-product') { const res = await ApiService.getProduct(id).catch(()=>null); const p = res?.data || res || { id }; openDrawer('product', p); }
     else if (action === 'delete-product') { if(confirm('Delete this product?')) { await ApiService.deleteProduct(id).catch(()=>{}); loadTab('products'); } }
     else if (action === 'edit-coupon') {
       try {
@@ -1968,12 +2092,27 @@ function bindTab(tab) {
   }
 }
 
-async function loadCategories() {
+async function loadCategories(selectedId) {
   try {
     const cats = await ApiService.getCategories();
-    const sel = document.getElementById('d-prod-cat') || document.getElementById('product-cat-filter');
-    if (!sel) return;
-    (cats.content||cats||[]).forEach(c => { const o = document.createElement('option'); o.value=c.id; o.textContent=c.name; sel.appendChild(o); });
+    const list = cats.content || cats || [];
+    if (list.length) _categoryCache = list;
+
+    const sel = document.getElementById('d-prod-cat');
+    const filterSel = document.getElementById('product-cat-filter');
+
+    [sel, filterSel].filter(Boolean).forEach(el => {
+      const existing = new Set([...el.options].map(o => o.value));
+      list.forEach(c => {
+        if (!existing.has(String(c.id))) {
+          const o = document.createElement('option');
+          o.value = c.id; o.textContent = c.name;
+          el.appendChild(o);
+        }
+      });
+    });
+
+    if (sel && selectedId) sel.value = selectedId;
   } catch(_){}
 }
 

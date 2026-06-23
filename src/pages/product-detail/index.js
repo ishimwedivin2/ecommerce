@@ -36,7 +36,7 @@ export async function render(state) {
         <h1 class="detail-title">${p.name}</h1>
         <p class="detail-desc">${p.description}</p>
         <div class="detail-price-box">
-          <span class="price-current" style="font-size:32px;">£${p.price.toFixed(2)}</span>
+          <span class="price-current" style="font-size:32px;">RWF ${Math.round(parseFloat(p.price)||0).toLocaleString('en-US')}</span>
           <span class="price-vat">(incl. VAT)</span>
         </div>
         <div class="detail-actions">

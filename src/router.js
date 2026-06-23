@@ -14,6 +14,9 @@ import * as ProfilePage from './pages/profile/index.js';
 import * as SupportPage from './pages/support/index.js';
 import * as TicketDetailPage from './pages/ticket-detail/index.js';
 import * as AdminPage from './pages/admin/index.js';
+import * as SupportAgentPage from './pages/support-agent/index.js';
+import * as EmployeePage from './pages/employee/index.js';
+import * as ShopPage from './pages/shop/index.js';
 
 // Helpers passed to every page/component
 export const helpers = {
@@ -106,10 +109,25 @@ export async function renderView() {
         container.innerHTML = html;
         TicketDetailPage.bindEvents(appState, helpers);
         break;
+      case 'shop':
+        html = await ShopPage.render(appState);
+        container.innerHTML = html;
+        ShopPage.bindEvents(appState, helpers);
+        break;
       case 'admin':
         html = await AdminPage.render(appState);
         container.innerHTML = html;
         AdminPage.bindEvents(appState, helpers);
+        break;
+      case 'support-agent':
+        html = await SupportAgentPage.render(appState);
+        container.innerHTML = html;
+        SupportAgentPage.bindEvents(appState, helpers);
+        break;
+      case 'employee':
+        html = await EmployeePage.render(appState);
+        container.innerHTML = html;
+        EmployeePage.bindEvents(appState, helpers);
         break;
       default:
         container.innerHTML = `<div style="text-align:center;padding:48px;"><h2>Page Not Found</h2></div>`;
@@ -153,8 +171,9 @@ export async function renderChatWidget() {
 }
 
 export async function renderAll() {
-  const isAdmin = appState.currentView === 'admin';
-  // Toggle admin-mode class — hides footer and chat widget on admin
+  const staffViews = ['admin', 'support-agent', 'employee'];
+  const isAdmin = staffViews.includes(appState.currentView);
+  // Toggle admin-mode class — hides footer and chat widget on staff dashboards
   document.body.classList.toggle('admin-mode', isAdmin);
   await renderHeader().catch(console.error);
   await renderCategoryNav().catch(console.error);

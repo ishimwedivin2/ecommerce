@@ -64,7 +64,7 @@ export async function render() {
 
   return `
     <div class="promo-banner" id="promo-banner">
-      🚀 <strong>Summer Sale:</strong> Free shipping on all orders over £50 — Use code <strong>LUZ24</strong> at checkout
+      🚀 <strong>Summer Sale:</strong> Free shipping on all orders over RWF 50,000 — Use code <strong>LUZ50</strong> at checkout
       <button class="promo-banner-close" onclick="document.getElementById('promo-banner').style.display='none'">×</button>
     </div>
     <div class="header-main">
@@ -72,6 +72,11 @@ export async function render() {
         <div class="logo-icon">L</div>
         Luz Technology<span>.</span>
       </div>
+
+      <nav class="header-nav">
+        <a class="header-nav-link" data-navigate="home">Home</a>
+        <a class="header-nav-link" data-navigate="shop">Shop</a>
+      </nav>
 
       <div class="search-bar-container">
         <input type="text" class="search-input" id="global-search-input" placeholder="Search a product, brand, category...">

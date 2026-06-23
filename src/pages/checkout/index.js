@@ -2,6 +2,19 @@ import './style.css';
 import { ApiService } from '../../api.js';
 import { setState } from '../../store.js';
 
+const BACKEND = 'http://localhost:8080';
+
+function getItemImage(item) {
+  const p = item.product || item;
+  if (Array.isArray(p.images) && p.images.length > 0) {
+    const primary = p.images.find(i => i.isPrimary || i.primary) || p.images[0];
+    const url = primary?.url || '';
+    return url.startsWith('/uploads/') ? BACKEND + url : url;
+  }
+  const url = p.imageUrl || item.imageUrl || '';
+  return url.startsWith('/uploads/') ? BACKEND + url : url;
+}
+
 // ── state ────────────────────────────────────────────────
 let _step          = 1;   // 1=shipping 2=payment 3=processing 4=success
 let _paymentMethod = 'MTN_MOMO';
@@ -63,7 +76,7 @@ export async function render() {
 
   const itemsHtml = items.map(item => `
     <div class="chk-item">
-      <img class="chk-item-img" src="${item.product?.imageUrl || item.imageUrl || ''}" alt="">
+      <img class="chk-item-img" src="${getItemImage(item)}" alt="" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2256%22 height=%2256%22><rect width=%2256%22 height=%2256%22 fill=%22%23f1f5f9%22/><text x=%2228%22 y=%2234%22 text-anchor=%22middle%22 font-size=%2220%22>📦</text></svg>'">
       <div class="chk-item-info">
         <div class="chk-item-name">${item.product?.name || item.productName || 'Product'}</div>
         <div class="chk-item-meta">Qty ${item.quantity} × ${fmtMoney(item.product?.price || item.unitPrice || 0)}</div>
