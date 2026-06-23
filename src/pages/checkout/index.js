@@ -213,7 +213,7 @@ export async function render() {
         <div id="step2-err" class="chk-err" style="display:none"></div>
         <div class="chk-btn-row">
           <button class="btn-secondary" id="btn-step2-back">← Back</button>
-          <button class="btn-primary" id="btn-step2-pay">Pay ${fmtMoney(subtotal)}</button>
+          <button class="btn-primary" id="btn-step2-pay">Pay ${fmtMoney(subtotal * 1.18)}</button>
         </div>
       </div>
 
@@ -240,6 +240,7 @@ export async function render() {
         <div id="receipt-block" class="chk-receipt"></div>
         <div class="chk-receipt-actions">
           <button class="btn-primary" id="btn-download-pdf">⬇ Download PDF Receipt</button>
+          <button class="btn-secondary" id="btn-print-receipt">🖨 Print Receipt</button>
           <button class="btn-secondary" id="btn-continue-shopping">Continue Shopping</button>
         </div>
       </div>
@@ -413,6 +414,56 @@ export function bindEvents(state, helpers) {
     } finally {
       btn.disabled = false; btn.textContent = '⬇ Download PDF Receipt';
     }
+  });
+
+  document.getElementById('btn-print-receipt')?.addEventListener('click', () => {
+    if (!_receipt) { toast('Receipt not yet loaded — try again in a moment', 'error'); return; }
+    const r = _receipt;
+    const itemsHtml = (r.items || []).map(i =>
+      `<div class="pi"><span>${i.productName||'Product'} ×${i.quantity}</span><span>${fmtMoney(i.subTotal)}</span></div>`
+    ).join('');
+    const win = window.open('', '_blank', 'width=520,height=760');
+    win.document.write(`<!DOCTYPE html><html><head>
+      <title>Receipt — ${r.receiptNumber||r.orderNumber}</title>
+      <style>
+        *{box-sizing:border-box;margin:0;padding:0}
+        body{font-family:Arial,sans-serif;padding:28px;color:#1e293b;max-width:420px;margin:0 auto}
+        .brand{text-align:center;font-size:20px;font-weight:800;color:#FF6B00;margin-bottom:2px}
+        .sub{text-align:center;font-size:11px;color:#94a3b8;margin-bottom:10px}
+        h2{text-align:center;font-size:14px;font-weight:700;margin-bottom:12px}
+        .meta{font-size:12px;color:#64748b;line-height:2;margin-bottom:12px}
+        .meta div{display:flex;justify-content:space-between}
+        .items{border-top:1px dashed #ccc;border-bottom:1px dashed #ccc;padding:10px 0;margin:12px 0}
+        .pi{display:flex;justify-content:space-between;font-size:13px;margin-bottom:5px}
+        .totals{font-size:13px}
+        .tot-r{display:flex;justify-content:space-between;color:#64748b;margin-bottom:3px;padding:2px 0}
+        .grand{display:flex;justify-content:space-between;font-size:16px;font-weight:800;border-top:2px solid #e2e8f0;padding-top:8px;margin-top:6px}
+        .grand span:last-child{color:#FF6B00}
+        .footer{text-align:center;font-size:11px;color:#94a3b8;margin-top:20px;border-top:1px dashed #ccc;padding-top:12px}
+        @media print{body{padding:10px}}
+      </style>
+    </head><body>
+      <div class="brand">Luz Technology</div>
+      <div class="sub">Payment Receipt</div>
+      <h2>Order #${r.orderNumber||'—'}</h2>
+      <div class="meta">
+        <div><span>Receipt No</span><span>${r.receiptNumber||'—'}</span></div>
+        <div><span>Customer</span><span>${r.customerName||'—'}</span></div>
+        <div><span>Payment</span><span>${(r.paymentMethod||'—').replace(/_/g,' ')}</span></div>
+        <div><span>Reference</span><span>${r.paymentReference||'—'}</span></div>
+        <div><span>Date</span><span>${r.issuedAt ? new Date(r.issuedAt).toLocaleString('en-GB',{dateStyle:'medium',timeStyle:'short'}) : '—'}</span></div>
+      </div>
+      <div class="items">${itemsHtml}</div>
+      <div class="totals">
+        <div class="tot-r"><span>Subtotal</span><span>${fmtMoney(r.subTotalAmount)}</span></div>
+        <div class="tot-r"><span>Tax (${Number((r.taxRate||0)*100).toFixed(0)}%)</span><span>${fmtMoney(r.taxAmount)}</span></div>
+      </div>
+      <div class="grand"><span>Total Paid</span><span>${fmtMoney(r.totalAmount)}</span></div>
+      <div class="footer">Thank you for shopping at Luz Technology!</div>
+    </body></html>`);
+    win.document.close();
+    win.focus();
+    setTimeout(() => { win.print(); win.close(); }, 400);
   });
 
   document.getElementById('btn-continue-shopping')?.addEventListener('click', () => {

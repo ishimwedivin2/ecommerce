@@ -417,6 +417,7 @@ export function bindEvents(helpers) {
         const roles = (user?.roles || []).map(r => (r?.name || r || '').toString());
         const view = roleToView(roles);
         setState({ authModalMode: null, currentView: view });
+        window.dispatchEvent(new Event('luz-login'));
         renderAll();
         showToast(`Welcome back${user?.firstName ? ', ' + user.firstName : ''}!`, 'success');
       }
@@ -537,6 +538,7 @@ export function bindEvents(helpers) {
       try {
         await ApiService.auth.verifyMfa(appState.pendingMfaToken, code);
         setState({ pendingMfaToken: null, authModalMode: null });
+        window.dispatchEvent(new Event('luz-login'));
         renderAll();
         showToast('Identity verified. Welcome!', 'success');
       } catch (_) {

@@ -23,6 +23,13 @@ export async function render() {
     try {
       const notifRes = await ApiService.notifications.getUnreadCount();
       notifCount = notifRes.data || 0;
+      // Add low-stock count to badge for staff
+      const roles = (user?.roles||[]).map(r=>(r?.name||r||'').toString());
+      if (roles.some(r=>r==='ROLE_ADMIN'||r==='ROLE_EMPLOYEE')) {
+        const ls = await ApiService.inventory.getLowStock().catch(()=>null);
+        const lsItems = ls ? (Array.isArray(ls)?ls:(ls?.data||ls?.content||[])) : [];
+        notifCount += lsItems.length;
+      }
     } catch (e) {}
   }
 
@@ -33,7 +40,19 @@ export async function render() {
       <div id="header-user-dropdown" style="display: none; position: absolute; top: 100%; right: 0; background: white; border: 1px solid var(--border-dark); border-radius: var(--radius-md); box-shadow: var(--shadow-lg); width: 190px; z-index: 1000; padding: 6px 0; margin-top: 10px;">
         <div style="padding: 10px 16px; border-bottom: 1px solid var(--border); font-size: 13px;">
           Hi, <strong>${user.firstName}</strong>
-          <div style="font-size: 11px; color: var(--text-light); margin-top: 2px; font-weight: 500;">${user.roles.includes('ROLE_ADMIN') ? 'Administrator' : 'Customer'}</div>
+          <div style="margin-top:5px;">
+            ${(user.roles || []).map(r => {
+              const name = (r?.name || r || '').toString();
+              const map = {
+                ROLE_ADMIN:         { label:'Administrator', color:'#7c3aed', bg:'#ede9fe' },
+                ROLE_EMPLOYEE:      { label:'Employee',      color:'#0369a1', bg:'#e0f2fe' },
+                ROLE_SUPPORT_AGENT: { label:'Support Agent', color:'#0f766e', bg:'#ccfbf1' },
+                ROLE_CUSTOMER:      { label:'Customer',      color:'#15803d', bg:'#dcfce7' },
+              };
+              const chip = map[name] || { label: name.replace('ROLE_',''), color:'#64748b', bg:'#f1f5f9' };
+              return `<span style="display:inline-block;padding:2px 8px;border-radius:20px;font-size:10px;font-weight:700;background:${chip.bg};color:${chip.color};margin-right:3px;">${chip.label}</span>`;
+            }).join('')}
+          </div>
         </div>
         <a class="header-action-btn" style="display: flex; width: 100%; text-align: left; border-radius: 0; padding: 10px 16px; gap: 8px; font-size: 13px;" data-navigate="profile">
           <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>
@@ -43,12 +62,22 @@ export async function render() {
           <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M18.364 5.636l-3.536 3.536m0 5.656l3.536 3.536M9.172 9.172L5.636 5.636m3.536 9.192l-3.536 3.536M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-5 0a4 4 0 11-8 0 4 4 0 018 0z"></path></svg>
           Support Center
         </a>
-        ${user.roles.includes('ROLE_ADMIN') || user.roles.includes('ROLE_EMPLOYEE') ? `
-          <a class="header-action-btn" style="display: flex; width: 100%; text-align: left; border-radius: 0; padding: 10px 16px; gap: 8px; color: var(--primary); font-weight: 700; font-size: 13px;" data-navigate="admin">
-            <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 002 2h2a2 2 0 002-2z"></path></svg>
-            Staff Dashboard
-          </a>
-        ` : ''}
+        ${(() => {
+          const roles = user.roles || [];
+          if (roles.includes('ROLE_ADMIN') || roles.includes('ROLE_EMPLOYEE')) {
+            return `<a class="header-action-btn" style="display:flex;width:100%;text-align:left;border-radius:0;padding:10px 16px;gap:8px;color:var(--primary);font-weight:700;font-size:13px;" data-navigate="admin">
+              <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 002 2h2a2 2 0 002-2z"></path></svg>
+              Staff Dashboard
+            </a>`;
+          }
+          if (roles.includes('ROLE_SUPPORT_AGENT')) {
+            return `<a class="header-action-btn" style="display:flex;width:100%;text-align:left;border-radius:0;padding:10px 16px;gap:8px;color:#0f766e;font-weight:700;font-size:13px;" data-navigate="support-agent">
+              <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M18.364 5.636l-3.536 3.536m0 5.656l3.536 3.536M9.172 9.172L5.636 5.636m3.536 9.192l-3.536 3.536M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-5 0a4 4 0 11-8 0 4 4 0 018 0z"></path></svg>
+              Support Portal
+            </a>`;
+          }
+          return '';
+        })()}
         <a class="header-action-btn" style="display: flex; width: 100%; text-align: left; border-radius: 0; padding: 10px 16px; gap: 8px; color: var(--danger); font-size: 13px;" id="btn-header-logout">
           <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg>
           Logout
@@ -158,6 +187,7 @@ export function bindEvents(helpers) {
 
   // Logout
   document.getElementById('btn-header-logout')?.addEventListener('click', () => {
+    window.dispatchEvent(new Event('luz-logout'));
     ApiService.auth.logout();
     showToast('Logged out successfully');
     navigate('home', { activeCategory: null, isUserDropdownOpen: false });
@@ -174,19 +204,51 @@ export function bindEvents(helpers) {
       notifPanel.style.display = open ? 'block' : 'none';
 
       if (open) {
-        const res = await ApiService.notifications.getAll();
-        const items = res.data || [];
+        const user = ApiService.getCurrentUser();
+        const roles = (user?.roles||[]).map(r=>(r?.name||r||'').toString());
+        const isStaff = roles.some(r=>r==='ROLE_ADMIN'||r==='ROLE_EMPLOYEE');
+
+        // Load regular notifications + low-stock alerts for staff
+        const [notifRes, lowStockRes] = await Promise.allSettled([
+          ApiService.notifications.getAll(),
+          isStaff ? ApiService.inventory.getLowStock() : Promise.resolve(null),
+        ]);
+
+        const items     = notifRes.status==='fulfilled' ? (notifRes.value?.data || []) : [];
+        const lowStock  = (lowStockRes.status==='fulfilled' && lowStockRes.value)
+          ? (Array.isArray(lowStockRes.value) ? lowStockRes.value : (lowStockRes.value?.data||lowStockRes.value?.content||[]))
+          : [];
+
+        // Update badge to include low-stock count for staff
+        const badge = document.getElementById('notif-badge');
+        const totalAlerts = items.filter(n=>!n.read).length + lowStock.length;
+        if (badge) {
+          badge.textContent = totalAlerts;
+          badge.style.display = totalAlerts > 0 ? 'flex' : 'none';
+        }
+
         const listEl = document.getElementById('notif-list');
         if (listEl) {
-          listEl.innerHTML = items.length === 0
+          const lowStockHtml = lowStock.length ? `
+            <div style="padding:10px 14px 4px;font-size:11px;font-weight:700;color:#F59E0B;text-transform:uppercase;letter-spacing:.05em;border-top:1px solid var(--border);">
+              ⚠ Low Stock Alerts (${lowStock.length})
+            </div>
+            ${lowStock.map(i=>`
+              <div class="notif-item unread" style="border-left:3px solid #F59E0B;padding-left:11px;">
+                <div class="notif-item-title">${i.productName||i.name||'—'}</div>
+                <div class="notif-item-msg">Only ${i.quantity} units left — reorder threshold: ${i.lowStockThreshold||10}</div>
+                <div class="notif-item-time">SKU: ${i.sku||'—'}</div>
+              </div>`).join('')}` : '';
+
+          listEl.innerHTML = items.length === 0 && !lowStockHtml
             ? `<div style="padding:24px;text-align:center;color:var(--text-light);font-size:13px;">You're all caught up!</div>`
-            : items.map(n => `
+            : (items.length > 0 ? items.map(n => `
               <div class="notif-item ${n.read ? '' : 'unread'}" data-notif-id="${n.id}">
                 <div class="notif-item-title">${n.title}</div>
                 <div class="notif-item-msg">${n.message}</div>
                 <div class="notif-item-time">${n.createdAt ? new Date(n.createdAt).toLocaleDateString() : ''}</div>
               </div>
-            `).join('');
+            `).join('') : '') + lowStockHtml;
 
           listEl.querySelectorAll('.notif-item').forEach(item => {
             item.addEventListener('click', async () => {

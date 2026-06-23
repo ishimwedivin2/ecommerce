@@ -502,10 +502,62 @@ export const ApiService = {
     async getItems() {
       return await request('/api/inventory');
     },
+    async getDashboard() {
+      return await request('/api/inventory/dashboard');
+    },
+    async getLowStock() {
+      return await request('/api/inventory/low-stock');
+    },
+    async updateThreshold(id, lowStockThreshold) {
+      return await request(`/api/inventory/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ lowStockThreshold })
+      });
+    },
     async adjustStock(id, quantity, reason, type = 'MANUAL') {
       const params = new URLSearchParams({ quantity, reason, type });
       return await request(`/api/inventory/${id}/adjust?${params}`, { method: 'POST' });
-    }
+    },
+    async getMovements(page = 0, size = 50) {
+      return await request(`/api/inventory/movements?page=${page}&size=${size}`);
+    },
+  },
+
+  suppliers: {
+    async getAll(active) {
+      const q = active !== undefined ? `?active=${active}` : '';
+      return await request(`/api/inventory/suppliers${q}`);
+    },
+    async create(data) {
+      return await request('/api/inventory/suppliers', { method: 'POST', body: JSON.stringify(data) });
+    },
+    async update(id, data) {
+      return await request(`/api/inventory/suppliers/${id}`, { method: 'PUT', body: JSON.stringify(data) });
+    },
+    async setActive(id, active) {
+      return await request(`/api/inventory/suppliers/${id}/active?active=${active}`, { method: 'PATCH' });
+    },
+  },
+
+  procurement: {
+    async getAll(status) {
+      const q = status ? `?status=${status}` : '';
+      return await request(`/api/inventory/procurements${q}`);
+    },
+    async create(data) {
+      return await request('/api/inventory/procurements', { method: 'POST', body: JSON.stringify(data) });
+    },
+    async receive(id, quantityReceived) {
+      return await request(`/api/inventory/procurements/${id}/receive`, {
+        method: 'POST', body: JSON.stringify({ quantityReceived })
+      });
+    },
+    async updateStatus(id, status) {
+      return await request(`/api/inventory/procurements/${id}/status?status=${status}`, { method: 'PATCH' });
+    },
+    async cancel(id) {
+      return await request(`/api/inventory/procurements/${id}/cancel`, { method: 'POST' });
+    },
   },
 
   productsAdmin: {

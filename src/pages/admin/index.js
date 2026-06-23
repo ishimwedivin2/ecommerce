@@ -64,7 +64,9 @@ function navItems() {
     { section: 'Commerce' },
     { id:'orders',   label:'Orders',    icon:I.cart,    badge:'orders' },
     { id:'products', label:'Products',  icon:I.box },
-    { id:'inventory',label:'Inventory', icon:I.pkg },
+    { id:'inventory',    label:'Inventory',    icon:I.pkg },
+    { id:'suppliers',    label:'Suppliers',    icon:I.users },
+    { id:'procurement',  label:'Procurement',  icon:I.truck },
     { id:'returns',  label:'Returns',   icon:I.rotate,  badge:'returns' },
     { id:'shipments',label:'Shipments', icon:I.truck },
     { section: 'Sales' },
@@ -101,9 +103,14 @@ let _bannerCache    = [];
 let _userCache      = [];
 let _invCache       = [];
 let _customerCache  = [];
-let _auditCache     = [];
-let _productCache   = [];
-let _categoryCache  = [];
+let _auditCache       = [];
+let _productCache     = [];
+let _categoryCache    = [];
+let _supplierCache    = [];
+let _procurementCache = [];
+let _movementCache    = [];
+let _lowStockCache    = [];
+let _invRefreshTimer  = null;
 
 // ── Main render ───────────────────────────────────────────
 export async function render(state) {
@@ -236,7 +243,7 @@ function bindShell() {
 
 // ── Drawer helpers ────────────────────────────────────────
 function openDrawer(type, data) {
-  const titles = { product:'Product', order:'Order Detail', coupon:'Coupon', banner:'Banner', user:'User', customer:'Customer', adjust:'Adjust Stock', ticket:'Support Ticket', shipment:'Shipment', 'shipment-status':'Shipment Status', 'return-action':'Return Review' };
+  const titles = { product:'Product', order:'Order Detail', coupon:'Coupon', banner:'Banner', user:'User', customer:'Customer', adjust:'Adjust Stock', ticket:'Support Ticket', shipment:'Shipment', 'shipment-status':'Shipment Status', 'return-action':'Return Review', supplier:'Supplier', procurement:'Procurement Order', 'inv-threshold':'Stock Threshold', 'receive-po':'Receive Stock' };
   document.getElementById('d-drawer-title').textContent = (data?'Edit ':'New ') + (titles[type]||type);
   document.getElementById('d-drawer-body').innerHTML = drawerBody(type, data);
   document.getElementById('d-drawer-footer').innerHTML = drawerFooter(type, data);
@@ -626,22 +633,31 @@ TAB.products = async () => {
 
 // ── Inventory ─────────────────────────────────────────────
 TAB.inventory = async () => {
-  let items = [];
+  let items = [], movements = [], lowStock = [];
   try {
-    const res = await ApiService.getInventory({ page:0, size:30 });
-    items = extractList(res);
+    const [ir, mr, lr] = await Promise.allSettled([
+      ApiService.getInventory({ page:0, size:100 }),
+      ApiService.inventory.getMovements(0, 50),
+      ApiService.inventory.getLowStock(),
+    ]);
+    if (ir.status==='fulfilled') items     = extractList(ir.value);
+    if (mr.status==='fulfilled') movements = Array.isArray(mr.value) ? mr.value : (mr.value?.data || mr.value?.content || []);
+    if (lr.status==='fulfilled') lowStock  = Array.isArray(lr.value) ? lr.value : (lr.value?.data || lr.value?.content || []);
   } catch(_){}
 
-  _invCache = items;
+  _invCache     = items;
+  _movementCache = movements;
+  _lowStockCache = lowStock;
+
   const reorderOf = i => i.reorderPoint || i.lowStockThreshold || 10;
 
   const buildInvRows = (list) => list.length ? list.map(item => {
-    const stock = item.quantity || 0;
+    const stock   = item.quantity || 0;
     const reorder = reorderOf(item);
-    const max   = Math.max(stock * 1.5, reorder * 3, 50);
-    const pct   = Math.min(Math.round(stock / max * 100), 100);
-    const cls   = stock === 0 ? 'out' : stock <= reorder ? 'low' : 'ok';
-    const st    = stock === 0 ? 'OUT_OF_STOCK' : stock <= reorder ? 'PENDING' : 'ACTIVE';
+    const max     = Math.max(stock * 1.5, reorder * 3, 50);
+    const pct     = Math.min(Math.round(stock / max * 100), 100);
+    const cls     = stock === 0 ? 'out' : stock <= reorder ? 'low' : 'ok';
+    const st      = stock === 0 ? 'OUT_OF_STOCK' : stock <= reorder ? 'PENDING' : 'ACTIVE';
     return `<tr>
       <td class="td-b">${item.productName || item.name || '—'}</td>
       <td>${item.sku || '—'}</td>
@@ -650,51 +666,249 @@ TAB.inventory = async () => {
         <span style="font-weight:700;color:${cls==='out'?'#EF4444':cls==='low'?'#F59E0B':'#10B981'}">${stock}</span>
         <div class="d-stock-bar" style="width:80px;display:inline-block;margin-left:8px"><div class="d-stock-fill ${cls}" style="width:${pct}%"></div></div>
       </td>
-      <td>${reorder}</td>
-      <td>${statusBdg(st)}</td>
       <td>
+        <span id="thresh-val-${item.id}">${reorder}</span>
+        <button class="btn-d btn-d-sec btn-d-sm" style="margin-left:6px;padding:2px 6px;font-size:11px" data-action="edit-threshold" data-id="${item.id}" data-threshold="${reorder}">Edit</button>
+      </td>
+      <td>${statusBdg(st)}</td>
+      <td style="display:flex;gap:4px;">
         <button class="btn-d btn-d-sec btn-d-sm" data-action="adjust-stock" data-id="${item.id}" data-item-name="${escAttr(item.productName||item.name||'')}">Adjust</button>
       </td>
     </tr>`;
   }).join('') : `<tr><td colspan="7"><div class="d-empty"><div class="d-empty-ico">🏭</div><div class="d-empty-ttl">No inventory data</div></div></td></tr>`;
 
+  const typeIcon = t => t==='IN'?'▲':t==='OUT'?'▼':'↕';
+  const typeColor = t => t==='IN'?'#10B981':t==='OUT'?'#EF4444':'#6366F1';
+  const buildMovRows = (list) => list.length ? list.map(m => `
+    <tr>
+      <td class="td-sm">${fmt.ago(m.createdAt)}</td>
+      <td class="td-b">${m.inventoryItem?.productName || m.inventoryItem?.name || '—'}</td>
+      <td style="color:${typeColor(m.type)};font-weight:700">${typeIcon(m.type)} ${m.type||'—'}</td>
+      <td style="font-weight:700;color:${(m.quantity||0)>=0?'#10B981':'#EF4444'}">${(m.quantity||0)>0?'+':''}${m.quantity||0}</td>
+      <td>${m.reason||'—'}</td>
+      <td class="td-sm">${m.referenceId ? `<code>#${m.referenceId.toString().slice(-8)}</code>` : '—'}</td>
+    </tr>`).join('') :
+    `<tr><td colspan="6"><div class="d-empty"><div class="d-empty-ico">📋</div><div class="d-empty-ttl">No movements yet</div></div></td></tr>`;
+
   const locations = [...new Set(items.map(i => i.location || i.warehouse || 'Main').filter(Boolean))];
+  const inStock   = items.filter(i=>i.quantity>0&&i.quantity>(reorderOf(i))).length;
+  const lowCount  = items.filter(i=>i.quantity>0&&i.quantity<=(reorderOf(i))).length;
+  const outCount  = items.filter(i=>!i.quantity||i.quantity<=0).length;
 
   return `
   <div class="dash-page-hd">
-    <div><div class="dash-page-title">Inventory</div><div class="dash-page-sub">${items.length} items tracked</div></div>
+    <div>
+      <div class="dash-page-title">Inventory</div>
+      <div class="dash-page-sub">${items.length} items · <span style="color:#EF4444;font-weight:600">${outCount} out of stock</span> · <span style="color:#F59E0B;font-weight:600">${lowCount} low stock</span></div>
+    </div>
     <div class="dash-page-acts">
       <button class="btn-d btn-d-sec" id="btn-export-inv">${I.download} Export CSV</button>
       <button class="btn-d btn-d-primary" id="btn-add-inv-item">${I.plus} Add Item</button>
     </div>
   </div>
+
   <div class="d-widgets" style="margin-bottom:16px">
     <div class="d-widget"><div class="d-widget-ttl">Stock Health</div>
-      <div class="d-widget-row"><span>In Stock</span><span class="bdg bdg-green">${items.filter(i=>i.quantity>0&&i.quantity>(reorderOf(i))).length}</span></div>
-      <div class="d-widget-row"><span>Low Stock</span><span class="bdg bdg-yellow">${items.filter(i=>i.quantity>0&&i.quantity<=(reorderOf(i))).length}</span></div>
-      <div class="d-widget-row"><span>Out of Stock</span><span class="bdg bdg-red">${items.filter(i=>!i.quantity||i.quantity<=0).length}</span></div>
+      <div class="d-widget-row"><span>In Stock</span><span class="bdg bdg-green">${inStock}</span></div>
+      <div class="d-widget-row"><span>Low Stock</span><span class="bdg bdg-yellow">${lowCount}</span></div>
+      <div class="d-widget-row"><span>Out of Stock</span><span class="bdg bdg-red">${outCount}</span></div>
     </div>
+    ${lowStock.length ? `
+    <div class="d-widget" style="border-left:3px solid #F59E0B">
+      <div class="d-widget-ttl" style="color:#F59E0B">⚠ Low Stock Alerts</div>
+      ${lowStock.slice(0,5).map(i=>`
+        <div class="d-widget-row">
+          <span style="font-size:12px">${i.productName||i.name||'—'}</span>
+          <span class="bdg bdg-yellow">${i.quantity} left</span>
+        </div>`).join('')}
+      ${lowStock.length>5?`<div style="font-size:11px;color:#94a3b8;margin-top:4px">+${lowStock.length-5} more items</div>`:''}
+    </div>` : ''}
+  </div>
+
+  <!-- Sub-tabs -->
+  <div style="display:flex;gap:0;border-bottom:2px solid #e2e8f0;margin-bottom:16px;">
+    <button class="inv-subtab active" data-subtab="stock" style="padding:9px 18px;border:none;background:none;cursor:pointer;font-size:13px;font-weight:600;color:#FF6B00;border-bottom:2px solid #FF6B00;margin-bottom:-2px;">
+      Stock Levels <span style="background:#e2e8f0;color:#475569;border-radius:20px;padding:1px 7px;font-size:11px;margin-left:4px;">${items.length}</span>
+    </button>
+    <button class="inv-subtab" data-subtab="movements" style="padding:9px 18px;border:none;background:none;cursor:pointer;font-size:13px;font-weight:600;color:#64748b;border-bottom:2px solid transparent;margin-bottom:-2px;">
+      Movement History <span style="background:#e2e8f0;color:#475569;border-radius:20px;padding:1px 7px;font-size:11px;margin-left:4px;">${movements.length}</span>
+    </button>
+  </div>
+
+  <!-- Stock Levels panel -->
+  <div id="inv-panel-stock">
+    <div class="dash-tcard">
+      <div class="dash-tcard-hd">
+        <span class="dash-tcard-title">Stock Levels</span>
+        <div class="dash-tcard-acts">
+          <input class="dash-inp" placeholder="Search SKU or product…" style="width:200px" id="inv-search">
+          <select class="dash-sel" id="inv-location-filter">
+            <option value="">All Locations</option>
+            ${locations.map(l=>`<option value="${escAttr(l)}">${l}</option>`).join('')}
+          </select>
+          <select class="dash-sel" id="inv-status-filter">
+            <option value="">All Status</option>
+            <option value="out">Out of Stock</option>
+            <option value="low">Low Stock</option>
+            <option value="ok">In Stock</option>
+          </select>
+        </div>
+      </div>
+      <table class="dt">
+        <thead><tr><th>Product</th><th>SKU</th><th>Location</th><th>Quantity</th><th>Reorder Threshold</th><th>Status</th><th>Actions</th></tr></thead>
+        <tbody id="inv-tbody">${buildInvRows(items)}</tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Movement History panel -->
+  <div id="inv-panel-movements" style="display:none">
+    <div class="dash-tcard">
+      <div class="dash-tcard-hd">
+        <span class="dash-tcard-title">Stock Movements</span>
+        <div class="dash-tcard-acts">
+          <input class="dash-inp" id="mov-search" placeholder="Search product or reason…" style="width:200px">
+          <select class="dash-sel" id="mov-type-filter">
+            <option value="">All Types</option>
+            <option value="IN">IN (Restock)</option>
+            <option value="OUT">OUT (Sale)</option>
+            <option value="ADJUSTMENT">Adjustment</option>
+          </select>
+        </div>
+      </div>
+      <table class="dt">
+        <thead><tr><th>Time</th><th>Item</th><th>Type</th><th>Qty Change</th><th>Reason</th><th>Reference</th></tr></thead>
+        <tbody id="mov-tbody">${buildMovRows(movements)}</tbody>
+      </table>
+    </div>
+  </div>`;
+};
+
+// ── Suppliers ─────────────────────────────────────────────
+TAB.suppliers = async () => {
+  let suppliers = [];
+  try {
+    const res = await ApiService.suppliers.getAll();
+    suppliers = Array.isArray(res) ? res : (res?.data || res?.content || []);
+  } catch(_){}
+  _supplierCache = suppliers;
+
+  const rows = suppliers.length ? suppliers.map(s => `
+    <tr>
+      <td class="td-b">${s.name||'—'}</td>
+      <td>${s.contactEmail||'—'}</td>
+      <td>${s.contactPhone||'—'}</td>
+      <td>${s.performanceRating ? '⭐'.repeat(Math.round(s.performanceRating)) + ' ' + s.performanceRating.toFixed(1) : '—'}</td>
+      <td>${s.notes ? `<span title="${escAttr(s.notes)}" style="max-width:180px;display:inline-block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${s.notes}</span>` : '—'}</td>
+      <td>${s.active ? `<span class="bdg bdg-green">Active</span>` : `<span class="bdg bdg-gray">Inactive</span>`}</td>
+      <td style="display:flex;gap:5px;">
+        <button class="btn-d btn-d-sec btn-d-sm" data-action="edit-supplier" data-id="${s.id}">Edit</button>
+        <button class="btn-d btn-d-${s.active?'danger':'success'} btn-d-sm" data-action="toggle-supplier" data-id="${s.id}" data-active="${s.active}">${s.active?'Deactivate':'Activate'}</button>
+      </td>
+    </tr>`).join('') :
+    `<tr><td colspan="7"><div class="d-empty"><div class="d-empty-ico">🏭</div><div class="d-empty-ttl">No suppliers yet</div><div class="d-empty-sub">Add your first supplier to get started</div></div></td></tr>`;
+
+  const active = suppliers.filter(s=>s.active).length;
+  return `
+  <div class="dash-page-hd">
+    <div><div class="dash-page-title">Suppliers</div><div class="dash-page-sub">${suppliers.length} total · ${active} active</div></div>
+    <div class="dash-page-acts"><button class="btn-d btn-d-primary" id="btn-add-supplier">${I.plus} Add Supplier</button></div>
   </div>
   <div class="dash-tcard">
     <div class="dash-tcard-hd">
-      <span class="dash-tcard-title">Stock Levels</span>
+      <span class="dash-tcard-title">Supplier Directory</span>
       <div class="dash-tcard-acts">
-        <input class="dash-inp" placeholder="Search SKU or product…" style="width:200px" id="inv-search">
-        <select class="dash-sel" id="inv-location-filter">
-          <option value="">All Locations</option>
-          ${locations.map(l=>`<option value="${escAttr(l)}">${l}</option>`).join('')}
-        </select>
-        <select class="dash-sel" id="inv-status-filter">
-          <option value="">All Status</option>
-          <option value="out">Out of Stock</option>
-          <option value="low">Low Stock</option>
-          <option value="ok">In Stock</option>
+        <input class="dash-inp" id="supplier-search" placeholder="Search by name or email…" style="width:220px">
+        <select class="dash-sel" id="supplier-status-filter">
+          <option value="">All</option>
+          <option value="active">Active only</option>
+          <option value="inactive">Inactive only</option>
         </select>
       </div>
     </div>
     <table class="dt">
-      <thead><tr><th>Product</th><th>SKU</th><th>Location</th><th>Quantity</th><th>Reorder At</th><th>Status</th><th>Actions</th></tr></thead>
-      <tbody id="inv-tbody">${buildInvRows(items)}</tbody>
+      <thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Rating</th><th>Notes</th><th>Status</th><th>Actions</th></tr></thead>
+      <tbody id="supplier-tbody">${rows}</tbody>
+    </table>
+  </div>`;
+};
+
+// ── Procurement ───────────────────────────────────────────
+TAB.procurement = async () => {
+  let orders = [], suppliers = [], items = [];
+  try {
+    const [or, sr, ir] = await Promise.allSettled([
+      ApiService.procurement.getAll(),
+      ApiService.suppliers.getAll(true),
+      ApiService.inventory.getItems(),
+    ]);
+    if (or.status==='fulfilled') orders    = Array.isArray(or.value) ? or.value : (or.value?.data || or.value?.content || []);
+    if (sr.status==='fulfilled') suppliers = Array.isArray(sr.value) ? sr.value : (sr.value?.data || sr.value?.content || []);
+    if (ir.status==='fulfilled') items     = Array.isArray(ir.value) ? ir.value : (ir.value?.data || ir.value?.content || []);
+  } catch(_){}
+  _procurementCache = orders;
+  _supplierCache    = suppliers.length ? suppliers : _supplierCache;
+  _invCache         = items.length     ? items     : _invCache;
+
+  const statusColor = { PENDING:'bdg-yellow', RECEIVED:'bdg-green', PARTIALLY_RECEIVED:'bdg-blue', CANCELLED:'bdg-red', DRAFT:'bdg-gray' };
+
+  const buildPORows = (list) => list.length ? list.map(o => {
+    const supplierName = o.supplier?.name || '—';
+    const itemName     = o.inventoryItem?.productName || o.inventoryItem?.name || '—';
+    const st           = (o.status||'PENDING').toUpperCase();
+    const eta          = o.expectedDeliveryDate ? fmt.date(o.expectedDeliveryDate) : '—';
+    const cost         = o.totalCost ? fmt.money(o.totalCost) : '—';
+    return `<tr>
+      <td class="td-m"><code>#${(o.id||'').toString().slice(-8)}</code></td>
+      <td class="td-b">${supplierName}</td>
+      <td>${itemName}</td>
+      <td style="text-align:center">${o.quantityOrdered||0}</td>
+      <td style="text-align:center">${o.quantityReceived||0}</td>
+      <td>${cost}</td>
+      <td>${eta}</td>
+      <td><span class="bdg ${statusColor[st]||'bdg-gray'}">${st.replace('_',' ')}</span></td>
+      <td style="display:flex;gap:4px;flex-wrap:wrap;">
+        ${st==='PENDING'||st==='DRAFT' ? `<button class="btn-d btn-d-success btn-d-sm" data-action="receive-po" data-id="${o.id}" data-ordered="${o.quantityOrdered||0}">Receive</button>` : ''}
+        ${st==='PENDING'||st==='DRAFT' ? `<button class="btn-d btn-d-danger btn-d-sm" data-action="cancel-po" data-id="${o.id}">Cancel</button>` : ''}
+        ${st==='PARTIALLY_RECEIVED' ? `<button class="btn-d btn-d-success btn-d-sm" data-action="receive-po" data-id="${o.id}" data-ordered="${o.quantityOrdered||0}">More</button>` : ''}
+      </td>
+    </tr>`;
+  }).join('') :
+  `<tr><td colspan="9"><div class="d-empty"><div class="d-empty-ico">📦</div><div class="d-empty-ttl">No procurement orders</div></div></td></tr>`;
+
+  const pending  = orders.filter(o=>o.status==='PENDING'||o.status==='DRAFT').length;
+  const received = orders.filter(o=>o.status==='RECEIVED').length;
+  const partial  = orders.filter(o=>o.status==='PARTIALLY_RECEIVED').length;
+
+  return `
+  <div class="dash-page-hd">
+    <div><div class="dash-page-title">Procurement</div><div class="dash-page-sub">${orders.length} orders · ${pending} pending</div></div>
+    <div class="dash-page-acts"><button class="btn-d btn-d-primary" id="btn-add-po">${I.plus} New Order</button></div>
+  </div>
+  <div class="d-widgets" style="margin-bottom:16px">
+    <div class="d-widget"><div class="d-widget-ttl">Order Summary</div>
+      <div class="d-widget-row"><span>Pending / Draft</span><span class="bdg bdg-yellow">${pending}</span></div>
+      <div class="d-widget-row"><span>Partially Received</span><span class="bdg bdg-blue">${partial}</span></div>
+      <div class="d-widget-row"><span>Received</span><span class="bdg bdg-green">${received}</span></div>
+    </div>
+  </div>
+  <div class="dash-tcard">
+    <div class="dash-tcard-hd">
+      <span class="dash-tcard-title">Purchase Orders</span>
+      <div class="dash-tcard-acts">
+        <select class="dash-sel" id="po-status-filter">
+          <option value="">All Statuses</option>
+          <option value="PENDING">Pending</option>
+          <option value="DRAFT">Draft</option>
+          <option value="PARTIALLY_RECEIVED">Partial</option>
+          <option value="RECEIVED">Received</option>
+          <option value="CANCELLED">Cancelled</option>
+        </select>
+      </div>
+    </div>
+    <table class="dt">
+      <thead><tr><th>Order #</th><th>Supplier</th><th>Item</th><th style="text-align:center">Ordered</th><th style="text-align:center">Received</th><th>Cost</th><th>ETA</th><th>Status</th><th>Actions</th></tr></thead>
+      <tbody id="po-tbody">${buildPORows(orders)}</tbody>
     </table>
   </div>`;
 };
@@ -1158,42 +1372,149 @@ TAB.security = async () => {
 };
 
 // ── Audit Log ─────────────────────────────────────────────
-const buildAuditRows = (list) => list.length ? list.map(l => `
-    <tr>
+function auditStatusBadge(l) {
+  const st = (l.status || '').toString().toUpperCase();
+  // Infer from HTTP status code if status field is numeric
+  const httpCode = parseInt(l.httpStatus || l.responseStatus || 0);
+  const isFail = st === 'FAILURE' || st === 'FAILED' || st === 'ERROR'
+               || (httpCode >= 400) || st === 'FORBIDDEN' || st === 'UNAUTHORIZED';
+  return isFail
+    ? `<span style="background:#fef2f2;color:#ef4444;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:700;">FAILURE</span>`
+    : `<span style="background:#f0fdf4;color:#22c55e;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:700;">SUCCESS</span>`;
+}
+
+const buildAuditRows = (list) => list.length ? list.map(l => {
+    const st = (l.status || '').toString().toUpperCase();
+    const httpCode = parseInt(l.httpStatus || l.responseStatus || 0);
+    const isFail = st === 'FAILURE' || st === 'FAILED' || st === 'ERROR'
+                 || (httpCode >= 400) || st === 'FORBIDDEN' || st === 'UNAUTHORIZED';
+    return `
+    <tr style="${isFail ? 'background:#fff5f5;' : ''}">
       <td class="td-sm">${fmt.ago(l.timestamp||l.createdAt)}</td>
       <td class="td-b">${l.actorEmail||l.userEmail||'System'}</td>
-      <td><span class="bdg bdg-blue">${l.action||l.actionType||'ACTION'}</span></td>
+      <td><span class="bdg ${isFail ? 'bdg-red' : 'bdg-blue'}">${l.action||l.actionType||'ACTION'}</span></td>
       <td>${l.entityType||l.resource||'—'}</td>
-      <td class="td-sm" style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${l.details||l.description||'—'}</td>
+      <td class="td-sm" style="max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${l.details||l.description||'—'}</td>
       <td class="td-m">${l.ipAddress||'—'}</td>
+      <td>${auditStatusBadge(l)}</td>
+    </tr>`}).join('') :
+    `<tr><td colspan="7"><div class="d-empty"><div class="d-empty-ico">📋</div><div class="d-empty-ttl">No matching records</div></div></td></tr>`;
+
+// Login-attempt rows for the violations sub-tab
+const buildAttemptRows = (list) => list.length ? list.map(a => `
+    <tr style="${a.success ? '' : 'background:#fff5f5;'}">
+      <td class="td-sm">${fmt.ago(a.timestamp||a.createdAt)}</td>
+      <td class="td-b">${a.email||'—'}</td>
+      <td class="td-m">${a.ipAddress||'—'}</td>
+      <td>${a.success
+        ? `<span style="background:#f0fdf4;color:#22c55e;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:700;">SUCCESS</span>`
+        : `<span style="background:#fef2f2;color:#ef4444;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:700;">FAILED</span>`}
+      </td>
+      <td>${a.failureReason||'—'}</td>
     </tr>`).join('') :
-    `<tr><td colspan="6"><div class="d-empty"><div class="d-empty-ico">📋</div><div class="d-empty-ttl">No matching records</div></div></td></tr>`;
+    `<tr><td colspan="5"><div class="d-empty"><div class="d-empty-ico">🔒</div><div class="d-empty-ttl">No login attempts recorded</div></div></td></tr>`;
+
+let _loginAttemptCache = [];
 
 TAB.audit = async () => {
   if (!isAdmin()) return `<div class="d-alert d-alert-err">Access denied.</div>`;
   let logs = []; let total = 0;
+  let attempts = [];
   try {
-    const res = await ApiService.getAuditLogs({ page:0, size:100 });
-    logs  = extractList(res);
-    total = extractTotal(res, logs);
+    const [auditRes, attRes] = await Promise.allSettled([
+      ApiService.getAuditLogs({ page:0, size:100 }),
+      fetch('http://localhost:8080/api/admin/audit/login-attempts?page=0&size=100', {
+        headers: { 'Authorization': 'Bearer ' + localStorage.getItem('luz_jwt') }
+      }).then(r => r.json()).catch(() => ({}))
+    ]);
+    if (auditRes.status === 'fulfilled') {
+      logs  = extractList(auditRes.value);
+      total = extractTotal(auditRes.value, logs);
+    }
+    if (attRes.status === 'fulfilled') {
+      attempts = extractList(attRes.value);
+    }
   } catch(_){}
   _auditCache = logs;
+  _loginAttemptCache = attempts;
+
+  const violations = logs.filter(l => {
+    const st = (l.status || '').toString().toUpperCase();
+    const code = parseInt(l.httpStatus || l.responseStatus || 0);
+    return st === 'FAILURE' || st === 'FAILED' || st === 'ERROR' || code >= 400;
+  });
+  const failedLogins = attempts.filter(a => !a.success);
 
   return `
   <div class="dash-page-hd">
-    <div><div class="dash-page-title">Audit Log</div><div class="dash-page-sub">${fmt.num(total)} events</div></div>
-    <div class="dash-page-acts"><button class="btn-d btn-d-sec" id="btn-export-audit">${I.download} Export CSV</button></div>
-  </div>
-  <div class="dash-tcard">
-    <div class="dash-tcard-hd"><span class="dash-tcard-title">Recent Activity</span>
-      <div class="dash-tcard-acts">
-        <input class="dash-inp" id="audit-search" placeholder="Search by email or action…" style="width:220px">
-      </div>
+    <div>
+      <div class="dash-page-title">Audit &amp; Access Monitoring</div>
+      <div class="dash-page-sub">${fmt.num(total)} events · <span style="color:#ef4444;font-weight:600;">${violations.length} violations</span> · ${failedLogins.length} failed logins</div>
     </div>
-    <table class="dt">
-      <thead><tr><th>Time</th><th>User</th><th>Action</th><th>Resource</th><th>Details</th><th>IP</th></tr></thead>
-      <tbody id="audit-tbody">${buildAuditRows(logs)}</tbody>
-    </table>
+    <div class="dash-page-acts">
+      <button class="btn-d btn-d-sec" id="btn-export-audit">${I.download} Export CSV</button>
+    </div>
+  </div>
+
+  <!-- Sub-tabs -->
+  <div style="display:flex;gap:0;border-bottom:2px solid #e2e8f0;margin-bottom:16px;">
+    <button class="audit-subtab active" data-subtab="activity" style="padding:9px 18px;border:none;background:none;cursor:pointer;font-size:13px;font-weight:600;color:#FF6B00;border-bottom:2px solid #FF6B00;margin-bottom:-2px;">
+      All Activity <span style="background:#e2e8f0;color:#475569;border-radius:20px;padding:1px 7px;font-size:11px;margin-left:4px;">${fmt.num(total)}</span>
+    </button>
+    <button class="audit-subtab" data-subtab="violations" style="padding:9px 18px;border:none;background:none;cursor:pointer;font-size:13px;font-weight:600;color:#64748b;border-bottom:2px solid transparent;margin-bottom:-2px;">
+      Access Violations <span style="background:#fef2f2;color:#ef4444;border-radius:20px;padding:1px 7px;font-size:11px;margin-left:4px;">${violations.length}</span>
+    </button>
+    <button class="audit-subtab" data-subtab="logins" style="padding:9px 18px;border:none;background:none;cursor:pointer;font-size:13px;font-weight:600;color:#64748b;border-bottom:2px solid transparent;margin-bottom:-2px;">
+      Login Attempts <span style="background:${failedLogins.length > 0 ? '#fef2f2;color:#ef4444' : '#e2e8f0;color:#475569'};border-radius:20px;padding:1px 7px;font-size:11px;margin-left:4px;">${attempts.length}</span>
+    </button>
+  </div>
+
+  <!-- All Activity panel -->
+  <div id="audit-panel-activity">
+    <div class="dash-tcard">
+      <div class="dash-tcard-hd"><span class="dash-tcard-title">Recent Activity</span>
+        <div class="dash-tcard-acts" style="display:flex;gap:8px;">
+          <input class="dash-inp" id="audit-search" placeholder="Search by email, action…" style="width:200px">
+          <select class="dash-filter-select" id="audit-status-filter">
+            <option value="">All Status</option>
+            <option value="success">Success only</option>
+            <option value="failure">Failures only</option>
+          </select>
+        </div>
+      </div>
+      <table class="dt">
+        <thead><tr><th>Time</th><th>User</th><th>Action</th><th>Resource</th><th>Details</th><th>IP</th><th>Status</th></tr></thead>
+        <tbody id="audit-tbody">${buildAuditRows(logs)}</tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Violations panel -->
+  <div id="audit-panel-violations" style="display:none;">
+    <div class="dash-tcard" style="border-left:4px solid #ef4444;">
+      <div class="dash-tcard-hd">
+        <span class="dash-tcard-title" style="color:#ef4444;">⚠ Access Violations &amp; Errors</span>
+      </div>
+      <table class="dt">
+        <thead><tr><th>Time</th><th>User</th><th>Action</th><th>Resource</th><th>Details</th><th>IP</th><th>Status</th></tr></thead>
+        <tbody>${buildAuditRows(violations)}</tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Login Attempts panel -->
+  <div id="audit-panel-logins" style="display:none;">
+    <div class="dash-tcard" style="border-left:4px solid #f59e0b;">
+      <div class="dash-tcard-hd">
+        <span class="dash-tcard-title">🔑 Login Attempts</span>
+        <span style="font-size:12px;color:#ef4444;font-weight:600;">${failedLogins.length} failed</span>
+      </div>
+      ${attempts.length === 0 ? `<div class="dash-empty">No login attempt data available.<br><small style="color:#94a3b8">Requires GET /api/admin/login-attempts endpoint.</small></div>` : `
+      <table class="dt">
+        <thead><tr><th>Time</th><th>Email</th><th>IP Address</th><th>Result</th><th>Failure Reason</th></tr></thead>
+        <tbody>${buildAttemptRows(attempts)}</tbody>
+      </table>`}
+    </div>
   </div>`;
 };
 
@@ -1471,13 +1792,63 @@ function drawerBody(type, data) {
     <div class="d-alert d-alert-info" style="margin-bottom:14px">${data?.action === 'approve' ? 'Approving return request' : 'Rejecting return request'}</div>
     <div class="f-field"><label class="f-lbl">Admin Notes <small style="color:#94A3B8">(optional)</small></label><textarea class="f-ta" id="d-ret-notes" placeholder="Reason or instructions for the customer…" style="min-height:80px">${data?.adminNotes||''}</textarea></div>`;
 
+  if (type === 'supplier') return `
+    <div class="f-field"><label class="f-lbl">Supplier Name *</label><input class="f-inp" id="d-sup-name" value="${data?.name||''}"></div>
+    <div class="f-row">
+      <div class="f-field"><label class="f-lbl">Contact Email *</label><input class="f-inp" type="email" id="d-sup-email" value="${data?.contactEmail||''}"></div>
+      <div class="f-field"><label class="f-lbl">Phone</label><input class="f-inp" id="d-sup-phone" value="${data?.contactPhone||''}"></div>
+    </div>
+    <div class="f-field"><label class="f-lbl">Address</label><input class="f-inp" id="d-sup-addr" value="${data?.address||''}"></div>
+    <div class="f-row">
+      <div class="f-field"><label class="f-lbl">Performance Rating <small style="color:#94A3B8">(1–5)</small></label><input class="f-inp" type="number" min="1" max="5" step="0.1" id="d-sup-rating" value="${data?.performanceRating||''}"></div>
+      <div class="f-field" style="padding-top:22px"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="d-sup-active" ${data?.active!==false?'checked':''}> Active supplier</label></div>
+    </div>
+    <div class="f-field"><label class="f-lbl">Notes</label><textarea class="f-ta" id="d-sup-notes" style="min-height:80px">${data?.notes||''}</textarea></div>`;
+
+  if (type === 'procurement') {
+    const supplierOpts = _supplierCache.map(s=>`<option value="${s.id}" ${data?.supplier?.id===s.id?'selected':''}>${s.name}</option>`).join('');
+    const itemOpts     = _invCache.map(i=>`<option value="${i.id}" ${data?.inventoryItem?.id===i.id?'selected':''}>${i.productName||i.name||i.sku}</option>`).join('');
+    return `
+    <div class="f-field"><label class="f-lbl">Supplier *</label>
+      <select class="f-inp" id="d-po-supplier"><option value="">Select supplier…</option>${supplierOpts}</select>
+    </div>
+    <div class="f-field"><label class="f-lbl">Inventory Item *</label>
+      <select class="f-inp" id="d-po-item"><option value="">Select item…</option>${itemOpts}</select>
+    </div>
+    <div class="f-row">
+      <div class="f-field"><label class="f-lbl">Quantity Ordered *</label><input class="f-inp" type="number" min="1" id="d-po-qty" value="${data?.quantityOrdered||''}"></div>
+      <div class="f-field"><label class="f-lbl">Total Cost (RWF)</label><input class="f-inp" type="number" min="0" id="d-po-cost" value="${data?.totalCost||''}"></div>
+    </div>
+    <div class="f-field"><label class="f-lbl">Expected Delivery Date</label><input class="f-inp" type="date" id="d-po-eta" value="${data?.expectedDeliveryDate||''}"></div>`;
+  }
+
+  if (type === 'receive-po') return `
+    <div class="d-alert d-alert-info" style="margin-bottom:14px">
+      Recording stock receipt for purchase order. Stock will be automatically added to inventory.
+    </div>
+    <div class="f-field"><label class="f-lbl">Quantity Received *</label>
+      <input class="f-inp" type="number" min="1" max="${data?.ordered||9999}" id="d-recv-qty" value="${data?.ordered||''}">
+      <small style="color:#94A3B8;margin-top:4px;display:block">Ordered: ${data?.ordered||'?'} units</small>
+    </div>`;
+
+  if (type === 'inv-threshold') return `
+    <div class="d-alert d-alert-info" style="margin-bottom:14px">
+      Setting the reorder threshold for <strong>${data?.name||'this item'}</strong>. An alert fires when stock drops to or below this level.
+    </div>
+    <div class="f-field"><label class="f-lbl">Reorder Threshold *</label>
+      <input class="f-inp" type="number" min="0" id="d-thresh-val" value="${data?.threshold||10}">
+    </div>`;
+
   return `<div class="d-empty"><div class="d-empty-ico">📝</div><div class="d-empty-ttl">Form coming soon</div></div>`;
 }
 
 function drawerFooter(type, data) {
+  const labels = { 'receive-po':'Confirm Receipt', 'inv-threshold':'Save Threshold', 'return-action': data?.action==='approve'?'Approve Return':'Reject Return' };
+  const saveLabel = labels[type] || (data ? 'Update' : 'Create');
+  const saveCls   = type==='return-action' ? (data?.action==='approve'?'btn-d-success':'btn-d-danger') : 'btn-d-primary';
   return `
     <button class="btn-d btn-d-sec" id="d-btn-cancel" style="flex:1">Cancel</button>
-    <button class="btn-d btn-d-primary" id="d-btn-save" style="flex:2">${data ? 'Update' : 'Create'}</button>`;
+    <button class="btn-d ${saveCls}" id="d-btn-save" style="flex:2">${saveLabel}</button>`;
 }
 
 function bindDrawerEvents(type, data) {
@@ -1674,6 +2045,49 @@ async function saveDrawer(type, data) {
       closeDrawer();
       setTimeout(() => loadTab('returns'), 300);
       return;
+    } else if (type === 'supplier') {
+      const payload = {
+        name:              document.getElementById('d-sup-name')?.value?.trim(),
+        contactEmail:      document.getElementById('d-sup-email')?.value?.trim(),
+        contactPhone:      document.getElementById('d-sup-phone')?.value?.trim() || null,
+        address:           document.getElementById('d-sup-addr')?.value?.trim() || null,
+        performanceRating: parseFloat(document.getElementById('d-sup-rating')?.value) || null,
+        active:            document.getElementById('d-sup-active')?.checked,
+        notes:             document.getElementById('d-sup-notes')?.value?.trim() || null,
+      };
+      if (!payload.name) throw new Error('Supplier name is required');
+      if (!payload.contactEmail) throw new Error('Contact email is required');
+      data?.id ? await ApiService.suppliers.update(data.id, payload) : await ApiService.suppliers.create(payload);
+      closeDrawer(); showToast(data?.id ? 'Supplier updated' : 'Supplier created', 'success');
+      setTimeout(() => loadTab('suppliers'), 300);
+      return;
+    } else if (type === 'procurement') {
+      const supplierId = document.getElementById('d-po-supplier')?.value;
+      const itemId     = document.getElementById('d-po-item')?.value;
+      const qty        = parseInt(document.getElementById('d-po-qty')?.value) || 0;
+      const cost       = parseFloat(document.getElementById('d-po-cost')?.value) || null;
+      const eta        = document.getElementById('d-po-eta')?.value || null;
+      if (!supplierId) throw new Error('Please select a supplier');
+      if (!itemId)     throw new Error('Please select an inventory item');
+      if (qty < 1)     throw new Error('Quantity must be at least 1');
+      await ApiService.procurement.create({ supplierId, inventoryItemId: itemId, quantityOrdered: qty, totalCost: cost, expectedDeliveryDate: eta });
+      closeDrawer(); showToast('Procurement order created', 'success');
+      setTimeout(() => loadTab('procurement'), 300);
+      return;
+    } else if (type === 'receive-po') {
+      const qty = parseInt(document.getElementById('d-recv-qty')?.value) || 0;
+      if (qty < 1) throw new Error('Quantity received must be at least 1');
+      await ApiService.procurement.receive(data.id, qty);
+      closeDrawer(); showToast('Stock received and inventory updated', 'success');
+      setTimeout(() => loadTab('procurement'), 300);
+      return;
+    } else if (type === 'inv-threshold') {
+      const threshold = parseInt(document.getElementById('d-thresh-val')?.value);
+      if (isNaN(threshold) || threshold < 0) throw new Error('Enter a valid threshold (0 or more)');
+      await ApiService.inventory.updateThreshold(data.id, threshold);
+      closeDrawer(); showToast('Threshold updated', 'success');
+      setTimeout(() => loadTab('inventory'), 300);
+      return;
     }
     closeDrawer();
     showToast('Saved successfully', 'success');
@@ -1713,7 +2127,27 @@ function bindTab(tab) {
       catch(_) { const b = _bannerCache.find(x => x.id === id) || { id }; openDrawer('banner', b); }
     }
     else if (action === 'delete-banner') { if(confirm('Delete banner?')) { await ApiService.deleteBanner(id).catch(()=>{}); loadTab('banners'); } }
-    else if (action === 'adjust-stock') { openDrawer('adjust', { id, name: el.dataset.itemName || name }); }
+    else if (action === 'adjust-stock')  { openDrawer('adjust', { id, name: el.dataset.itemName || name }); }
+    else if (action === 'edit-threshold') { openDrawer('inv-threshold', { id, name: el.dataset.itemName || name, threshold: parseInt(el.dataset.threshold)||10 }); }
+    else if (action === 'edit-supplier')  {
+      const s = _supplierCache.find(x=>x.id===id) || { id };
+      openDrawer('supplier', s);
+    }
+    else if (action === 'toggle-supplier') {
+      const active = el.dataset.active === 'true';
+      if (!confirm(`${active?'Deactivate':'Activate'} this supplier?`)) return;
+      await ApiService.suppliers.setActive(id, !active).catch(()=>{});
+      loadTab('suppliers');
+    }
+    else if (action === 'receive-po') {
+      openDrawer('receive-po', { id, ordered: parseInt(el.dataset.ordered)||0 });
+    }
+    else if (action === 'cancel-po') {
+      if (!confirm('Cancel this procurement order?')) return;
+      await ApiService.procurement.cancel(id).catch(()=>{});
+      showToast('Order cancelled', 'success');
+      loadTab('procurement');
+    }
     else if (action === 'approve-return') { openDrawer('return-action', { id, action:'approve' }); }
     else if (action === 'reject-return')  { openDrawer('return-action', { id, action:'reject' }); }
     else if (action === 'view-return')    { viewReturnDetail(id); }
@@ -1883,6 +2317,135 @@ function bindTab(tab) {
     document.getElementById('inv-search')?.addEventListener('input', filterInv);
     document.getElementById('inv-location-filter')?.addEventListener('change', filterInv);
     document.getElementById('inv-status-filter')?.addEventListener('change', filterInv);
+
+    // Inventory sub-tab switching
+    document.querySelectorAll('.inv-subtab').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.inv-subtab').forEach(b => {
+          b.style.color = '#64748b'; b.style.borderBottomColor = 'transparent';
+        });
+        btn.style.color = '#FF6B00'; btn.style.borderBottomColor = '#FF6B00';
+        const sub = btn.dataset.subtab;
+        document.getElementById('inv-panel-stock').style.display     = sub==='stock'     ? 'block' : 'none';
+        document.getElementById('inv-panel-movements').style.display = sub==='movements' ? 'block' : 'none';
+      });
+    });
+
+    // Movement history filter
+    const filterMov = () => {
+      const q  = (document.getElementById('mov-search')?.value||'').toLowerCase();
+      const tp = (document.getElementById('mov-type-filter')?.value||'').toUpperCase();
+      const tbody = document.getElementById('mov-tbody');
+      if (!tbody) return;
+      const typeIcon  = t => t==='IN'?'▲':t==='OUT'?'▼':'↕';
+      const typeColor = t => t==='IN'?'#10B981':t==='OUT'?'#EF4444':'#6366F1';
+      const filtered = _movementCache.filter(m => {
+        const name = (m.inventoryItem?.productName||m.inventoryItem?.name||'').toLowerCase();
+        const reason = (m.reason||'').toLowerCase();
+        return (!q || name.includes(q) || reason.includes(q)) && (!tp || m.type===tp);
+      });
+      tbody.innerHTML = filtered.length ? filtered.map(m=>`
+        <tr>
+          <td class="td-sm">${fmt.ago(m.createdAt)}</td>
+          <td class="td-b">${m.inventoryItem?.productName||m.inventoryItem?.name||'—'}</td>
+          <td style="color:${typeColor(m.type)};font-weight:700">${typeIcon(m.type)} ${m.type||'—'}</td>
+          <td style="font-weight:700;color:${(m.quantity||0)>=0?'#10B981':'#EF4444'}">${(m.quantity||0)>0?'+':''}${m.quantity||0}</td>
+          <td>${m.reason||'—'}</td>
+          <td class="td-sm">${m.referenceId?`<code>#${m.referenceId.toString().slice(-8)}</code>`:'—'}</td>
+        </tr>`).join('') :
+        `<tr><td colspan="6"><div class="d-empty"><div class="d-empty-ico">🔍</div><div class="d-empty-ttl">No matching movements</div></div></td></tr>`;
+    };
+    document.getElementById('mov-search')?.addEventListener('input', filterMov);
+    document.getElementById('mov-type-filter')?.addEventListener('change', filterMov);
+
+    // Auto-refresh inventory every 60s
+    clearInterval(_invRefreshTimer);
+    _invRefreshTimer = setInterval(async () => {
+      if (activeTab !== 'inventory') { clearInterval(_invRefreshTimer); return; }
+      try {
+        const res = await ApiService.getInventory({ page:0, size:100 });
+        _invCache = extractList(res);
+        filterInv();
+      } catch(_){}
+    }, 60000);
+  }
+
+  if (tab === 'suppliers') {
+    document.getElementById('btn-add-supplier')?.addEventListener('click', () => {
+      if (!_supplierCache.length) ApiService.suppliers.getAll().then(r => { _supplierCache = Array.isArray(r)?r:(r?.data||[]); });
+      openDrawer('supplier', null);
+    });
+
+    // Search + filter
+    const filterSup = () => {
+      const q  = (document.getElementById('supplier-search')?.value||'').toLowerCase();
+      const st = document.getElementById('supplier-status-filter')?.value||'';
+      const tbody = document.getElementById('supplier-tbody');
+      if (!tbody) return;
+      const filtered = _supplierCache.filter(s => {
+        const matchQ  = !q || (s.name||'').toLowerCase().includes(q) || (s.contactEmail||'').toLowerCase().includes(q);
+        const matchSt = !st || (st==='active'&&s.active) || (st==='inactive'&&!s.active);
+        return matchQ && matchSt;
+      });
+      tbody.innerHTML = filtered.length ? filtered.map(s=>`
+        <tr>
+          <td class="td-b">${s.name||'—'}</td>
+          <td>${s.contactEmail||'—'}</td>
+          <td>${s.contactPhone||'—'}</td>
+          <td>${s.performanceRating ? '⭐'.repeat(Math.round(s.performanceRating)) + ' ' + s.performanceRating.toFixed(1) : '—'}</td>
+          <td>${s.notes ? `<span title="${escAttr(s.notes)}" style="max-width:180px;display:inline-block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${s.notes}</span>` : '—'}</td>
+          <td>${s.active?`<span class="bdg bdg-green">Active</span>`:`<span class="bdg bdg-gray">Inactive</span>`}</td>
+          <td style="display:flex;gap:5px;">
+            <button class="btn-d btn-d-sec btn-d-sm" data-action="edit-supplier" data-id="${s.id}">Edit</button>
+            <button class="btn-d btn-d-${s.active?'danger':'success'} btn-d-sm" data-action="toggle-supplier" data-id="${s.id}" data-active="${s.active}">${s.active?'Deactivate':'Activate'}</button>
+          </td>
+        </tr>`).join('') :
+        `<tr><td colspan="7"><div class="d-empty"><div class="d-empty-ico">🔍</div><div class="d-empty-ttl">No matching suppliers</div></div></td></tr>`;
+    };
+    document.getElementById('supplier-search')?.addEventListener('input', filterSup);
+    document.getElementById('supplier-status-filter')?.addEventListener('change', filterSup);
+  }
+
+  if (tab === 'procurement') {
+    document.getElementById('btn-add-po')?.addEventListener('click', async () => {
+      // Pre-load suppliers and inventory items for the form
+      const [sr, ir] = await Promise.allSettled([
+        ApiService.suppliers.getAll(true),
+        ApiService.inventory.getItems(),
+      ]);
+      if (sr.status==='fulfilled') _supplierCache = Array.isArray(sr.value)?sr.value:(sr.value?.data||[]);
+      if (ir.status==='fulfilled') _invCache      = Array.isArray(ir.value)?ir.value:(ir.value?.data||extractList(ir.value));
+      openDrawer('procurement', null);
+    });
+
+    // Status filter
+    document.getElementById('po-status-filter')?.addEventListener('change', e => {
+      const st = e.target.value;
+      const tbody = document.getElementById('po-tbody');
+      if (!tbody) return;
+      const statusColor = { PENDING:'bdg-yellow', RECEIVED:'bdg-green', PARTIALLY_RECEIVED:'bdg-blue', CANCELLED:'bdg-red', DRAFT:'bdg-gray' };
+      const filtered = st ? _procurementCache.filter(o=>o.status===st) : _procurementCache;
+      tbody.innerHTML = filtered.length ? filtered.map(o=>{
+        const supplierName = o.supplier?.name||'—';
+        const itemName     = o.inventoryItem?.productName||o.inventoryItem?.name||'—';
+        const s            = (o.status||'PENDING').toUpperCase();
+        return `<tr>
+          <td class="td-m"><code>#${(o.id||'').toString().slice(-8)}</code></td>
+          <td class="td-b">${supplierName}</td>
+          <td>${itemName}</td>
+          <td style="text-align:center">${o.quantityOrdered||0}</td>
+          <td style="text-align:center">${o.quantityReceived||0}</td>
+          <td>${o.totalCost?fmt.money(o.totalCost):'—'}</td>
+          <td>${o.expectedDeliveryDate?fmt.date(o.expectedDeliveryDate):'—'}</td>
+          <td><span class="bdg ${statusColor[s]||'bdg-gray'}">${s.replace('_',' ')}</span></td>
+          <td style="display:flex;gap:4px;flex-wrap:wrap;">
+            ${s==='PENDING'||s==='DRAFT'?`<button class="btn-d btn-d-success btn-d-sm" data-action="receive-po" data-id="${o.id}" data-ordered="${o.quantityOrdered||0}">Receive</button>`:''}
+            ${s==='PENDING'||s==='DRAFT'?`<button class="btn-d btn-d-danger btn-d-sm" data-action="cancel-po" data-id="${o.id}">Cancel</button>`:''}
+            ${s==='PARTIALLY_RECEIVED'?`<button class="btn-d btn-d-success btn-d-sm" data-action="receive-po" data-id="${o.id}" data-ordered="${o.quantityOrdered||0}">More</button>`:''}
+          </td>
+        </tr>`;
+      }).join('') : `<tr><td colspan="9"><div class="d-empty"><div class="d-empty-ico">📦</div><div class="d-empty-ttl">No matching orders</div></div></td></tr>`;
+    });
   }
 
   if (tab === 'crm') {
@@ -1927,25 +2490,58 @@ function bindTab(tab) {
   }
 
   if (tab === 'audit') {
-    document.getElementById('audit-search')?.addEventListener('input', e => {
-      const q = e.target.value.toLowerCase().trim();
+    // Sub-tab switching
+    document.querySelectorAll('.audit-subtab').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.audit-subtab').forEach(b => {
+          b.style.color = '#64748b'; b.style.borderBottomColor = 'transparent';
+        });
+        btn.style.color = '#FF6B00'; btn.style.borderBottomColor = '#FF6B00';
+        const tab = btn.dataset.subtab;
+        ['activity','violations','logins'].forEach(p => {
+          const el = document.getElementById(`audit-panel-${p}`);
+          if (el) el.style.display = p === tab ? 'block' : 'none';
+        });
+      });
+    });
+
+    // Text + status filter for All Activity
+    function applyAuditFilters() {
+      const q  = (document.getElementById('audit-search')?.value || '').toLowerCase().trim();
+      const st = (document.getElementById('audit-status-filter')?.value || '').toLowerCase();
       const tbody = document.getElementById('audit-tbody');
       if (!tbody) return;
-      const filtered = !q ? _auditCache : _auditCache.filter(l => {
+      let filtered = _auditCache;
+      if (q) filtered = filtered.filter(l => {
         const email  = (l.actorEmail||l.userEmail||'').toLowerCase();
         const action = (l.action||l.actionType||'').toLowerCase();
         const res    = (l.entityType||l.resource||'').toLowerCase();
         return email.includes(q) || action.includes(q) || res.includes(q);
       });
+      if (st === 'failure') filtered = filtered.filter(l => {
+        const s = (l.status||'').toUpperCase();
+        const code = parseInt(l.httpStatus||l.responseStatus||0);
+        return s==='FAILURE'||s==='FAILED'||s==='ERROR'||code>=400;
+      });
+      if (st === 'success') filtered = filtered.filter(l => {
+        const s = (l.status||'').toUpperCase();
+        const code = parseInt(l.httpStatus||l.responseStatus||0);
+        return s==='SUCCESS'||(code>0&&code<400);
+      });
       tbody.innerHTML = buildAuditRows(filtered);
-    });
+    }
+
+    document.getElementById('audit-search')?.addEventListener('input', applyAuditFilters);
+    document.getElementById('audit-status-filter')?.addEventListener('change', applyAuditFilters);
+
     document.getElementById('btn-export-audit')?.addEventListener('click', () => {
       if (!_auditCache.length) { showToast('No data to export', 'error'); return; }
-      const header = 'Time,User,Action,Resource,Details,IP';
+      const header = 'Time,User,Action,Resource,Details,IP,Status';
       const rows = _auditCache.map(l => [
         l.timestamp||l.createdAt||'', l.actorEmail||l.userEmail||'System',
         l.action||l.actionType||'', l.entityType||l.resource||'',
-        (l.details||l.description||'').replace(/,/g,' '), l.ipAddress||''
+        (l.details||l.description||'').replace(/,/g,' '), l.ipAddress||'',
+        l.status||''
       ].map(v=>`"${String(v).replace(/"/g,'""')}"`).join(','));
       const csv = header + '\n' + rows.join('\n');
       const a = document.createElement('a');
@@ -2733,34 +3329,140 @@ function renderCart() {
 
 // ── POS receipt modal ─────────────────────────────────────
 function showPOSReceipt(receipt) {
-  const items = receipt.items || [];
+  const items    = receipt.items || [];
+  const orderId  = receipt.orderId || receipt.id || '';
+  const orderNum = receipt.orderNumber || orderId;
+  const subtotal = receipt.subTotalAmount || receipt.subtotal || 0;
+  const taxAmt   = receipt.taxAmount || 0;
+  const total    = receipt.totalAmount || 0;
+
   const el = document.createElement('div');
-  el.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:10000;display:flex;align-items:center;justify-content:center';
+  el.id = 'pos-receipt-overlay';
+  el.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:10000;display:flex;align-items:center;justify-content:center;padding:16px';
   el.innerHTML = `
-    <div style="background:#fff;border-radius:14px;padding:28px 24px;width:380px;max-width:95vw;box-shadow:0 20px 60px rgba(0,0,0,0.25)">
-      <div style="text-align:center;margin-bottom:16px">
-        <div style="font-size:28px">🧾</div>
-        <div style="font-size:16px;font-weight:800;margin-top:4px">Sale Complete</div>
-        <div style="font-size:12px;color:#64748B">Order #${receipt.orderNumber||receipt.orderId||'—'}</div>
+    <div style="background:#fff;border-radius:14px;width:420px;max-width:95vw;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.3);display:flex;flex-direction:column;">
+
+      <!-- Header -->
+      <div style="padding:24px 24px 0;text-align:center;">
+        <div style="font-size:13px;font-weight:700;color:#FF6B00;letter-spacing:.08em;text-transform:uppercase;margin-bottom:2px;">Luz Technology</div>
+        <div style="font-size:11px;color:#94A3B8;margin-bottom:12px;">Official Receipt</div>
+        <div style="width:48px;height:48px;background:#FFF7F0;border-radius:50%;margin:0 auto 8px;display:flex;align-items:center;justify-content:center;font-size:22px;">🧾</div>
+        <div style="font-size:16px;font-weight:800;">Sale Complete</div>
+        <div style="font-size:12px;color:#64748B;margin-top:2px;">Order #${orderNum}</div>
+        <div style="font-size:11px;color:#94A3B8;">${new Date().toLocaleString('en-GB',{dateStyle:'medium',timeStyle:'short'})}</div>
       </div>
-      <div style="border-top:1px dashed #E2E8F0;border-bottom:1px dashed #E2E8F0;padding:12px 0;margin-bottom:14px">
-        ${items.length ? items.map(i=>`
-          <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px">
-            <span>${i.productName||'Product'} × ${i.quantity}</span>
-            <span>${fmt.money(i.subTotal||((i.unitPrice||0)*(i.quantity||1)))}</span>
-          </div>`).join('') : '<div style="font-size:13px;color:#94A3B8;text-align:center">Items processed successfully.</div>'}
+
+      <!-- Receipt printable body -->
+      <div id="pos-rcpt-printable" style="padding:16px 24px;">
+        <!-- Items -->
+        <div style="border-top:1px dashed #E2E8F0;border-bottom:1px dashed #E2E8F0;padding:12px 0;margin:12px 0;">
+          ${items.length ? items.map(i=>`
+            <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:5px;">
+              <span style="max-width:220px;">${i.productName||'Product'} <span style="color:#94A3B8">×${i.quantity}</span></span>
+              <span style="font-weight:600;">${fmt.money(i.subTotal||((i.unitPrice||0)*(i.quantity||1)))}</span>
+            </div>`).join('') :
+            '<div style="font-size:13px;color:#94A3B8;text-align:center;">Items processed successfully.</div>'}
+        </div>
+
+        <!-- Totals -->
+        <div style="font-size:13px;">
+          ${subtotal ? `<div style="display:flex;justify-content:space-between;margin-bottom:4px;color:#64748B;"><span>Subtotal</span><span>${fmt.money(subtotal)}</span></div>` : ''}
+          ${taxAmt   ? `<div style="display:flex;justify-content:space-between;margin-bottom:4px;color:#64748B;"><span>Tax (18%)</span><span>${fmt.money(taxAmt)}</span></div>` : ''}
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:16px;font-weight:800;padding-top:8px;border-top:2px solid #F1F5F9;margin-top:4px;">
+          <span>Total Paid</span><span style="color:#FF6B00;">${fmt.money(total)}</span>
+        </div>
+
+        <!-- Meta -->
+        <div style="margin-top:12px;padding:10px;background:#F8FAFC;border-radius:8px;font-size:12px;color:#64748B;line-height:1.8;">
+          <div><strong>Payment:</strong> ${(receipt.paymentMethod||'—').replace(/_/g,' ')}</div>
+          ${receipt.paymentReference ? `<div><strong>Reference:</strong> ${receipt.paymentReference}</div>` : ''}
+          ${receipt.cashierEmail     ? `<div><strong>Cashier:</strong> ${receipt.cashierEmail}</div>` : ''}
+          ${receipt.customerEmail    ? `<div><strong>Customer:</strong> ${receipt.customerEmail}</div>` : ''}
+        </div>
+
+        <div style="text-align:center;font-size:11px;color:#94A3B8;margin-top:14px;padding-top:10px;border-top:1px dashed #E2E8F0;">
+          Thank you for shopping at Luz Technology!
+        </div>
       </div>
-      <div style="display:flex;justify-content:space-between;font-size:15px;font-weight:800;margin-bottom:8px">
-        <span>Total Charged</span><span style="color:#FF6B00">${fmt.money(receipt.totalAmount||0)}</span>
+
+      <!-- Action buttons -->
+      <div style="padding:12px 24px 20px;display:flex;gap:8px;">
+        <button id="pos-rcpt-pdf" style="flex:1;padding:10px 8px;background:#1E293B;color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer;font-size:13px;">⬇ Download PDF</button>
+        <button id="pos-rcpt-print" style="flex:1;padding:10px 8px;background:#475569;color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer;font-size:13px;">🖨 Print</button>
+        <button id="pos-receipt-close" style="flex:1;padding:10px 8px;background:#FF6B00;color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer;font-size:13px;">Done</button>
       </div>
-      <div style="font-size:12px;color:#64748B;margin-bottom:4px">Payment: ${(receipt.paymentMethod||'—').replace(/_/g,' ')}</div>
-      ${receipt.paymentReference ? `<div style="font-size:12px;color:#64748B;margin-bottom:4px">Ref: ${receipt.paymentReference}</div>` : ''}
-      <div style="font-size:12px;color:#64748B;margin-bottom:16px">Cashier: ${receipt.cashierEmail||'—'}</div>
-      <button style="width:100%;padding:10px;background:#FF6B00;color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer;font-size:14px" id="pos-receipt-close">Done</button>
     </div>`;
+
   document.body.appendChild(el);
+
+  // Close
   el.querySelector('#pos-receipt-close').onclick = () => el.remove();
-  el.onclick = (e) => { if(e.target === el) el.remove(); };
+  el.onclick = (e) => { if (e.target === el) el.remove(); };
+
+  // PDF download — uses existing receipt PDF endpoint
+  el.querySelector('#pos-rcpt-pdf').onclick = async (e) => {
+    const btn = e.currentTarget;
+    if (!orderId) { showToast('Order ID not available for PDF download', 'error'); return; }
+    btn.disabled = true; btn.textContent = '⏳ Generating…';
+    try {
+      await ApiService.receipts.downloadPdf(orderId, orderNum);
+      showToast('Receipt downloaded', 'success');
+    } catch(_) {
+      showToast('Could not download PDF', 'error');
+    } finally {
+      btn.disabled = false; btn.textContent = '⬇ Download PDF';
+    }
+  };
+
+  // Print — inject print stylesheet, print the receipt content, remove stylesheet
+  el.querySelector('#pos-rcpt-print').onclick = () => {
+    const printable = el.querySelector('#pos-rcpt-printable');
+    const header    = el.querySelector('div[style*="padding:24px 24px 0"]');
+    const win = window.open('', '_blank', 'width=480,height=720');
+    win.document.write(`<!DOCTYPE html><html><head>
+      <title>Receipt — ${orderNum}</title>
+      <style>
+        body { font-family: Arial, sans-serif; margin: 0; padding: 24px; color: #1e293b; }
+        .brand { text-align:center; font-size:18px; font-weight:800; color:#FF6B00; margin-bottom:2px; }
+        .sub   { text-align:center; font-size:11px; color:#94A3B8; margin-bottom:12px; }
+        .title { text-align:center; font-size:16px; font-weight:700; margin-bottom:4px; }
+        .meta  { text-align:center; font-size:12px; color:#64748B; margin-bottom:16px; }
+        .items { border-top:1px dashed #ccc; border-bottom:1px dashed #ccc; padding:10px 0; margin:12px 0; }
+        .item  { display:flex; justify-content:space-between; font-size:13px; margin-bottom:4px; }
+        .totals  { font-size:13px; }
+        .tot-row { display:flex; justify-content:space-between; margin-bottom:4px; color:#64748B; }
+        .grand { display:flex; justify-content:space-between; font-size:16px; font-weight:800; border-top:2px solid #e2e8f0; padding-top:8px; margin-top:6px; }
+        .grand span:last-child { color:#FF6B00; }
+        .info  { font-size:12px; color:#64748B; line-height:1.8; background:#f8fafc; padding:10px; border-radius:6px; margin-top:12px; }
+        .footer { text-align:center; font-size:11px; color:#94A3B8; margin-top:16px; border-top:1px dashed #ccc; padding-top:10px; }
+        @media print { body { padding:10px; } }
+      </style>
+    </head><body>
+      <div class="brand">Luz Technology</div>
+      <div class="sub">Official Receipt</div>
+      <div class="title">Sale Complete — #${orderNum}</div>
+      <div class="meta">${new Date().toLocaleString('en-GB',{dateStyle:'medium',timeStyle:'short'})}</div>
+      <div class="items">
+        ${items.map(i=>`<div class="item"><span>${i.productName||'Product'} ×${i.quantity}</span><span>${fmt.money(i.subTotal||((i.unitPrice||0)*(i.quantity||1)))}</span></div>`).join('')}
+      </div>
+      <div class="totals">
+        ${subtotal ? `<div class="tot-row"><span>Subtotal</span><span>${fmt.money(subtotal)}</span></div>` : ''}
+        ${taxAmt   ? `<div class="tot-row"><span>Tax (18%)</span><span>${fmt.money(taxAmt)}</span></div>` : ''}
+      </div>
+      <div class="grand"><span>Total Paid</span><span>${fmt.money(total)}</span></div>
+      <div class="info">
+        <div><strong>Payment:</strong> ${(receipt.paymentMethod||'—').replace(/_/g,' ')}</div>
+        ${receipt.paymentReference ? `<div><strong>Reference:</strong> ${receipt.paymentReference}</div>` : ''}
+        ${receipt.cashierEmail     ? `<div><strong>Cashier:</strong> ${receipt.cashierEmail}</div>` : ''}
+        ${receipt.customerEmail    ? `<div><strong>Customer:</strong> ${receipt.customerEmail}</div>` : ''}
+      </div>
+      <div class="footer">Thank you for shopping at Luz Technology!</div>
+    </body></html>`);
+    win.document.close();
+    win.focus();
+    setTimeout(() => { win.print(); win.close(); }, 400);
+  };
 }
 
 // ── Reports ───────────────────────────────────────────────

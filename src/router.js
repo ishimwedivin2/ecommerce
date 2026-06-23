@@ -1,6 +1,7 @@
 import { appState, setState } from './store.js';
 import { ApiService } from './api.js';
 import { showToast } from './components/toast.js';
+import * as SessionGuard from './components/SessionGuard.js';
 import * as Header from './components/Header.js';
 import * as CategoryNav from './components/CategoryNav.js';
 import * as AuthModal from './components/AuthModal.js';
@@ -185,6 +186,14 @@ export async function renderAll() {
 }
 
 export function init() {
+  // Start session guard if user is already logged in
+  if (ApiService.getCurrentUser()) SessionGuard.start();
+
+  // Restart guard after successful login (AuthModal fires this)
+  window.addEventListener('luz-login', () => SessionGuard.start());
+  // Stop guard on logout
+  window.addEventListener('luz-logout', () => SessionGuard.stop());
+
   // Global chat-updated event
   window.addEventListener('chat-updated', async (e) => {
     const panel = document.getElementById('support-chat-panel');

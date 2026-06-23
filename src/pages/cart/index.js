@@ -48,7 +48,10 @@ export async function render() {
   `;
   }).join('');
 
-  const total = Number(cart.totalAmount ?? cart.totalPrice ?? 0);
+  const subtotal = Number(cart.totalPrice ?? cart.totalAmount ?? 0);
+  const TAX_RATE = 0.18;
+  const taxAmt   = subtotal * TAX_RATE;
+  const total    = subtotal + taxAmt;
 
   return `
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;">
@@ -59,9 +62,14 @@ export async function render() {
       <div class="cart-items-container">${itemsHtml}</div>
       <div class="cart-summary">
         <h3>Order Summary</h3>
-        <div class="summary-row"><span>Total Items</span><span>${cart.totalItems}</span></div>
+        <div class="summary-row"><span>Items (${cart.totalItems})</span><span>RWF ${Math.round(subtotal).toLocaleString('en-US')}</span></div>
         <div class="summary-row"><span>Shipping</span><span style="color:var(--success);font-weight:600;">FREE</span></div>
-        <div class="summary-row total"><span>Total Amount</span><span>RWF ${Math.round(total).toLocaleString('en-US')}</span></div>
+        <div class="summary-row" style="color:#64748b;font-size:13px;"><span>VAT / Tax (18%)</span><span>RWF ${Math.round(taxAmt).toLocaleString('en-US')}</span></div>
+        <div class="summary-row total" style="border-top:2px solid var(--border);padding-top:12px;margin-top:4px;">
+          <span>Total (incl. tax)</span>
+          <span>RWF ${Math.round(total).toLocaleString('en-US')}</span>
+        </div>
+        <p style="font-size:11px;color:#94a3b8;margin:6px 0 12px;text-align:center;">18% VAT included in total price</p>
         <button class="btn-primary" id="btn-proceed-checkout" style="justify-content:center;">Proceed to Checkout</button>
       </div>
     </div>
