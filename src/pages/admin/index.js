@@ -3282,7 +3282,6 @@ function bindTab(tab) {
           }).join('');
           gallery.querySelectorAll('.img-delete-btn').forEach(btn => {
             btn.addEventListener('click', async () => {
-              if (!confirm('Remove this image?')) return;
               try {
                 await ApiService.removeProductImage(id, btn.dataset.imageId);
                 btn.closest('div[style*="width:100px"]').remove();
@@ -3329,7 +3328,6 @@ function bindTab(tab) {
       openDrawer('discount', d);
     }
     else if (action === 'delete-discount') {
-      if (!confirm('Delete this discount? It will be removed from all products.')) return;
       try { await ApiService.deleteDiscount(id); showToast('Discount deleted', 'success'); loadTab('discounts'); }
       catch(e) { showToast(e.message || 'Delete failed', 'error'); }
     }
@@ -3344,12 +3342,12 @@ function bindTab(tab) {
         openDrawer('coupon', c);
       }
     }
-    else if (action === 'delete-coupon') { if(confirm('Delete coupon?')) { await ApiService.deleteCoupon(id).catch(()=>{}); loadTab('coupons'); } }
+    else if (action === 'delete-coupon') { await ApiService.deleteCoupon(id).catch(()=>{}); showToast('Coupon deleted', 'success'); loadTab('coupons'); }
     else if (action === 'edit-banner') {
       try { const b = await ApiService.getBanner(id).then(r => r.data || r); openDrawer('banner', b); }
       catch(_) { const b = _bannerCache.find(x => x.id === id) || { id }; openDrawer('banner', b); }
     }
-    else if (action === 'delete-banner') { if(confirm('Delete banner?')) { await ApiService.deleteBanner(id).catch(()=>{}); loadTab('banners'); } }
+    else if (action === 'delete-banner') { await ApiService.deleteBanner(id).catch(()=>{}); showToast('Banner deleted', 'success'); loadTab('banners'); }
     else if (action === 'adjust-stock')  { openDrawer('adjust', { id, name: el.dataset.itemName || name }); }
     else if (action === 'edit-threshold') { openDrawer('inv-threshold', { id, name: el.dataset.itemName || name, threshold: parseInt(el.dataset.threshold)||10 }); }
     else if (action === 'view-inv-item') {
@@ -3385,8 +3383,8 @@ function bindTab(tab) {
     }
     else if (action === 'toggle-supplier') {
       const active = el.dataset.active === 'true';
-      if (!confirm(`${active?'Deactivate':'Activate'} this supplier?`)) return;
       await ApiService.suppliers.setActive(id, !active).catch(()=>{});
+      showToast(`Supplier ${active ? 'deactivated' : 'activated'}`, 'success');
       loadTab('suppliers');
     }
     else if (action === 'view-po') {
@@ -3418,7 +3416,6 @@ function bindTab(tab) {
       openDrawer('receive-po', { id, ordered: parseInt(el.dataset.ordered)||0 });
     }
     else if (action === 'cancel-po') {
-      if (!confirm('Cancel this procurement order?')) return;
       await ApiService.procurement.cancel(id).catch(()=>{});
       showToast('Order cancelled', 'success');
       loadTab('procurement');
@@ -3427,8 +3424,7 @@ function bindTab(tab) {
     else if (action === 'reject-return')  { openDrawer('return-action', { id, action:'reject' }); }
     else if (action === 'view-return')    { viewReturnDetail(id); }
     else if (action === 'block-user') {
-      if (!confirm('Block this user? They will be unable to log in.')) return;
-      try { await ApiService.blockUser(id); showToast('User blocked'); loadTab('users'); }
+      try { await ApiService.blockUser(id); showToast('User blocked', 'success'); loadTab('users'); }
       catch(e) { showToast(e.message, 'error'); }
     }
     else if (action === 'unblock-user') {
@@ -3445,14 +3441,12 @@ function bindTab(tab) {
     else if (action === 'view-shipment') { viewShipmentDetail(id); }
     else if (action === 'update-shipment-status') { openDrawer('shipment-status', { id, status }); }
     else if (action === 'cancel-shipment') {
-      if (confirm('Cancel this shipment? This cannot be undone.')) {
-        el.disabled = true;
-        try {
-          await ApiService.cancelShipment(id);
-          showToast('Shipment cancelled', 'success');
-          loadTab('shipments');
-        } catch(err) { showToast(err.message||'Cancel failed', 'error'); el.disabled = false; }
-      }
+      el.disabled = true;
+      try {
+        await ApiService.cancelShipment(id);
+        showToast('Shipment cancelled', 'success');
+        loadTab('shipments');
+      } catch(err) { showToast(err.message||'Cancel failed', 'error'); el.disabled = false; }
     }
     else if (action === 'view-backup') {
       try {
@@ -3477,14 +3471,12 @@ function bindTab(tab) {
       } catch(e) { showToast(e.message || 'Failed to load backup', 'error'); }
     }
     else if (action === 'restore-backup') {
-      if (confirm('Restore from this backup? Current data will be replaced.')) {
-        el.disabled = true; el.textContent = 'Restoring…';
-        try {
-          await ApiService.restoreBackup(id);
-          showToast('Restore started successfully', 'success');
-          closeDrawer();
-        } catch(err) { showToast(err.message||'Restore failed', 'error'); el.disabled = false; el.textContent = 'Restore'; }
-      }
+      el.disabled = true; el.textContent = 'Restoring…';
+      try {
+        await ApiService.restoreBackup(id);
+        showToast('Restore started successfully', 'success');
+        closeDrawer();
+      } catch(err) { showToast(err.message||'Restore failed', 'error'); el.disabled = false; el.textContent = 'Restore'; }
     }
     else if (action === 'edit-config') {
       try {
@@ -3682,7 +3674,6 @@ function bindTab(tab) {
       if (!delBtn) return;
       const id   = delBtn.dataset.catId;
       const name = delBtn.dataset.catName;
-      if (!confirm(`Delete category "${name}"?\n\nProducts assigned to this category will lose their category.`)) return;
       delBtn.disabled = true;
       try {
         await ApiService.deleteCategory(id);
@@ -5005,7 +4996,6 @@ function bindSupportTab() {
           showToast('You joined this chat as agent');
         });
         document.getElementById('btn-close-chat')?.addEventListener('click', async () => {
-          if (!confirm('Close this chat session?')) return;
           await ApiService.chat.closeSession(sessionId).catch(() => {});
           if (_supActiveChatId) { unsubscribeWS(`/topic/live-chat/${_supActiveChatId}`); _supActiveChatId = null; }
           showToast('Chat closed'); loadTab('support');
@@ -5079,7 +5069,6 @@ function bindSupportTab() {
       }
     }
     if (deleteBtn) {
-      if (!confirm('Delete this FAQ article?')) return;
       await ApiService.deleteFaq(deleteBtn.dataset.id).catch(e => showToast(e.message,'error'));
       showToast('FAQ deleted'); loadTab('support');
     }
@@ -5659,7 +5648,6 @@ function bindFinanceTab() {
   // Delete expense
   document.querySelectorAll('[data-action="delete-expense"]').forEach(btn => {
     btn.addEventListener('click', async () => {
-      if (!confirm('Delete this expense?')) return;
       try {
         await ApiService.deleteExpense(btn.dataset.id);
         showToast('Expense deleted', 'success');
