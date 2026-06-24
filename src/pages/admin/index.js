@@ -67,12 +67,14 @@ function navItems() {
     { id:'inventory',    label:'Inventory',    icon:I.pkg },
     { id:'suppliers',    label:'Suppliers',    icon:I.users },
     { id:'procurement',  label:'Procurement',  icon:I.truck },
-    { id:'returns',  label:'Returns',   icon:I.rotate,  badge:'returns' },
-    { id:'shipments',label:'Shipments', icon:I.truck },
+    { id:'returns',      label:'Returns',     icon:I.rotate,  badge:'returns' },
+    { id:'fulfillment',  label:'Fulfillment', icon:I.pkg },
+    { id:'shipments',    label:'Shipments',   icon:I.truck },
     { section: 'Sales' },
     { id:'pos',      label:'Point of Sale', icon:I.pos },
-    { id:'coupons',  label:'Coupons',   icon:I.percent },
-    { id:'banners',  label:'Banners',   icon:I.img },
+    { id:'coupons',   label:'Coupons',   icon:I.percent },
+    { id:'discounts', label:'Discounts', icon:I.tag },
+    { id:'banners',   label:'Banners',   icon:I.img },
     { section: 'People' },
     { id:'crm',      label:'Customers', icon:I.users },
     { id:'support',  label:'Support',   icon:I.msg,     badge:'tickets' },
@@ -111,6 +113,11 @@ let _procurementCache = [];
 let _movementCache    = [];
 let _lowStockCache    = [];
 let _invRefreshTimer  = null;
+let _discountCache    = [];
+let _finSubTab        = 'overview';
+let _expenseCache     = [];
+let _finDateFrom      = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+let _finDateTo        = new Date().toISOString().slice(0, 10);
 
 // ── Main render ───────────────────────────────────────────
 export async function render(state) {
@@ -310,6 +317,7 @@ const fmt = {
   ago:   v => { if(!v) return '—'; const s=(Date.now()-new Date(v))/1000; if(s<60) return 'just now'; if(s<3600) return Math.floor(s/60)+'m ago'; if(s<86400) return Math.floor(s/3600)+'h ago'; return Math.floor(s/86400)+'d ago'; },
 };
 
+function esc(s) { return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 function escAttr(s) { return String(s).replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
 
 function statusBdg(status) {
@@ -341,34 +349,33 @@ async function loadAnalyticsData(startDate, endDate) {
   let topProducts = [];
   let customerCount = 0;
   let invAnalytics = {};
+  let totalRevenue = null;
   try {
-    const [ds, rm, obs, tp, ca, inv] = await Promise.allSettled([
-      ApiService.getAdminStats(),
+    const [kpiRes, rm, totalRevRes] = await Promise.allSettled([
+      ApiService.analytics.getKPIs({ startDate: sd, endDate: ed }),
       ApiService.getRevenueByMonth({ startDate: sd, endDate: ed }),
-      ApiService.getOrdersByStatus({ startDate: sd, endDate: ed }),
-      ApiService.getTopProducts({ startDate: sd, endDate: ed }),
-      ApiService.analytics.getCustomers(),
-      ApiService.analytics.getInventory(),
+      ApiService.getTotalRevenue({ startDate: sd, endDate: ed }),
     ]);
-    if (ds.status === 'fulfilled' && ds.value) stats = ds.value.data || ds.value;
+    if (kpiRes.status === 'fulfilled' && kpiRes.value) {
+      stats = kpiRes.value.data || kpiRes.value || {};
+      // Extract nested data from KPI dashboard response
+      if (stats.orderStatusBreakdown && typeof stats.orderStatusBreakdown === 'object') {
+        ordersByStatus = Object.entries(stats.orderStatusBreakdown).map(([label, value]) => ({ label, value: Number(value)||0 }));
+      }
+      if (Array.isArray(stats.topSellingProducts)) topProducts = stats.topSellingProducts;
+      if (stats.customerAnalytics)  customerCount = stats.customerAnalytics.totalCustomers || stats.activeCustomers || 0;
+      if (stats.inventoryAnalytics) invAnalytics  = stats.inventoryAnalytics;
+      if (Array.isArray(stats.salesTrend)) {
+        revenueByMonth = stats.salesTrend.map(d => ({ month: (d.period||d.date||'').slice(5), revenue: Number(d.revenue||d.totalRevenue)||0 }));
+      }
+    }
     if (rm.status === 'fulfilled' && rm.value) {
       const raw = rm.value.data || rm.value;
-      if (Array.isArray(raw)) revenueByMonth = raw.map(d => ({ month: (d.month||'').slice(5), revenue: Number(d.revenue)||0 }));
+      if (Array.isArray(raw) && raw.length) revenueByMonth = raw.map(d => ({ month: (d.month||'').slice(5), revenue: Number(d.revenue)||0 }));
     }
-    if (obs.status === 'fulfilled' && obs.value) {
-      const raw = obs.value.data || obs.value;
-      if (raw && typeof raw === 'object') ordersByStatus = Object.entries(raw).map(([label, value]) => ({ label, value: Number(value)||0 }));
-    }
-    if (tp.status === 'fulfilled' && tp.value) {
-      const raw = tp.value.data || tp.value;
-      if (Array.isArray(raw)) topProducts = raw;
-    }
-    if (ca.status === 'fulfilled' && ca.value) {
-      const raw = ca.value.data || ca.value;
-      customerCount = raw?.totalCustomers || 0;
-    }
-    if (inv.status === 'fulfilled' && inv.value) {
-      invAnalytics = inv.value.data || inv.value;
+    if (totalRevRes.status === 'fulfilled' && totalRevRes.value != null) {
+      const rv = totalRevRes.value?.data ?? totalRevRes.value;
+      if (rv != null) totalRevenue = Number(rv);
     }
   } catch(_){}
 
@@ -412,9 +419,19 @@ async function loadAnalyticsData(startDate, endDate) {
 
   const container = document.getElementById('analytics-content');
   if (!container) return;
+  const revDisplay = totalRevenue != null ? fmt.money(totalRevenue) : fmt.money(stats.totalRevenue||0);
   container.innerHTML = `
+  ${totalRevenue != null ? `
+  <div style="background:linear-gradient(135deg,#1e3a5f,#2563eb);border-radius:16px;padding:20px 28px;margin-bottom:18px;display:flex;align-items:center;justify-content:space-between;box-shadow:0 4px 20px rgba(37,99,235,0.3)">
+    <div>
+      <div style="color:rgba(255,255,255,.7);font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px">Total Revenue (Period)</div>
+      <div style="font-size:36px;font-weight:900;color:white;letter-spacing:-.02em">${revDisplay}</div>
+      <div style="color:rgba(255,255,255,.6);font-size:12px;margin-top:4px">${sd} → ${ed}</div>
+    </div>
+    <div style="font-size:52px;opacity:.4">💰</div>
+  </div>` : ''}
   <div class="dash-stats">
-    <div class="dash-stat"><div class="dash-stat-ico ico-green">${I.dollar}</div><div class="dash-stat-lbl">Total Revenue</div><div class="dash-stat-val">${fmt.money(stats.totalRevenue||0)}</div><div class="dash-stat-trend flat">Selected period</div></div>
+    <div class="dash-stat"><div class="dash-stat-ico ico-green">${I.dollar}</div><div class="dash-stat-lbl">Revenue (KPI)</div><div class="dash-stat-val">${fmt.money(stats.totalRevenue||0)}</div><div class="dash-stat-trend flat">Selected period</div></div>
     <div class="dash-stat"><div class="dash-stat-ico ico-blue">${I.cart}</div><div class="dash-stat-lbl">Total Orders</div><div class="dash-stat-val">${fmt.num(stats.totalOrders||0)}</div><div class="dash-stat-trend flat">${fmt.num(stats.paidOrActiveOrders||0)} paid/active</div></div>
     <div class="dash-stat"><div class="dash-stat-ico ico-purple">${I.users}</div><div class="dash-stat-lbl">Total Customers</div><div class="dash-stat-val">${fmt.num(customerCount||stats.activeCustomers||0)}</div><div class="dash-stat-trend flat">${fmt.num(stats.activeCustomers||0)} active this period</div></div>
     <div class="dash-stat"><div class="dash-stat-ico ico-orange">${I.dollar}</div><div class="dash-stat-lbl">Avg Order Value</div><div class="dash-stat-val">${fmt.money(stats.averageOrderValue||0)}</div><div class="dash-stat-trend flat">Per paid order</div></div>
@@ -571,30 +588,45 @@ TAB.orders = async () => {
 };
 
 // ── Products ──────────────────────────────────────────────
-const buildProductRows = (list) => list.length ? list.map(p => `
+const buildProductRows = (list) => list.length ? list.map(p => {
+  const discountBadge = p.discountName
+    ? `<span class="bdg bdg-purple" style="font-size:10px" title="${p.discountName}">-${p.discountPercentage||0}%</span>`
+    : '';
+  return `
   <tr>
-    <td class="td-b">${p.name||p.productName||'—'}</td>
+    <td class="td-b">${p.name||p.productName||'—'} ${discountBadge}</td>
     <td>${p.categoryName||p.category?.name||'—'}</td>
     <td>${fmt.money(p.price||0)}</td>
-    <td>${statusBdg(p.status||'ACTIVE')}</td>
+    <td>
+      <select class="dash-sel prod-status-sel" data-id="${p.id}" style="font-size:11px;padding:2px 4px;height:26px">
+        <option value="ACTIVE"   ${(p.status||'ACTIVE')==='ACTIVE'   ?'selected':''}>Active</option>
+        <option value="INACTIVE" ${p.status==='INACTIVE'?'selected':''}>Inactive</option>
+        <option value="DRAFT"    ${p.status==='DRAFT'   ?'selected':''}>Draft</option>
+      </select>
+    </td>
     <td><label class="d-toggle" style="margin:0"><input type="checkbox" class="prod-featured-toggle" data-id="${p.id}" ${p.featured?'checked':''}><span class="d-tog-slider"></span></label></td>
     <td>
       <button class="btn-d btn-d-sec btn-d-sm btn-d-ico" data-action="edit-product" data-id="${p.id}" title="Edit">${I.edit}</button>
+      <button class="btn-d btn-d-sec btn-d-sm btn-d-ico" data-action="manage-images" data-id="${p.id}" title="Manage images">${I.img}</button>
+      <button class="btn-d btn-d-sec btn-d-sm btn-d-ico" data-action="apply-discount" data-id="${p.id}" data-name="${escAttr(p.name||'')}" title="Apply discount">${I.tag}</button>
       <button class="btn-d btn-d-danger btn-d-sm btn-d-ico" data-action="delete-product" data-id="${p.id}" title="Delete">${I.trash}</button>
     </td>
-  </tr>`).join('') :
+  </tr>`;
+}).join('') :
   `<tr><td colspan="6"><div class="d-empty"><div class="d-empty-ico">📦</div><div class="d-empty-ttl">No products found</div><div class="d-empty-txt">Try adjusting your filters.</div></div></td></tr>`;
 
 TAB.products = async () => {
   let products = []; let total = 0;
   try {
-    const [prodRes, catRes] = await Promise.all([
+    const [prodRes, catRes, discRes] = await Promise.all([
       ApiService.products.search({ page:0, size:200 }),
-      ApiService.products.getCategories().catch(()=>({data:[]}))
+      ApiService.products.getCategories().catch(()=>({data:[]})),
+      ApiService.getDiscounts().catch(()=>({data:[]})),
     ]);
     products = extractList(prodRes);
     total    = extractTotal(prodRes, products);
     _categoryCache = extractList(catRes);
+    _discountCache = extractList(discRes);
   } catch(_){}
   _productCache = products;
 
@@ -605,9 +637,15 @@ TAB.products = async () => {
     <div><div class="dash-page-title">Products</div><div class="dash-page-sub">${fmt.num(total)} products total</div></div>
     <div class="dash-page-acts">
       <button class="btn-d btn-d-sec" id="btn-export-products">${I.download} Export CSV</button>
+      <button class="btn-d btn-d-sec" id="btn-bulk-export">${I.download} Export Excel</button>
+      <label class="btn-d btn-d-sec" style="cursor:pointer" title="Import products from Excel">
+        ${I.refresh} Import Excel
+        <input type="file" id="bulk-import-file" accept=".xlsx,.xls" style="display:none">
+      </label>
       <button class="btn-d btn-d-primary" id="btn-add-product">${I.plus} Add Product</button>
     </div>
   </div>
+  <div id="bulk-import-result" style="display:none;margin-bottom:14px"></div>
   <div class="dash-tcard">
     <div class="dash-tcard-hd">
       <span class="dash-tcard-title">All Products</span>
@@ -621,6 +659,7 @@ TAB.products = async () => {
           <option value="">All Status</option>
           <option value="ACTIVE">Active</option>
           <option value="INACTIVE">Inactive</option>
+          <option value="DRAFT">Draft</option>
         </select>
       </div>
     </div>
@@ -628,22 +667,145 @@ TAB.products = async () => {
       <thead><tr><th>Name</th><th>Category</th><th>Price</th><th>Status</th><th>Featured</th><th>Actions</th></tr></thead>
       <tbody id="products-tbody">${buildProductRows(products)}</tbody>
     </table>
+  </div>
+  <!-- Apply discount modal -->
+  <div id="discount-apply-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:1000;align-items:center;justify-content:center">
+    <div style="background:#fff;border-radius:12px;padding:24px;width:380px;max-width:95vw">
+      <div style="font-weight:700;font-size:15px;margin-bottom:14px">Apply Discount</div>
+      <input type="hidden" id="da-product-id">
+      <div class="f-field"><label class="f-lbl">Product</label><div id="da-product-name" style="font-size:13px;color:#64748B;margin-bottom:10px"></div></div>
+      <div class="f-field"><label class="f-lbl">Select Discount</label>
+        <select class="dash-sel" id="da-discount-sel" style="width:100%">
+          <option value="">— No discount —</option>
+          ${_discountCache.filter(d=>d.active).map(d=>`<option value="${d.id}">${escAttr(d.name)} (${d.discountPercentage}%)</option>`).join('')}
+        </select>
+      </div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
+        <button class="btn-d btn-d-sec" id="btn-da-cancel">Cancel</button>
+        <button class="btn-d btn-d-primary" id="btn-da-save">Apply</button>
+      </div>
+    </div>
+  </div>
+  <!-- Image management modal -->
+  <div id="img-mgmt-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:1000;align-items:center;justify-content:center">
+    <div style="background:#fff;border-radius:12px;padding:24px;width:500px;max-width:95vw;max-height:90vh;overflow-y:auto">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+        <div style="font-weight:700;font-size:15px">Manage Images</div>
+        <button class="btn-d btn-d-sec btn-d-sm btn-d-ico" id="btn-img-close">${I.x}</button>
+      </div>
+      <input type="hidden" id="img-mgmt-product-id">
+      <div id="img-mgmt-gallery" style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:16px"></div>
+      <div style="border-top:1px dashed #e2e8f0;padding-top:14px">
+        <div class="f-lbl" style="margin-bottom:8px">Add image</div>
+        <input type="file" id="img-upload-file" accept="image/*" style="margin-bottom:8px;width:100%">
+        <div class="f-row" style="gap:8px">
+          <div class="f-field" style="flex:1"><label class="f-lbl">Alt text</label><input class="f-inp" id="img-upload-alt" placeholder="Description…"></div>
+          <div class="f-field" style="flex:0 0 auto;padding-top:22px"><label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px"><input type="checkbox" id="img-upload-primary"> Primary</label></div>
+        </div>
+        <button class="btn-d btn-d-primary btn-d-sm" id="btn-img-upload" style="margin-top:8px">${I.refresh} Upload Image</button>
+      </div>
+      <div id="img-upload-msg" style="margin-top:8px;font-size:12px;display:none"></div>
+    </div>
+  </div>
+
+  <!-- Category management -->
+  <div class="dash-chart-card" style="margin-top:16px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+      <div>
+        <div class="dash-chart-hd" style="margin:0">Category Management</div>
+        <div class="dash-chart-sub" style="margin:0">${_categoryCache.length} categories · assigned when creating or editing a product</div>
+      </div>
+      <button class="btn-d btn-d-primary btn-d-sm" id="btn-show-add-cat">${I.plus} Add Category</button>
+    </div>
+
+    <!-- Inline add form (hidden by default) -->
+    <div id="cat-add-form" style="display:none;background:#F8FAFC;border:1.5px solid #e2e8f0;border-radius:10px;padding:14px 16px;margin-bottom:14px">
+      <div class="f-row" style="align-items:flex-end;gap:10px;flex-wrap:wrap">
+        <div class="f-field" style="flex:1;min-width:160px;margin:0">
+          <label class="f-lbl">Name *</label>
+          <input class="f-inp" id="cat-new-name" placeholder="e.g. Smartphones" autocomplete="off">
+        </div>
+        <div class="f-field" style="flex:2;min-width:200px;margin:0">
+          <label class="f-lbl">Description <span style="color:#94A3B8">(optional)</span></label>
+          <input class="f-inp" id="cat-new-desc" placeholder="Short description…">
+        </div>
+        <div style="display:flex;gap:6px;padding-bottom:1px">
+          <button class="btn-d btn-d-sec btn-d-sm" id="btn-cancel-cat">Cancel</button>
+          <button class="btn-d btn-d-primary btn-d-sm" id="btn-save-cat">Save</button>
+        </div>
+      </div>
+      <div id="cat-form-err" style="display:none;color:#991B1B;font-size:12px;margin-top:8px"></div>
+    </div>
+
+    <!-- Category chips -->
+    <div id="cat-chips" style="display:flex;flex-wrap:wrap;gap:8px">
+      ${_categoryCache.length ? _categoryCache.map(c => `
+        <div class="cat-chip" data-cat-id="${c.id}" style="display:inline-flex;align-items:center;gap:6px;padding:6px 12px;background:#EEF2FF;border:1.5px solid #C7D2FE;border-radius:20px;font-size:13px;font-weight:600;color:#3730a3">
+          <span>${esc(c.name)}</span>
+          ${isAdmin() ? `<button class="cat-chip-del" data-cat-id="${c.id}" data-cat-name="${escAttr(c.name)}" style="background:none;border:none;cursor:pointer;color:#6366f1;font-size:14px;line-height:1;padding:0 0 0 2px" title="Delete">${I.x}</button>` : ''}
+        </div>`).join('') :
+        `<div style="color:#94A3B8;font-size:13px">No categories yet — add one above.</div>`}
+    </div>
+  </div>`;
+};
+
+// ── Discounts ─────────────────────────────────────────────
+TAB.discounts = async () => {
+  if (!isAdmin()) return `<div class="d-alert d-alert-err">Access denied. Admin only.</div>`;
+  let discounts = [];
+  try {
+    const res = await ApiService.getDiscounts();
+    discounts = extractList(res);
+    _discountCache = discounts;
+  } catch(_){}
+
+  const rows = discounts.length ? discounts.map(d => `
+    <tr>
+      <td class="td-b">${d.name||'—'}</td>
+      <td>${d.description||'—'}</td>
+      <td style="text-align:center;font-size:15px;font-weight:700;color:#7C3AED">${Number(d.discountPercentage||0).toFixed(1)}%</td>
+      <td>${d.startDate ? fmt.date(d.startDate) : '—'}</td>
+      <td>${d.endDate   ? fmt.date(d.endDate)   : '—'}</td>
+      <td>${statusBdg(d.active ? 'ACTIVE' : 'INACTIVE')}</td>
+      <td>
+        <button class="btn-d ${d.active?'btn-d-sec':'btn-d-success'} btn-d-sm" data-action="toggle-discount" data-id="${d.id}">${d.active?'Disable':'Enable'}</button>
+        <button class="btn-d btn-d-sec btn-d-sm btn-d-ico" data-action="edit-discount" data-id="${d.id}" title="Edit">${I.edit}</button>
+        <button class="btn-d btn-d-danger btn-d-sm btn-d-ico" data-action="delete-discount" data-id="${d.id}" title="Delete">${I.trash}</button>
+      </td>
+    </tr>`).join('') :
+    `<tr><td colspan="7"><div class="d-empty"><div class="d-empty-ico">🏷️</div><div class="d-empty-ttl">No discounts yet</div><div class="d-empty-txt">Create a discount to apply it to products.</div></div></td></tr>`;
+
+  return `
+  <div class="dash-page-hd">
+    <div><div class="dash-page-title">Discounts</div><div class="dash-page-sub">Percentage discounts applied to products</div></div>
+    <div class="dash-page-acts">
+      <button class="btn-d btn-d-primary" id="btn-add-discount">${I.plus} New Discount</button>
+    </div>
+  </div>
+  <div class="dash-tcard">
+    <div class="dash-tcard-hd"><span class="dash-tcard-title">All Discounts</span><span class="dash-tcard-count">${discounts.length}</span></div>
+    <table class="dt">
+      <thead><tr><th>Name</th><th>Description</th><th style="text-align:center">%</th><th>Start</th><th>End</th><th>Status</th><th>Actions</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
   </div>`;
 };
 
 // ── Inventory ─────────────────────────────────────────────
 TAB.inventory = async () => {
   let items = [], movements = [], lowStock = [];
-  try {
-    const [ir, mr, lr] = await Promise.allSettled([
-      ApiService.getInventory({ page:0, size:100 }),
-      ApiService.inventory.getMovements(0, 50),
-      ApiService.inventory.getLowStock(),
-    ]);
-    if (ir.status==='fulfilled') items     = extractList(ir.value);
-    if (mr.status==='fulfilled') movements = Array.isArray(mr.value) ? mr.value : (mr.value?.data || mr.value?.content || []);
-    if (lr.status==='fulfilled') lowStock  = Array.isArray(lr.value) ? lr.value : (lr.value?.data || lr.value?.content || []);
-  } catch(_){}
+  const [ir, mr, lr] = await Promise.allSettled([
+    ApiService.inventory.getItems(),
+    ApiService.inventory.getMovements(0, 50),
+    ApiService.inventory.getLowStock(),
+  ]);
+  if (ir.status === 'fulfilled') {
+    items = extractList(ir.value);
+  } else {
+    showToast('Failed to load inventory: ' + (ir.reason?.message || 'Server error'), 'error');
+  }
+  if (mr.status === 'fulfilled') movements = extractList(mr.value);
+  if (lr.status === 'fulfilled') lowStock  = extractList(lr.value);
 
   _invCache     = items;
   _movementCache = movements;
@@ -672,6 +834,7 @@ TAB.inventory = async () => {
       </td>
       <td>${statusBdg(st)}</td>
       <td style="display:flex;gap:4px;">
+        <button class="btn-d btn-d-sec btn-d-sm btn-d-ico" data-action="view-inv-item" data-id="${item.id}" title="View detail">${I.eye}</button>
         <button class="btn-d btn-d-sec btn-d-sm" data-action="adjust-stock" data-id="${item.id}" data-item-name="${escAttr(item.productName||item.name||'')}">Adjust</button>
       </td>
     </tr>`;
@@ -868,6 +1031,7 @@ TAB.procurement = async () => {
       <td>${eta}</td>
       <td><span class="bdg ${statusColor[st]||'bdg-gray'}">${st.replace('_',' ')}</span></td>
       <td style="display:flex;gap:4px;flex-wrap:wrap;">
+        <button class="btn-d btn-d-sec btn-d-sm btn-d-ico" data-action="view-po" data-id="${o.id}" title="View detail">${I.eye}</button>
         ${st==='PENDING'||st==='DRAFT' ? `<button class="btn-d btn-d-success btn-d-sm" data-action="receive-po" data-id="${o.id}" data-ordered="${o.quantityOrdered||0}">Receive</button>` : ''}
         ${st==='PENDING'||st==='DRAFT' ? `<button class="btn-d btn-d-danger btn-d-sm" data-action="cancel-po" data-id="${o.id}">Cancel</button>` : ''}
         ${st==='PARTIALLY_RECEIVED' ? `<button class="btn-d btn-d-success btn-d-sm" data-action="receive-po" data-id="${o.id}" data-ordered="${o.quantityOrdered||0}">More</button>` : ''}
@@ -1000,6 +1164,17 @@ TAB.shipments = async () => {
       <button class="btn-d btn-d-primary" id="btn-create-shipment">${I.plus} Create Shipment</button>
     </div>
   </div>
+
+  <!-- Tracking search bar -->
+  <div class="dash-chart-card" style="margin-bottom:16px;padding:16px 20px">
+    <div style="font-size:13px;font-weight:700;margin-bottom:10px;color:#0F172A">🔍 Track Shipment by Number</div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <input class="dash-inp" id="track-number-input" placeholder="Enter tracking number…" style="flex:1;max-width:360px">
+      <button class="btn-d btn-d-primary" id="btn-track-shipment">Track</button>
+    </div>
+    <div id="track-result" style="margin-top:12px"></div>
+  </div>
+
   <div class="dash-tcard">
     <div class="dash-tcard-hd"><span class="dash-tcard-title">All Shipments</span><span class="dash-tcard-count">${total}</span>
       <div class="dash-tcard-acts">
@@ -1014,6 +1189,88 @@ TAB.shipments = async () => {
       <thead><tr><th>Tracking #</th><th>Order</th><th>Recipient</th><th>Carrier</th><th>Status</th><th>ETA</th><th>Actions</th></tr></thead>
       <tbody id="shipments-tbody">${rows}</tbody>
     </table>
+  </div>`;
+};
+
+// ── Fulfillment ───────────────────────────────────────────
+TAB.fulfillment = async () => {
+  let orders = [];
+  try {
+    // Load orders that are fulfillable: PAID or PROCESSING
+    const [paidRes, procRes] = await Promise.allSettled([
+      ApiService.getOrders({ page:0, size:50, status:'PAID' }),
+      ApiService.getOrders({ page:0, size:50, status:'PROCESSING' }),
+    ]);
+    const paid = paidRes.status === 'fulfilled' ? extractList(paidRes.value) : [];
+    const proc = procRes.status === 'fulfilled' ? extractList(procRes.value) : [];
+    // Deduplicate by id
+    const seen = new Set();
+    orders = [...paid, ...proc].filter(o => { if (seen.has(o.id)) return false; seen.add(o.id); return true; });
+  } catch(_){}
+
+  const STEPS = ['PICKED','PACKED','DISPATCHED','COMPLETED'];
+  function stepIndex(status) { return STEPS.indexOf(status); }
+
+  const rows = orders.length ? orders.map(o => `
+    <tr class="ful-row" data-order-id="${o.id}" style="cursor:pointer">
+      <td class="td-m">#${(o.orderNumber||o.id||'').toString().slice(-8)}</td>
+      <td class="td-b">${esc(o.customerName||o.userName||'Customer')}</td>
+      <td>${fmt.money(o.totalAmount||0)}</td>
+      <td>${statusBdg(o.status)}</td>
+      <td class="td-sm">${fmt.date(o.createdAt)}</td>
+      <td>
+        <button class="btn-d btn-d-primary btn-d-sm" data-action="start-fulfillment" data-id="${o.id}">
+          ${I.pkg} Fulfill
+        </button>
+      </td>
+    </tr>`).join('') :
+    `<tr><td colspan="6"><div class="d-empty"><div class="d-empty-ico">✅</div><div class="d-empty-ttl">No orders awaiting fulfillment</div><div class="d-empty-txt">PAID and PROCESSING orders appear here.</div></div></td></tr>`;
+
+  return `
+  <div class="dash-page-hd">
+    <div><div class="dash-page-title">Fulfillment</div><div class="dash-page-sub">${orders.length} order${orders.length===1?'':'s'} awaiting fulfillment</div></div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 420px;gap:16px;align-items:start">
+    <!-- Order queue -->
+    <div class="dash-tcard">
+      <div class="dash-tcard-hd"><span class="dash-tcard-title">Orders to Fulfill</span><span class="dash-tcard-count">${orders.length}</span></div>
+      <table class="dt">
+        <thead><tr><th>Order #</th><th>Customer</th><th>Total</th><th>Status</th><th>Date</th><th>Action</th></tr></thead>
+        <tbody id="ful-tbody">${rows}</tbody>
+      </table>
+    </div>
+
+    <!-- Fulfillment workflow panel -->
+    <div id="ful-panel" class="dash-chart-card" style="padding:0;overflow:hidden">
+      <div style="padding:18px 20px;border-bottom:1px solid #F1F5F9;font-weight:700;font-size:14px;color:#0F172A">Fulfillment Workflow</div>
+      <div id="ful-panel-body" style="padding:20px">
+        <div style="text-align:center;color:#94A3B8;padding:40px 0">
+          <div style="font-size:36px;margin-bottom:8px">📦</div>
+          <div style="font-weight:600">Select an order to start</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Dispatch modal -->
+  <div id="dispatch-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1000;align-items:center;justify-content:center">
+    <div style="background:white;border-radius:16px;padding:28px;width:460px;max-width:95vw">
+      <div style="font-size:17px;font-weight:700;margin-bottom:20px">Dispatch Order</div>
+      <input type="hidden" id="dispatch-order-id">
+      <div class="f-field"><label class="f-lbl">Carrier *</label>
+        <select class="f-inp" id="dispatch-carrier">
+          <option value="">Select carrier…</option>
+          <option>DHL</option><option>FedEx</option><option>UPS</option><option>USPS</option><option>EMS</option><option>Local Courier</option><option>Other</option>
+        </select>
+      </div>
+      <div class="f-field"><label class="f-lbl">Tracking Number</label><input class="f-inp" id="dispatch-tracking" placeholder="Optional — auto-generated if blank"></div>
+      <div class="f-field"><label class="f-lbl">Est. Delivery Date</label><input class="f-inp" type="datetime-local" id="dispatch-eta"></div>
+      <div style="display:flex;gap:10px;margin-top:18px">
+        <button class="btn-d btn-d-sec" style="flex:1" id="dispatch-cancel">Cancel</button>
+        <button class="btn-d btn-d-primary" style="flex:2" id="dispatch-confirm">Dispatch</button>
+      </div>
+    </div>
   </div>`;
 };
 
@@ -1095,157 +1352,698 @@ TAB.banners = async () => {
 };
 
 // ── CRM / Customers ───────────────────────────────────────
+let _crmSubTab = 'customers';
+let _crmCustomerCache = [];
+
 TAB.crm = async () => {
-  let customers = []; let total = 0;
+  let customers = [], analytics = {}, total = 0;
   try {
-    const res = await ApiService.getCustomers({ page:0, size:200 });
-    customers = extractList(res);
-    total     = extractTotal(res, customers);
+    const [cusRes, anaRes] = await Promise.allSettled([
+      ApiService.getCustomers({ page:0, size:200 }),
+      ApiService.getCrmAnalytics(),
+    ]);
+    if (cusRes.status === 'fulfilled') {
+      customers = extractList(cusRes.value);
+      total     = extractTotal(cusRes.value, customers);
+    }
+    if (anaRes.status === 'fulfilled') analytics = anaRes.value?.data || anaRes.value || {};
   } catch(_){}
   _customerCache = customers;
+  _crmCustomerCache = customers;
 
-  const rows = customers.length ? customers.map(c => `
+  /* ── Analytics sub-tab ─────────────────────────────── */
+  const seg = analytics.segments || {};
+  const segRows = Object.entries(seg).map(([name, count]) =>
+    `<tr><td class="td-b">${name}</td><td>${count}</td><td>
+      <div style="background:#F1F5F9;border-radius:4px;height:8px;width:100%;max-width:200px">
+        <div style="background:#FF6B00;height:8px;border-radius:4px;width:${Math.min(100, Math.round((count/(total||1))*100))}%"></div>
+      </div>
+    </td></tr>`
+  ).join('');
+
+  const analyticsHtml = `
+    <div class="dash-stats" style="margin-bottom:20px">
+      <div class="dash-stat"><div class="dash-stat-ico ico-blue">${I.users}</div><div class="dash-stat-lbl">Total Customers</div><div class="dash-stat-val">${fmt.num(analytics.totalCustomers||0)}</div></div>
+      <div class="dash-stat"><div class="dash-stat-ico ico-green">${I.dollar}</div><div class="dash-stat-lbl">Lifetime Revenue</div><div class="dash-stat-val">${fmt.money(analytics.lifetimeValue||0)}</div></div>
+      <div class="dash-stat"><div class="dash-stat-ico ico-purple">${I.dollar}</div><div class="dash-stat-lbl">Avg. LTV</div><div class="dash-stat-val">${fmt.money(analytics.averageLifetimeValue||0)}</div></div>
+      <div class="dash-stat"><div class="dash-stat-ico ico-red">${I.alert}</div><div class="dash-stat-lbl">At-Risk Customers</div><div class="dash-stat-val">${fmt.num(analytics.atRiskCustomers||0)}</div></div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+      <div class="dash-chart-card">
+        <div class="dash-chart-hd">Customer Segments</div>
+        <table class="d-table" style="width:100%">
+          <thead><tr><th>Segment</th><th>Count</th><th>Share</th></tr></thead>
+          <tbody>${segRows || '<tr><td colspan="3" style="text-align:center;color:#94A3B8;padding:20px">No segment data yet</td></tr>'}</tbody>
+        </table>
+      </div>
+      <div class="dash-chart-card">
+        <div class="dash-chart-hd">Engagement Overview</div>
+        <div class="fin-metric"><span class="fin-metric-lbl">Profiled Customers</span><span class="fin-metric-val">${fmt.num(analytics.profiledCustomers||0)}</span></div>
+        <div class="fin-metric"><span class="fin-metric-lbl">Support Tickets</span><span class="fin-metric-val">${fmt.num(analytics.supportTickets||0)}</span></div>
+        <div class="fin-metric"><span class="fin-metric-lbl">Communication Logs</span><span class="fin-metric-val">${fmt.num(analytics.communicationLogs||0)}</span></div>
+        <div class="fin-metric"><span class="fin-metric-lbl">At-Risk (30d inactive)</span><span class="fin-metric-val neg">${fmt.num(analytics.atRiskCustomers||0)}</span></div>
+      </div>
+    </div>`;
+
+  /* ── Customer list sub-tab ──────────────────────────── */
+  const custRows = customers.length ? customers.map(c => `
     <tr>
-      <td class="td-m">${(c.id||'').toString().slice(0,8)}…</td>
-      <td class="td-b">${c.firstName||''} ${c.lastName||''}</td>
-      <td>${c.email||'—'}</td>
+      <td class="td-b">${esc(c.firstName||'')} ${esc(c.lastName||'')}</td>
+      <td>${esc(c.email||'—')}</td>
       <td>${c.orderCount||c.totalOrders||0}</td>
       <td>${fmt.money(c.totalSpent||c.lifetimeValue||0)}</td>
       <td>${statusBdg(c.locked?'BLOCKED':c.enabled===false?'DISABLED':'ACTIVE')}</td>
       <td class="td-sm">${fmt.date(c.createdAt||c.joinDate)}</td>
-      <td>
+      <td style="display:flex;gap:4px">
         <button class="btn-d btn-d-sec btn-d-sm" data-action="view-customer" data-id="${c.id}">${I.eye} View</button>
+        <button class="btn-d btn-d-primary btn-d-sm" data-action="log-comm" data-id="${c.id}" data-name="${esc(c.firstName||'')} ${esc(c.lastName||'')}">+ Log</button>
       </td>
     </tr>`).join('') :
-    `<tr><td colspan="8"><div class="d-empty"><div class="d-empty-ico">👥</div><div class="d-empty-ttl">No customers found</div></div></td></tr>`;
+    `<tr><td colspan="7"><div class="d-empty"><div class="d-empty-ico">👥</div><div class="d-empty-ttl">No customers found</div></div></td></tr>`;
+
+  /* ── Communication logs sub-tab ─────────────────────── */
+  const commLogsHtml = `
+    <div class="dash-tcard">
+      <div class="dash-tcard-hd">
+        <span class="dash-tcard-title">Communication Logs</span>
+        <div class="dash-tcard-acts">
+          <select class="dash-sel" id="comm-customer-filter" style="width:220px">
+            <option value="">All Customers</option>
+            ${customers.map(c => `<option value="${c.id}">${esc(c.firstName||'')} ${esc(c.lastName||'')} — ${esc(c.email||'')}</option>`).join('')}
+          </select>
+          <button class="btn-d btn-d-primary btn-d-sm" id="btn-load-comm-logs">Load Logs</button>
+        </div>
+      </div>
+      <div id="comm-logs-body">
+        <div style="text-align:center;padding:40px;color:#94A3B8">Select a customer to view their communication history</div>
+      </div>
+    </div>`;
 
   return `
   <div class="dash-page-hd">
-    <div><div class="dash-page-title">Customers</div><div class="dash-page-sub">${fmt.num(total)} registered customers</div></div>
-    <div class="dash-page-acts"><button class="btn-d btn-d-sec" id="btn-export-customers">${I.download} Export Excel</button></div>
+    <div><div class="dash-page-title">CRM</div><div class="dash-page-sub">${fmt.num(total)} customers · ${fmt.money(analytics.lifetimeValue||0)} LTV</div></div>
+    <div class="dash-page-acts"><button class="btn-d btn-d-sec" id="btn-export-customers">${I.download} Export</button></div>
   </div>
-  <div class="dash-tcard">
-    <div class="dash-tcard-hd"><span class="dash-tcard-title">Customer List</span><span class="dash-tcard-count">${total}</span>
-      <div class="dash-tcard-acts">
-        <input class="dash-inp" placeholder="Search by name or email…" style="width:200px" id="crm-search">
+
+  <!-- Sub-tab bar -->
+  <div style="display:flex;gap:0;margin-bottom:16px;border-bottom:2px solid #F1F5F9">
+    ${[{id:'analytics',label:'📊 Analytics'},{id:'customers',label:`👥 Customers (${total})`},{id:'comms',label:'📋 Communication Logs'}].map(st=>`
+      <button class="sup-main-tab ${_crmSubTab===st.id?'active':''}" data-crm-tab="${st.id}">${st.label}</button>
+    `).join('')}
+  </div>
+
+  <!-- Analytics -->
+  <div id="crm-panel-analytics" style="${_crmSubTab==='analytics'?'':'display:none'}">${analyticsHtml}</div>
+
+  <!-- Customer list -->
+  <div id="crm-panel-customers" style="${_crmSubTab==='customers'?'':'display:none'}">
+    <div class="dash-tcard">
+      <div class="dash-tcard-hd"><span class="dash-tcard-title">Customer List</span><span class="dash-tcard-count">${total}</span>
+        <div class="dash-tcard-acts"><input class="dash-inp" placeholder="Search name or email…" style="width:200px" id="crm-search"></div>
+      </div>
+      <table class="dt">
+        <thead><tr><th>Name</th><th>Email</th><th>Orders</th><th>LTV</th><th>Status</th><th>Joined</th><th>Actions</th></tr></thead>
+        <tbody id="crm-tbody">${custRows}</tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Comm logs -->
+  <div id="crm-panel-comms" style="${_crmSubTab==='comms'?'':'display:none'}">${commLogsHtml}</div>
+
+  <!-- Log communication modal -->
+  <div id="comm-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1000;align-items:center;justify-content:center">
+    <div style="background:white;border-radius:16px;padding:28px;width:520px;max-width:95vw">
+      <div style="font-size:17px;font-weight:700;margin-bottom:20px">Log Communication — <span id="comm-modal-cname"></span></div>
+      <input type="hidden" id="comm-customer-id">
+      <div class="f-field"><label class="f-lbl">Channel *</label>
+        <select class="f-inp" id="comm-channel">
+          <option value="EMAIL">Email</option><option value="PHONE">Phone</option><option value="CHAT">Chat</option><option value="IN_PERSON">In Person</option><option value="OTHER">Other</option>
+        </select>
+      </div>
+      <div class="f-field"><label class="f-lbl">Subject *</label><input class="f-inp" id="comm-subject" placeholder="Brief subject of the interaction"></div>
+      <div class="f-field"><label class="f-lbl">Notes</label><textarea class="f-inp" id="comm-notes" rows="3" placeholder="Details of the interaction…"></textarea></div>
+      <div class="f-field"><label class="f-lbl">Outcome</label><input class="f-inp" id="comm-outcome" placeholder="e.g. Resolved, Follow-up needed"></div>
+      <div style="display:flex;gap:10px;margin-top:18px">
+        <button class="btn-d btn-d-sec" style="flex:1" id="comm-modal-cancel">Cancel</button>
+        <button class="btn-d btn-d-primary" style="flex:2" id="comm-modal-save">Save Log</button>
       </div>
     </div>
-    <table class="dt">
-      <thead><tr><th>ID</th><th>Name</th><th>Email</th><th>Orders</th><th>LTV</th><th>Status</th><th>Joined</th><th>Actions</th></tr></thead>
-      <tbody id="crm-tbody">${rows}</tbody>
-    </table>
   </div>`;
 };
 
 // ── Support ───────────────────────────────────────────────
+let _supSubTab = 'tickets';
+let _supTicketFilter = '';
+let _supFaqCache = [];
+let _supAgentCache = [];
+
 TAB.support = async () => {
-  let tickets = [], chatSessions = [];
+  let tickets = [], chatSessions = [], faqs = [], agents = [];
   try {
-    const [tRes, cRes] = await Promise.allSettled([
-      ApiService.getSupportTickets({ page:0, size:30 }),
-      ApiService.chat.getSessions()
+    const [tRes, cRes, fRes, uRes] = await Promise.allSettled([
+      ApiService.getSupportTickets({ page:0, size:100 }),
+      ApiService.chat.getSessions(),
+      ApiService.getAllFaqs(),
+      ApiService.getUsers({ page:0, size:100 }),
     ]);
     if (tRes.status === 'fulfilled') tickets = extractList(tRes.value);
     if (cRes.status === 'fulfilled') chatSessions = cRes.value?.data || [];
+    if (fRes.status === 'fulfilled') faqs = fRes.value?.data || [];
+    if (uRes.status === 'fulfilled') {
+      const all = extractList(uRes.value);
+      agents = all.filter(u => ['SUPPORT_AGENT','ADMIN','EMPLOYEE'].includes(u.role));
+    }
   } catch(_){}
 
-  const ticketListHtml = tickets.length ? tickets.map(t => `
-    <div class="sup-item" data-ticket-id="${t.id}">
-      <div class="sup-item-title">${escAttr(t.subject||t.title||'Support Request')}</div>
+  _supFaqCache = faqs;
+  _supAgentCache = agents;
+
+  const priorityClr = { HIGH:'#ef4444', CRITICAL:'#dc2626', MEDIUM:'#f59e0b', LOW:'#10b981' };
+
+  /* ── Tickets sub-tab ─────────────────────────────────── */
+  const statuses = ['', 'OPEN', 'IN_PROGRESS', 'RESOLVED', 'CLOSED'];
+  const filterBar = `
+    <div style="display:flex;gap:6px;flex-wrap:wrap;padding:10px 14px;border-bottom:1px solid #F1F5F9">
+      ${statuses.map(s => `<button class="btn-d btn-d-sm ${_supTicketFilter===s?'btn-d-primary':'btn-d-sec'}" data-action="sup-filter" data-status="${s}">${s||'All'}</button>`).join('')}
+      <button class="btn-d btn-d-sm ${_supTicketFilter==='__assigned__'?'btn-d-warning':'btn-d-sec'}" data-action="sup-filter-assigned" style="margin-left:auto">👤 My Queue</button>
+    </div>`;
+  const filteredTickets = _supTicketFilter ? tickets.filter(t => t.status === _supTicketFilter) : tickets;
+  const ticketListHtml = filteredTickets.length ? filteredTickets.map(t => `
+    <div class="sup-item" data-ticket-id="${t.id}" style="cursor:pointer">
+      <div class="sup-item-title">${esc(t.title||'Support Request')}</div>
       <div class="sup-item-meta">
         ${statusBdg(t.status||'OPEN')}
-        <span>${fmt.ago(t.updatedAt||t.createdAt)}</span>
+        <span style="color:${priorityClr[t.priority]||'#94A3B8'};font-size:10px;font-weight:700">${t.priority||''}</span>
+        <span style="font-size:11px;color:#94A3B8">${fmt.ago(t.updatedAt||t.createdAt)}</span>
       </div>
+      <div style="font-size:11px;color:#64748B;margin-top:3px">${esc(t.customer?.firstName||'')} ${esc(t.customer?.lastName||'')}${t.assignedAgent ? ` · Agent: ${esc(t.assignedAgent.firstName||'')}` : ' · <em style="color:#f59e0b">Unassigned</em>'}</div>
     </div>`).join('') :
     `<div class="d-empty"><div class="d-empty-ico">🎫</div><div class="d-empty-ttl">No tickets</div></div>`;
 
+  /* ── Live chat sub-tab ───────────────────────────────── */
   const chatListHtml = chatSessions.length ? chatSessions.map(s => {
-    const statusColor = s.status === 'OPEN' ? '#EFF6FF' : s.status === 'ASSIGNED' ? '#F0FDF4' : '#F8FAFC';
-    const statusTxt  = s.status === 'OPEN' ? '#3B82F6' : s.status === 'ASSIGNED' ? '#10B981' : '#94A3B8';
-    return `
-    <div class="sup-item" data-chat-id="${s.id}">
-      <div class="sup-item-title">${escAttr(s.subject||'Chat Session')}</div>
+    const sc = s.status==='OPEN'?'#3B82F6':s.status==='ASSIGNED'?'#10B981':'#94A3B8';
+    return `<div class="sup-item" data-chat-id="${s.id}" style="cursor:pointer">
+      <div class="sup-item-title">${esc(s.subject||'Chat Session')}</div>
       <div class="sup-item-meta">
-        <span style="background:${statusColor};color:${statusTxt};padding:2px 7px;border-radius:999px;font-size:10px;font-weight:600;">${s.status}</span>
-        <span>${fmt.ago(s.updatedAt||s.createdAt)}</span>
+        <span style="background:${sc}1a;color:${sc};padding:2px 7px;border-radius:999px;font-size:10px;font-weight:600">${s.status}</span>
+        <span style="font-size:11px;color:#94A3B8">${fmt.ago(s.updatedAt||s.createdAt)}</span>
       </div>
     </div>`;
   }).join('') :
     `<div class="d-empty"><div class="d-empty-ico">💬</div><div class="d-empty-ttl">No live chats</div></div>`;
 
+  /* ── FAQ sub-tab ─────────────────────────────────────── */
+  const faqRows = faqs.length ? faqs.map(f => `
+    <tr>
+      <td style="max-width:300px"><div style="font-size:13px;font-weight:600;color:#1E293B">${esc(f.question)}</div></td>
+      <td><span class="bdg bdg-blue" style="font-size:10px">${esc(f.category)}</span></td>
+      <td><span class="bdg ${f.published?'bdg-green':'bdg-grey'}">${f.published?'Published':'Draft'}</span></td>
+      <td>
+        <button class="btn-d btn-d-sec btn-d-sm" data-action="edit-faq" data-id="${f.id}">Edit</button>
+        <button class="btn-d btn-d-danger btn-d-sm" data-action="delete-faq" data-id="${f.id}" style="margin-left:4px">Delete</button>
+      </td>
+    </tr>`).join('') :
+    `<tr><td colspan="4" style="text-align:center;color:#94A3B8;padding:40px">No FAQ articles yet</td></tr>`;
+
+  const openT = tickets.filter(t => t.status === 'OPEN').length;
+  const inpT  = tickets.filter(t => t.status === 'IN_PROGRESS').length;
+  const unassigned = tickets.filter(t => !t.assignedAgent).length;
+
   return `
   <div class="dash-page-hd">
-    <div><div class="dash-page-title">Support Center</div><div class="dash-page-sub">${tickets.length} tickets · ${chatSessions.filter(s=>s.status!=='CLOSED').length} active chats</div></div>
-  </div>
-  <div class="sup-layout">
-    <div class="sup-list">
-      <div class="sup-list-tabs">
-        <button class="sup-list-tab active" data-sup-tab="tickets">Tickets (${tickets.length})</button>
-        <button class="sup-list-tab" data-sup-tab="chats">Live Chat (${chatSessions.filter(s=>s.status!=='CLOSED').length})</button>
-      </div>
-      <div id="sup-tab-tickets">${ticketListHtml}</div>
-      <div id="sup-tab-chats" style="display:none;">${chatListHtml}</div>
+    <div>
+      <div class="dash-page-title">Support Admin</div>
+      <div class="dash-page-sub">${openT} open · ${inpT} in progress · ${unassigned} unassigned</div>
     </div>
-    <div class="sup-chat" id="sup-chat-panel">
-      <div style="display:flex;align-items:center;justify-content:center;height:100%;color:#94A3B8">
-        <div style="text-align:center"><div style="font-size:36px;margin-bottom:8px">💬</div><div style="font-weight:600">Select a ticket or chat to view</div></div>
+    <div style="display:flex;gap:8px">
+      <button class="btn-d btn-d-primary" id="btn-new-faq">+ New FAQ</button>
+    </div>
+  </div>
+
+  <!-- Stats row -->
+  <div class="dash-stats" style="margin-bottom:16px">
+    <div class="dash-stat"><div class="dash-stat-ico ico-blue">${I.msg}</div><div class="dash-stat-lbl">Total Tickets</div><div class="dash-stat-val">${tickets.length}</div></div>
+    <div class="dash-stat"><div class="dash-stat-ico ico-yellow">${I.bell}</div><div class="dash-stat-lbl">Open</div><div class="dash-stat-val">${openT}</div></div>
+    <div class="dash-stat"><div class="dash-stat-ico ico-orange">${I.clock}</div><div class="dash-stat-lbl">In Progress</div><div class="dash-stat-val">${inpT}</div></div>
+    <div class="dash-stat"><div class="dash-stat-ico ico-red">${I.alert}</div><div class="dash-stat-lbl">Unassigned</div><div class="dash-stat-val">${unassigned}</div></div>
+  </div>
+
+  <!-- Sub-tab bar -->
+  <div style="display:flex;gap:8px;margin-bottom:16px;border-bottom:2px solid #F1F5F9;padding-bottom:0">
+    ${[{id:'tickets',label:`🎫 Tickets (${tickets.length})`},{id:'chats',label:`💬 Live Chat (${chatSessions.filter(s=>s.status!=='CLOSED').length})`},{id:'faq',label:`📚 FAQ (${faqs.length})`}].map(st=>`
+      <button class="sup-main-tab ${_supSubTab===st.id?'active':''}" data-sup-main="${st.id}">${st.label}</button>
+    `).join('')}
+  </div>
+
+  <!-- Tickets panel -->
+  <div id="sup-panel-tickets" style="${_supSubTab==='tickets'?'':'display:none'}">
+    <div class="sup-layout">
+      <div class="sup-list">
+        ${filterBar}
+        <div id="sup-ticket-list">${ticketListHtml}</div>
+      </div>
+      <div class="sup-chat" id="sup-chat-panel">
+        <div style="display:flex;align-items:center;justify-content:center;height:100%;color:#94A3B8">
+          <div style="text-align:center"><div style="font-size:36px;margin-bottom:8px">🎫</div><div style="font-weight:600">Select a ticket to view</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Chats panel -->
+  <div id="sup-panel-chats" style="${_supSubTab==='chats'?'':'display:none'}">
+    <div class="sup-layout">
+      <div class="sup-list">
+        <div>${chatListHtml}</div>
+      </div>
+      <div class="sup-chat" id="sup-chat-panel-live">
+        <div style="display:flex;align-items:center;justify-content:center;height:100%;color:#94A3B8">
+          <div style="text-align:center"><div style="font-size:36px;margin-bottom:8px">💬</div><div style="font-weight:600">Select a chat to view</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- FAQ panel -->
+  <div id="sup-panel-faq" style="${_supSubTab==='faq'?'':'display:none'}">
+    <div class="dash-card" style="overflow:auto">
+      <table class="d-table" style="width:100%">
+        <thead><tr><th>Question</th><th>Category</th><th>Status</th><th>Actions</th></tr></thead>
+        <tbody id="faq-tbody">${faqRows}</tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- FAQ drawer modal -->
+  <div id="faq-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1000;align-items:center;justify-content:center">
+    <div style="background:white;border-radius:16px;padding:28px;width:560px;max-width:95vw;max-height:90vh;overflow:auto">
+      <div style="font-size:17px;font-weight:700;margin-bottom:20px" id="faq-modal-title">New FAQ</div>
+      <div class="f-field"><label class="f-lbl">Question *</label><input class="f-inp" id="faq-question"></div>
+      <div class="f-field"><label class="f-lbl">Answer *</label><textarea class="f-inp" id="faq-answer" rows="5" style="resize:vertical"></textarea></div>
+      <div class="f-field"><label class="f-lbl">Category *</label><input class="f-inp" id="faq-category" placeholder="e.g. general, shipping, returns"></div>
+      <div class="f-field"><label class="f-lbl">Published</label><label class="d-toggle" style="margin-top:8px"><input type="checkbox" id="faq-published" checked><span class="d-tog-slider"></span></label></div>
+      <input type="hidden" id="faq-edit-id">
+      <div style="display:flex;gap:10px;margin-top:20px">
+        <button class="btn-d btn-d-sec" style="flex:1" id="faq-modal-cancel">Cancel</button>
+        <button class="btn-d btn-d-primary" style="flex:2" id="faq-modal-save">Save FAQ</button>
       </div>
     </div>
   </div>`;
 };
 
+// ── Finance helpers ───────────────────────────────────────
+function finMetric(label, value, cls = '') {
+  return `<div class="fin-metric"><span class="fin-metric-lbl">${label}</span><span class="fin-metric-val ${cls}">${fmt.money(value)}</span></div>`;
+}
+function finMetricPct(label, value) {
+  return `<div class="fin-metric"><span class="fin-metric-lbl">${label}</span><span class="fin-metric-val">${Number(value||0).toFixed(2)}%</span></div>`;
+}
+function finDateBar(subTab) {
+  const tabs = [
+    { id:'overview',       label:'Overview' },
+    { id:'expenses',       label:'Expenses' },
+    { id:'taxes',          label:'Taxes' },
+    { id:'pl',             label:'P&L Report' },
+    { id:'mgmt',           label:'Financial Mgmt' },
+    { id:'reconciliation', label:'💳 Reconciliation' },
+  ];
+  const tabsHtml = tabs.map(t =>
+    `<button class="btn-d ${_finSubTab===t.id?'btn-d-primary':'btn-d-sec'} btn-d-sm" data-action="fin-subtab" data-tab="${t.id}">${t.label}</button>`
+  ).join('');
+  return `
+  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:16px">
+    ${tabsHtml}
+    <div style="margin-left:auto;display:flex;gap:6px;align-items:center">
+      <input type="date" class="dash-inp" id="fin-date-from" value="${_finDateFrom}" style="width:130px">
+      <span style="color:#94A3B8;font-size:12px">to</span>
+      <input type="date" class="dash-inp" id="fin-date-to" value="${_finDateTo}" style="width:130px">
+      <button class="btn-d btn-d-primary btn-d-sm" id="btn-fin-apply">Apply</button>
+    </div>
+  </div>`;
+}
+
+// ── Finance: Overview ─────────────────────────────────────
+async function finOverview() {
+  let s = {};
+  try { const r = await ApiService.getFinanceStats({ startDate: _finDateFrom, endDate: _finDateTo }); s = r.data || r || {}; } catch(_){}
+  const rev = s.revenue || s.netRevenue || 0;
+  const exp = s.expenses || 0;
+  const profit = s.netProfit || (rev - exp);
+  const margin = rev ? (profit / rev * 100) : 0;
+  return `
+  <div class="dash-stats">
+    <div class="dash-stat"><div class="dash-stat-ico ico-green">${I.dollar}</div><div class="dash-stat-lbl">Net Revenue</div><div class="dash-stat-val">${fmt.money(rev)}</div></div>
+    <div class="dash-stat"><div class="dash-stat-ico ico-red">${I.dollar}</div><div class="dash-stat-lbl">Expenses</div><div class="dash-stat-val">${fmt.money(exp)}</div></div>
+    <div class="dash-stat"><div class="dash-stat-ico ${profit>=0?'ico-green':'ico-red'}">${I.dollar}</div><div class="dash-stat-lbl">Net Profit</div><div class="dash-stat-val">${fmt.money(profit)}</div><div class="dash-stat-trend ${profit>=0?'up':'down'}">${margin>=0?'▲':'▼'} ${Math.abs(margin).toFixed(1)}% margin</div></div>
+    <div class="dash-stat"><div class="dash-stat-ico ico-purple">${I.percent}</div><div class="dash-stat-lbl">Tax Collected</div><div class="dash-stat-val">${fmt.money(s.taxCollected||0)}</div></div>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+    <div class="dash-chart-card">
+      <div class="dash-chart-hd">Finance Summary</div>
+      ${finMetric('Gross Revenue', s.grossRevenue||rev, 'pos')}
+      ${finMetric('Refunds', s.refunds||0, 'neg')}
+      ${finMetric('Net Revenue', rev, 'pos')}
+      ${finMetric('Operating Expenses', exp, 'neg')}
+      ${finMetric('Tax Collected', s.taxCollected||0)}
+      <div class="fin-metric" style="border-top:2px solid #E8ECF0;margin-top:8px;padding-top:12px">
+        <span class="fin-metric-lbl" style="font-weight:700">Net Profit</span>
+        <span class="fin-metric-val ${profit>=0?'pos':'neg'}" style="font-size:16px">${fmt.money(profit)}</span>
+      </div>
+    </div>
+    <div class="dash-chart-card">
+      <div class="dash-chart-hd">Receivables & Orders</div>
+      ${finMetric('Accounts Receivable', s.accountsReceivable||0)}
+      <div class="fin-metric"><span class="fin-metric-lbl">Paid Orders</span><span class="fin-metric-val">${fmt.num(s.paidOrders||0)}</span></div>
+      <div class="fin-metric"><span class="fin-metric-lbl">Refunded Returns</span><span class="fin-metric-val">${fmt.num(s.refundedReturns||0)}</span></div>
+      <div class="fin-metric"><span class="fin-metric-lbl">Expense Records</span><span class="fin-metric-val">${fmt.num(s.expenseRecords||0)}</span></div>
+    </div>
+  </div>`;
+}
+
+// ── Finance: Expenses ─────────────────────────────────────
+async function finExpenses() {
+  let expenses = [];
+  try {
+    const r = await ApiService.getExpenses({ startDate: _finDateFrom, endDate: _finDateTo });
+    expenses = extractList(r);
+    _expenseCache = expenses;
+  } catch(_){}
+
+  const rows = expenses.length ? expenses.map(e => `
+    <tr>
+      <td class="td-sm">${fmt.date(e.expenseDate)}</td>
+      <td class="td-b">${e.category||'—'}</td>
+      <td>${e.description||'—'}</td>
+      <td>${fmt.money(e.amount||0)}</td>
+      <td>${statusBdg(e.status||'PENDING')}</td>
+      <td>
+        <button class="btn-d btn-d-sec btn-d-sm btn-d-ico" data-action="edit-expense" data-id="${e.id}" title="Edit">${I.edit}</button>
+        <button class="btn-d btn-d-sec btn-d-sm" data-action="expense-status" data-id="${e.id}" data-status="APPROVED" title="Approve">✓</button>
+        <button class="btn-d btn-d-sec btn-d-sm" data-action="expense-status" data-id="${e.id}" data-status="PAID" title="Mark Paid">$</button>
+        <button class="btn-d btn-d-danger btn-d-sm btn-d-ico" data-action="delete-expense" data-id="${e.id}" title="Delete">${I.trash}</button>
+      </td>
+    </tr>`) .join('') :
+    `<tr><td colspan="6"><div class="d-empty"><div class="d-empty-ico">💸</div><div class="d-empty-ttl">No expenses found</div></div></td></tr>`;
+
+  const total = expenses.reduce((s, e) => s + (Number(e.amount)||0), 0);
+  return `
+  <div class="dash-tcard">
+    <div class="dash-tcard-hd">
+      <span class="dash-tcard-title">Expenses</span>
+      <span class="dash-tcard-count">${expenses.length} records · ${fmt.money(total)}</span>
+      <div class="dash-tcard-acts">
+        <select class="dash-sel" id="expense-status-filter">
+          <option value="">All Status</option>
+          <option>PENDING</option><option>APPROVED</option><option>PAID</option>
+        </select>
+        <button class="btn-d btn-d-primary btn-d-sm" id="btn-add-expense">${I.plus} Add Expense</button>
+      </div>
+    </div>
+    <table class="dt">
+      <thead><tr><th>Date</th><th>Category</th><th>Description</th><th>Amount</th><th>Status</th><th>Actions</th></tr></thead>
+      <tbody id="expenses-tbody">${rows}</tbody>
+    </table>
+  </div>
+  <!-- Expense form modal -->
+  <div id="expense-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:1000;align-items:center;justify-content:center">
+    <div style="background:#fff;border-radius:12px;padding:24px;width:420px;max-width:95vw">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+        <div style="font-weight:700;font-size:15px" id="expense-modal-title">Add Expense</div>
+        <button class="btn-d btn-d-sec btn-d-sm btn-d-ico" id="btn-close-expense-modal">${I.x}</button>
+      </div>
+      <input type="hidden" id="expense-modal-id">
+      <div class="f-field"><label class="f-lbl">Category *</label><input class="f-inp" id="exp-category" placeholder="e.g. Rent, Salaries, Utilities"></div>
+      <div class="f-field"><label class="f-lbl">Amount (RWF) *</label><input class="f-inp" type="number" id="exp-amount" min="0.01" step="0.01"></div>
+      <div class="f-field"><label class="f-lbl">Date *</label><input class="f-inp" type="date" id="exp-date" value="${new Date().toISOString().slice(0,10)}"></div>
+      <div class="f-field"><label class="f-lbl">Status *</label>
+        <select class="dash-sel" id="exp-status" style="width:100%">
+          <option value="PENDING">Pending</option>
+          <option value="APPROVED">Approved</option>
+          <option value="PAID">Paid</option>
+        </select>
+      </div>
+      <div class="f-field"><label class="f-lbl">Description</label><textarea class="f-inp" id="exp-desc" rows="2" placeholder="Optional notes"></textarea></div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
+        <button class="btn-d btn-d-sec" id="btn-cancel-expense">Cancel</button>
+        <button class="btn-d btn-d-primary" id="btn-save-expense">Save Expense</button>
+      </div>
+      <div id="expense-modal-err" style="margin-top:8px;font-size:12px;color:#ef4444;display:none"></div>
+    </div>
+  </div>`;
+}
+
+// ── Finance: Taxes ────────────────────────────────────────
+async function finTaxes() {
+  let records = []; let summary = {};
+  try {
+    const [rr, rs] = await Promise.all([
+      ApiService.getTaxRecords({ startDate: _finDateFrom, endDate: _finDateTo }),
+      ApiService.getTaxSummary({ startDate: _finDateFrom, endDate: _finDateTo }),
+    ]);
+    records = extractList(rr);
+    summary = rs.data || rs || {};
+  } catch(_){}
+
+  const rows = records.length ? records.map(t => `
+    <tr>
+      <td class="td-sm">${fmt.date(t.taxDate||t.filingDate)}</td>
+      <td><span class="bdg bdg-blue">${t.taxType||'—'}</span></td>
+      <td>${t.orderNumber||t.orderId||'—'}</td>
+      <td>${fmt.money(t.taxableAmount||0)}</td>
+      <td>${fmt.money(t.amount||0)}</td>
+      <td>${t.taxRate!=null?Number(t.taxRate).toFixed(2)+'%':'—'}</td>
+      <td>${statusBdg(t.status||'PENDING')}</td>
+    </tr>`) .join('') :
+    `<tr><td colspan="7"><div class="d-empty"><div class="d-empty-ico">🧾</div><div class="d-empty-ttl">No tax records found</div></div></td></tr>`;
+
+  return `
+  <div class="dash-stats" style="margin-bottom:16px">
+    <div class="dash-stat"><div class="dash-stat-ico ico-green">${I.dollar}</div><div class="dash-stat-lbl">Taxable Sales</div><div class="dash-stat-val">${fmt.money(summary.taxableSales||0)}</div></div>
+    <div class="dash-stat"><div class="dash-stat-ico ico-purple">${I.percent}</div><div class="dash-stat-lbl">Tax Collected</div><div class="dash-stat-val">${fmt.money(summary.taxCollected||0)}</div></div>
+    <div class="dash-stat"><div class="dash-stat-ico ico-blue">${I.bar}</div><div class="dash-stat-lbl">Total Records</div><div class="dash-stat-val">${fmt.num(summary.totalRecords||records.length)}</div></div>
+  </div>
+  <div class="dash-tcard">
+    <div class="dash-tcard-hd">
+      <span class="dash-tcard-title">Tax Records</span>
+      <div class="dash-tcard-acts" style="display:flex;gap:8px;align-items:center">
+        <div id="tax-record-form" style="display:none;gap:6px;align-items:center">
+          <input class="dash-inp" id="tax-order-id" placeholder="Order UUID…" style="width:280px;font-size:12px">
+          <button class="btn-d btn-d-primary btn-d-sm" id="btn-do-record-tax">Record</button>
+          <button class="btn-d btn-d-sec btn-d-sm" id="btn-cancel-record-tax">✕</button>
+        </div>
+        <button class="btn-d btn-d-primary btn-d-sm" id="btn-show-record-tax">+ Record Tax</button>
+        <button class="btn-d btn-d-sec btn-d-sm" id="btn-export-taxes">${I.download} Export CSV</button>
+      </div>
+    </div>
+    <table class="dt">
+      <thead><tr><th>Date</th><th>Type</th><th>Order</th><th>Taxable Amount</th><th>Tax Amount</th><th>Rate</th><th>Status</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  </div>`;
+}
+
+// ── Finance: P&L ──────────────────────────────────────────
+async function finPL() {
+  let pl = {};
+  try { const r = await ApiService.getProfitLoss({ startDate: _finDateFrom, endDate: _finDateTo }); pl = r.data || r || {}; } catch(_){}
+  return `
+  <div class="dash-chart-card" style="max-width:540px">
+    <div class="dash-chart-hd" style="margin-bottom:16px">Profit & Loss — ${fmt.date(_finDateFrom)} to ${fmt.date(_finDateTo)}</div>
+    <div style="font-size:12px;font-weight:700;color:#94A3B8;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Revenue</div>
+    ${finMetric('Sales Revenue', pl.salesRevenue||0, 'pos')}
+    ${finMetric('Refunds', pl.refunds||0, 'neg')}
+    ${finMetric('Net Sales', pl.netSales||0, 'pos')}
+    <div style="font-size:12px;font-weight:700;color:#94A3B8;text-transform:uppercase;letter-spacing:.5px;margin:16px 0 8px">Costs</div>
+    ${finMetric('Operating Expenses', pl.operatingExpenses||0, 'neg')}
+    ${finMetric('Tax Collected', pl.taxCollected||0)}
+    <div class="fin-metric" style="border-top:2px solid #E8ECF0;margin-top:8px;padding-top:12px">
+      <span class="fin-metric-lbl" style="font-weight:700">Gross Profit</span>
+      <span class="fin-metric-val ${(pl.grossProfit||0)>=0?'pos':'neg'}" style="font-size:15px">${fmt.money(pl.grossProfit||0)}</span>
+    </div>
+    <div class="fin-metric" style="margin-top:4px">
+      <span class="fin-metric-lbl" style="font-weight:700">Net Profit</span>
+      <span class="fin-metric-val ${(pl.netProfit||0)>=0?'pos':'neg'}" style="font-size:16px">${fmt.money(pl.netProfit||0)}</span>
+    </div>
+    ${finMetricPct('Profit Margin', pl.profitMarginPercent||0)}
+  </div>`;
+}
+
+// ── Finance: Financial Management ─────────────────────────
+async function finMgmt() {
+  let m = {};
+  try { const r = await ApiService.getFinancialManagement({ startDate: _finDateFrom, endDate: _finDateTo }); m = r.data || r || {}; } catch(_){}
+  return `
+  <div class="dash-page-acts" style="margin-bottom:16px">
+    <button class="btn-d btn-d-sec" id="btn-export-fin-mgmt">${I.download} Export CSV</button>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+    <div class="dash-chart-card">
+      <div class="dash-chart-hd">Revenue</div>
+      ${finMetric('Gross Revenue', m.grossRevenue||0, 'pos')}
+      ${finMetric('Refunds', m.refunds||0, 'neg')}
+      ${finMetric('Net Revenue', m.netRevenue||0, 'pos')}
+      ${finMetric('Taxable Revenue', m.taxableRevenue||0)}
+      ${finMetric('Tax Collected', m.taxCollected||0)}
+    </div>
+    <div class="dash-chart-card">
+      <div class="dash-chart-hd">Expenses</div>
+      ${finMetric('Operating Expenses', m.operatingExpenses||0, 'neg')}
+      ${finMetric('Paid Expenses', m.paidExpenses||0, 'neg')}
+      ${finMetric('Pending Expenses', m.pendingExpenses||0)}
+      <div class="fin-metric"><span class="fin-metric-lbl">Expense Records</span><span class="fin-metric-val">${fmt.num(m.expenseRecords||0)}</span></div>
+      <div class="fin-metric"><span class="fin-metric-lbl">Pending Records</span><span class="fin-metric-val">${fmt.num(m.pendingExpenseRecords||0)}</span></div>
+    </div>
+    <div class="dash-chart-card">
+      <div class="dash-chart-hd">Profitability</div>
+      ${finMetric('Gross Profit', m.grossProfit||0, (m.grossProfit||0)>=0?'pos':'neg')}
+      ${finMetric('Net Profit', m.netProfit||0, (m.netProfit||0)>=0?'pos':'neg')}
+    </div>
+    <div class="dash-chart-card">
+      <div class="dash-chart-hd">Cash Position</div>
+      ${finMetric('Accounts Receivable', m.accountsReceivable||0)}
+      ${finMetric('Tax Liability', m.taxLiability||0)}
+      ${finMetric('Est. Cash Position', m.estimatedCashPosition||0, (m.estimatedCashPosition||0)>=0?'pos':'neg')}
+      <div class="fin-metric"><span class="fin-metric-lbl">Receivable Orders</span><span class="fin-metric-val">${fmt.num(m.receivableOrders||0)}</span></div>
+      <div class="fin-metric"><span class="fin-metric-lbl">Revenue Orders</span><span class="fin-metric-val">${fmt.num(m.revenueOrders||0)}</span></div>
+    </div>
+  </div>`;
+}
+
+// ── Finance: Reconciliation ───────────────────────────────
+async function finReconciliation() {
+  let summary = {};
+  let txns    = [];
+  try {
+    const [sRes, tRes] = await Promise.allSettled([
+      ApiService.getReconciliationSummary(),
+      ApiService.getReconciliationTransactions(),
+    ]);
+    if (sRes.status === 'fulfilled') summary = sRes.value?.data || sRes.value || {};
+    if (tRes.status === 'fulfilled') txns    = tRes.value?.data || tRes.value || [];
+    if (!Array.isArray(txns)) txns = [];
+  } catch(_){}
+
+  const breakdown = summary.statusBreakdown || {};
+  const rcBdg = s => {
+    const m = { MATCHED:'bdg-green', PENDING:'bdg-yellow', MISMATCH:'bdg-red', UNRECONCILED:'bdg-purple' };
+    return `<span class="bdg ${m[s]||'bdg-blue'}">${s||'—'}</span>`;
+  };
+
+  const statCards = [
+    { label:'Total Transactions', value: fmt.num(summary.totalTransactions||0), ico:'💳', color:'#3b82f6' },
+    { label:'Matched',            value: fmt.num(breakdown.MATCHED||0),          ico:'✅', color:'#10b981' },
+    { label:'Mismatches',         value: fmt.num(breakdown.MISMATCH||0),         ico:'⚠️', color:'#ef4444' },
+    { label:'Matched Amount',     value: fmt.money(summary.matchedAmount||0),    ico:'💰', color:'#8b5cf6' },
+  ].map(c => `
+    <div class="dash-stat-card" style="border-top:3px solid ${c.color}">
+      <div class="dash-stat-ico">${c.ico}</div>
+      <div class="dash-stat-val">${c.value}</div>
+      <div class="dash-stat-lbl">${c.label}</div>
+    </div>`).join('');
+
+  const rows = txns.length ? txns.map(t => `
+    <tr>
+      <td class="td-sm" title="${t.id||''}" style="font-size:10px;color:#94A3B8;max-width:80px;overflow:hidden;text-overflow:ellipsis">${(t.id||'').slice(0,8)}…</td>
+      <td class="td-b">${esc(t.provider||'—')}</td>
+      <td class="td-m">${esc(t.paymentReference||'—')}</td>
+      <td>${esc(t.transactionType||'—')}</td>
+      <td>${fmt.money(t.amount||0)}</td>
+      <td>${statusBdg(t.status)}</td>
+      <td>${rcBdg(t.reconciliationStatus)}</td>
+      <td class="td-sm" style="font-size:11px;max-width:180px;white-space:normal;color:#64748B">${esc(t.reconciliationNotes||'—')}</td>
+      <td class="td-sm">${t.reconciledAt ? fmt.date(t.reconciledAt) : '—'}</td>
+      <td>
+        ${t.reconciliationStatus !== 'MATCHED' ? `<button class="btn-d btn-d-success btn-d-sm" data-action="reconcile-txn" data-id="${t.id}">Reconcile</button>` : `<span style="color:#10b981;font-size:12px">✓ Matched</span>`}
+      </td>
+    </tr>`).join('') :
+    `<tr><td colspan="10"><div class="d-empty"><div class="d-empty-ico">💳</div><div class="d-empty-ttl">No transactions yet</div></div></td></tr>`;
+
+  return `
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px">
+    ${statCards}
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
+    <div class="dash-chart-card" style="padding:16px 20px">
+      <div style="font-weight:700;margin-bottom:12px;font-size:13px">Reconciliation Breakdown</div>
+      ${Object.entries(breakdown).length ? Object.entries(breakdown).map(([k,v]) => {
+        const pct = summary.totalTransactions ? Math.round(v/summary.totalTransactions*100) : 0;
+        const clr = { MATCHED:'#10b981', PENDING:'#f59e0b', MISMATCH:'#ef4444', UNRECONCILED:'#8b5cf6' }[k] || '#94a3b8';
+        return `
+        <div style="margin-bottom:10px">
+          <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
+            <span style="font-weight:600">${k}</span><span style="color:#64748B">${v} (${pct}%)</span>
+          </div>
+          <div style="height:8px;background:#F1F5F9;border-radius:4px;overflow:hidden">
+            <div style="height:100%;width:${pct}%;background:${clr};border-radius:4px;transition:width .4s"></div>
+          </div>
+        </div>`;
+      }).join('') : '<div style="color:#94A3B8;font-size:13px">No data yet</div>'}
+    </div>
+    <div class="dash-chart-card" style="padding:16px 20px">
+      <div style="font-weight:700;margin-bottom:12px;font-size:13px">Amount Summary</div>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <div style="display:flex;justify-content:space-between;padding:10px 14px;background:#F0FDF4;border-radius:10px;border-left:4px solid #10b981">
+          <span style="font-size:13px;color:#064E3B;font-weight:600">Matched Amount</span>
+          <span style="font-size:15px;font-weight:800;color:#10b981">${fmt.money(summary.matchedAmount||0)}</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;padding:10px 14px;background:#FFF7ED;border-radius:10px;border-left:4px solid #f59e0b">
+          <span style="font-size:13px;color:#78350F;font-weight:600">Pending / Mismatch</span>
+          <span style="font-size:15px;font-weight:800;color:#f59e0b">${fmt.money(summary.pendingOrMismatchAmount||0)}</span>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="dash-tcard">
+    <div class="dash-tcard-hd">
+      <span class="dash-tcard-title">All Transactions</span>
+      <span class="dash-tcard-count">${txns.length}</span>
+      <div class="dash-tcard-acts">
+        <input class="dash-inp" placeholder="Search reference or provider…" id="rec-search" style="width:200px">
+        <select class="dash-sel" id="rec-status-filter">
+          <option value="">All Statuses</option>
+          <option>MATCHED</option><option>PENDING</option><option>MISMATCH</option><option>UNRECONCILED</option>
+        </select>
+        <button class="btn-d btn-d-primary btn-d-sm" id="btn-reconcile-all">⚡ Reconcile All</button>
+      </div>
+    </div>
+    <div style="overflow-x:auto">
+      <table class="dt">
+        <thead><tr><th>ID</th><th>Provider</th><th>Reference</th><th>Type</th><th>Amount</th><th>Pay Status</th><th>Rec. Status</th><th>Notes</th><th>Reconciled At</th><th>Action</th></tr></thead>
+        <tbody id="rec-tbody">${rows}</tbody>
+      </table>
+    </div>
+  </div>`;
+}
+
 // ── Finance ───────────────────────────────────────────────
 TAB.finance = async () => {
   if (!isAdmin() && !isEmployee()) return `<div class="d-alert d-alert-err">Access denied.</div>`;
-  let stats = {};
-  try {
-    const res = await ApiService.getFinanceStats();
-    stats = res.data || res || {};
-  } catch(_){}
-
-  const revenue  = stats.totalRevenue||stats.revenue||0;
-  const expenses = stats.totalExpenses||stats.expenses||0;
-  const profit   = revenue - expenses;
+  let content = '';
+  if (_finSubTab === 'overview')  content = await finOverview();
+  else if (_finSubTab === 'expenses') content = await finExpenses();
+  else if (_finSubTab === 'taxes')    content = await finTaxes();
+  else if (_finSubTab === 'pl')       content = await finPL();
+  else if (_finSubTab === 'mgmt')          content = await finMgmt();
+  else if (_finSubTab === 'reconciliation') content = await finReconciliation();
 
   return `
   <div class="dash-page-hd">
-    <div><div class="dash-page-title">Finance</div><div class="dash-page-sub">Revenue, expenses & profit overview</div></div>
-    <div class="dash-page-acts"><button class="btn-d btn-d-sec">${I.download} Export P&L</button></div>
+    <div><div class="dash-page-title">Finance</div><div class="dash-page-sub">Revenue, expenses, taxes & profitability</div></div>
   </div>
-  <div class="dash-stats">
-    <div class="dash-stat"><div class="dash-stat-ico ico-green">${I.dollar}</div><div class="dash-stat-lbl">Total Revenue</div><div class="dash-stat-val">${fmt.money(revenue)}</div><div class="dash-stat-trend up">▲ 12.4%</div></div>
-    <div class="dash-stat"><div class="dash-stat-ico ico-red">${I.dollar}</div><div class="dash-stat-lbl">Total Expenses</div><div class="dash-stat-val">${fmt.money(expenses)}</div><div class="dash-stat-trend down">▼ 3.1%</div></div>
-    <div class="dash-stat"><div class="dash-stat-ico ${profit>=0?'ico-green':'ico-red'}">${I.dollar}</div><div class="dash-stat-lbl">Net Profit</div><div class="dash-stat-val">${fmt.money(profit)}</div><div class="dash-stat-trend ${profit>=0?'up':'down'}">${profit>=0?'▲':'▼'} ${Math.abs(profit/(revenue||1)*100).toFixed(1)}% margin</div></div>
-    <div class="dash-stat"><div class="dash-stat-ico ico-purple">${I.rotate}</div><div class="dash-stat-lbl">Refunds Issued</div><div class="dash-stat-val">${fmt.money(stats.totalRefunds||0)}</div><div class="dash-stat-trend flat">→ 2.1%</div></div>
-  </div>
-  <div class="dash-cards-grid-2" style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
-    <div class="dash-chart-card">
-      <div class="dash-chart-hd">P&L Summary</div>
-      <div class="fin-metric"><span class="fin-metric-lbl">Gross Revenue</span><span class="fin-metric-val pos">${fmt.money(revenue)}</span></div>
-      <div class="fin-metric"><span class="fin-metric-lbl">Cost of Goods</span><span class="fin-metric-val neg">-${fmt.money(expenses*0.6)}</span></div>
-      <div class="fin-metric"><span class="fin-metric-lbl">Gross Profit</span><span class="fin-metric-val pos">${fmt.money(revenue-expenses*0.6)}</span></div>
-      <div class="fin-metric"><span class="fin-metric-lbl">Operating Expenses</span><span class="fin-metric-val neg">-${fmt.money(expenses*0.4)}</span></div>
-      <div class="fin-metric"><span class="fin-metric-lbl">Refunds & Returns</span><span class="fin-metric-val neg">-${fmt.money(stats.totalRefunds||0)}</span></div>
-      <div class="fin-metric" style="border-top:2px solid #E8ECF0;margin-top:8px;padding-top:12px"><span class="fin-metric-lbl" style="font-weight:700;color:#0F172A">Net Profit</span><span class="fin-metric-val ${profit>=0?'pos':'neg'}" style="font-size:16px">${fmt.money(profit)}</span></div>
-    </div>
-    <div class="dash-chart-card">
-      <div class="dash-chart-hd">Tax Summary</div>
-      <div class="fin-metric"><span class="fin-metric-lbl">Tax Collected</span><span class="fin-metric-val">${fmt.money(stats.taxCollected||revenue*0.08)}</span></div>
-      <div class="fin-metric"><span class="fin-metric-lbl">Tax Rate</span><span class="fin-metric-val">${stats.taxRate||8}%</span></div>
-      <div class="fin-metric"><span class="fin-metric-lbl">Pending Tax Remittance</span><span class="fin-metric-val neg">${fmt.money(stats.pendingTax||0)}</span></div>
-    </div>
-  </div>`;
+  ${finDateBar(_finSubTab)}
+  <div id="fin-content">${content}</div>`;
 };
 
 // ── Reports ───────────────────────────────────────────────
 TAB.reports = async () => {
   const reportTypes = [
-    { id:'sales',       title:'Sales Report',         desc:'Revenue, orders, AOV by date range',     icon:'📊', formats:['CSV','Excel','PDF'] },
-    { id:'inventory',   title:'Inventory Report',      desc:'Stock levels, movements, reorder alerts', icon:'📦', formats:['CSV','Excel'] },
-    { id:'customers',   title:'Customer Report',       desc:'Customer list with lifetime value',       icon:'👥', formats:['CSV','Excel'] },
-    { id:'orders',      title:'Orders Report',         desc:'Full order history with details',         icon:'🛒', formats:['CSV','Excel','PDF'] },
-    { id:'returns',     title:'Returns Report',        desc:'Return & refund analysis',                icon:'↩️', formats:['CSV','Excel'] },
-    { id:'finance',     title:'Financial Report',      desc:'P&L, expenses, tax summary',             icon:'💰', formats:['Excel','PDF'] },
+    { id:'sales',   title:'Sales Report',            desc:'Revenue, orders, AOV by date range',         icon:'📊', formats:['Excel'] },
+    { id:'finance', title:'Financial Mgmt Report',   desc:'Full P&L, expenses, cash position export',   icon:'💰', formats:['CSV'] },
+    { id:'finance', title:'Tax Records Export',       desc:'Tax collected, rates and filing status',     icon:'🧾', formats:['taxes'] },
+    { id:'inventory',   title:'Inventory Report',    desc:'Stock levels — coming soon',                 icon:'📦', formats:[] },
+    { id:'orders',      title:'Orders Report',       desc:'Full order history — coming soon',           icon:'🛒', formats:[] },
   ];
 
   return `
@@ -1267,7 +2065,7 @@ TAB.reports = async () => {
       <div class="dash-chart-hd">${r.title}</div>
       <div class="dash-chart-sub" style="margin-bottom:4px">${r.desc}</div>
       <div style="display:flex;gap:6px;flex-wrap:wrap">
-        ${r.formats.map(f => `<button class="btn-d btn-d-sec btn-d-sm" data-action="download-report" data-type="${r.id}" data-format="${f}">${I.download} ${f}</button>`).join('')}
+        ${r.formats.length ? r.formats.map(f => `<button class="btn-d btn-d-sec btn-d-sm" data-action="download-report" data-type="${r.id}" data-format="${f}">${I.download} ${f}</button>`).join('') : `<span style="font-size:12px;color:#94A3B8">Coming soon</span>`}
       </div>
     </div>`).join('')}
   </div>`;
@@ -1276,12 +2074,21 @@ TAB.reports = async () => {
 // ── Users (Admin only) ────────────────────────────────────
 TAB.users = async () => {
   if (!isAdmin()) return `<div class="d-alert d-alert-err">Access denied. Admin only.</div>`;
-  let users = []; let total = 0;
+  let users = []; let total = 0; let roles = [];
   try {
-    const res = await ApiService.getUsers({ page:0, size:20 });
-    users = extractList(res);
-    total = extractTotal(res, users);
-    _userCache = users;
+    const [uRes, rRes] = await Promise.allSettled([
+      ApiService.getUsers({ page:0, size:20 }),
+      ApiService.getRoles(),
+    ]);
+    if (uRes.status === 'fulfilled') {
+      users = extractList(uRes.value);
+      total = extractTotal(uRes.value, users);
+      _userCache = users;
+    }
+    if (rRes.status === 'fulfilled') {
+      const raw = rRes.value?.data || rRes.value;
+      roles = Array.isArray(raw) ? raw : [];
+    }
   } catch(_){}
 
   const roleLabel = r => (r?.name || r || '').replace('ROLE_', '');
@@ -1330,6 +2137,33 @@ TAB.users = async () => {
       <thead><tr><th>ID</th><th>Name</th><th>Email</th><th>Roles</th><th>Status</th><th>Joined</th><th>Actions</th></tr></thead>
       <tbody id="users-tbody">${rows}</tbody>
     </table>
+  </div>
+
+  <!-- Roles list -->
+  <div class="dash-chart-card" style="margin-top:16px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+      <div>
+        <div class="dash-chart-hd" style="margin:0">System Roles</div>
+        <div class="dash-chart-sub" style="margin:0">${roles.length} role${roles.length===1?'':'s'} defined</div>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px">
+      ${roles.length ? roles.map(r => {
+        const name = (r.name||'').replace('ROLE_','');
+        const colors = { ADMIN:'#7c3aed', EMPLOYEE:'#2563eb', SUPPORT_AGENT:'#0891b2', CUSTOMER:'#059669' };
+        const clr = colors[name] || '#64748b';
+        const desc = { ADMIN:'Full system access', EMPLOYEE:'Store management', SUPPORT_AGENT:'Ticket & chat support', CUSTOMER:'Shopper account' }[name] || 'Custom role';
+        return `
+        <div style="border:1.5px solid ${clr}22;border-radius:12px;padding:14px 16px;background:${clr}08">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+            <div style="width:10px;height:10px;border-radius:50%;background:${clr}"></div>
+            <span style="font-weight:700;font-size:13px;color:${clr}">${name}</span>
+          </div>
+          <div style="font-size:12px;color:#64748B">${desc}</div>
+          ${r.id ? `<div style="font-size:10px;color:#CBD5E1;margin-top:6px;font-family:monospace">${(r.id||'').slice(0,16)}…</div>` : ''}
+        </div>`;
+      }).join('') : `<div style="color:#94A3B8;font-size:13px">No roles defined</div>`}
+    </div>
   </div>`;
 };
 
@@ -1538,7 +2372,10 @@ TAB.system = async () => {
         <div style="font-weight:600">${fmt.date(b.createdAt)}</div>
         <div style="color:#94A3B8">${b.status||'COMPLETED'}</div>
       </div>
-      <button class="btn-d btn-d-sec btn-d-sm" data-action="restore-backup" data-id="${b.id}" style="margin-left:auto">Restore</button>
+      <div style="display:flex;gap:4px;margin-left:auto">
+        <button class="btn-d btn-d-sec btn-d-sm btn-d-ico" data-action="view-backup" data-id="${b.id}" title="View detail">${I.eye}</button>
+        <button class="btn-d btn-d-sec btn-d-sm" data-action="restore-backup" data-id="${b.id}">Restore</button>
+      </div>
     </div>`).join('') || '<div style="color:#94A3B8;font-size:12px;padding:8px 0">No backups yet</div>';
 
   const configRows = Array.isArray(configs) && configs.length ? configs.map(c => `
@@ -1551,7 +2388,7 @@ TAB.system = async () => {
     </div>`).join('') : '<div style="color:#94A3B8;font-size:12px;padding:8px 0">No configurations found</div>';
 
   return `
-  <div class="dash-page-hd"><div><div class="dash-page-title">System</div><div class="dash-page-sub">Backups, configuration & health</div></div></div>
+  <div class="dash-page-hd"><div><div class="dash-page-title">System</div><div class="dash-page-sub">Backups, configuration, health & developer tools</div></div></div>
   <div class="d-widgets">
     <div class="d-widget">
       <div class="d-widget-ttl">System Health</div>
@@ -1579,6 +2416,76 @@ TAB.system = async () => {
       <div class="f-field"><label class="f-lbl">Description</label><input class="f-inp" id="sys-cfg-desc" placeholder="Optional description…"></div>
       <button class="btn-d btn-d-primary" style="margin-top:8px" id="btn-save-config">Save Configuration</button>
       <div id="sys-cfg-msg" style="margin-top:8px;font-size:12px;display:none"></div>
+    </div>
+  </div>
+
+  <!-- Developer Tools -->
+  <div class="dash-chart-card" style="margin-top:16px">
+    <div class="dash-chart-hd" style="margin-bottom:4px">🛠 Developer Tools</div>
+    <div class="dash-chart-sub" style="margin-bottom:20px">Internal backend tools — not part of the customer-facing application</div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px">
+
+      <!-- MTN Sandbox Test Runner -->
+      <div style="border:1.5px solid #e2e8f0;border-radius:12px;padding:18px">
+        <div style="font-weight:700;font-size:13px;margin-bottom:4px">📱 MTN MoMo Sandbox Tests</div>
+        <div style="font-size:12px;color:#64748B;margin-bottom:14px">Runs 13 automated test cases against the MTN MoMo sandbox — Collection API (request-to-pay, token, balance) and Disbursement API (transfer, refund). Generates a <code>mtn_sandbox_test_report.md</code> on the server.</div>
+        <div class="f-field" style="margin-bottom:8px">
+          <label class="f-lbl" style="font-size:11px">Collection Subscription Key <span style="color:#94A3B8">(optional — uses env default)</span></label>
+          <input class="f-inp" id="mtn-col-key" placeholder="Ocp-Apim-Subscription-Key for Collection…" style="font-size:12px">
+        </div>
+        <div class="f-field" style="margin-bottom:12px">
+          <label class="f-lbl" style="font-size:11px">Disbursement Subscription Key <span style="color:#94A3B8">(optional)</span></label>
+          <input class="f-inp" id="mtn-dis-key" placeholder="Ocp-Apim-Subscription-Key for Disbursement…" style="font-size:12px">
+        </div>
+        <button class="btn-d btn-d-primary" id="btn-run-mtn-tests" style="width:100%">▶ Run MTN Sandbox Tests</button>
+        <div id="mtn-test-status" style="margin-top:10px;font-size:12px;display:none"></div>
+        <div id="mtn-test-results" style="margin-top:12px;display:none;max-height:360px;overflow-y:auto"></div>
+      </div>
+
+      <!-- Webhook Handler info -->
+      <div style="border:1.5px solid #e2e8f0;border-radius:12px;padding:18px">
+        <div style="font-weight:700;font-size:13px;margin-bottom:4px">🔗 Payment Webhook Endpoints</div>
+        <div style="font-size:12px;color:#64748B;margin-bottom:14px">These endpoints are called by external payment providers, not the frontend. Configure each provider's dashboard to point callbacks here.</div>
+        ${[
+          { provider:'MTN_MOMO',  path:'/api/payments/webhook/MTN_MOMO',  desc:'MTN Mobile Money callback' },
+          { provider:'PAYPAL',    path:'/api/payments/webhook/PAYPAL',    desc:'PayPal IPN / webhook' },
+          { provider:'BK_CARD',   path:'/api/payments/webhook/BK_CARD',   desc:'Bank of Kigali card webhook' },
+          { provider:'AIRTEL',    path:'/api/payments/webhook/AIRTEL',    desc:'Airtel Money callback' },
+        ].map(w => `
+          <div style="margin-bottom:10px;padding:10px 12px;background:#F8FAFC;border-radius:8px;border-left:3px solid #6366f1">
+            <div style="font-size:11px;font-weight:700;color:#4338ca;margin-bottom:2px">${w.provider}</div>
+            <code style="font-size:10px;color:#0f172a;word-break:break-all">POST http://localhost:8080${w.path}?orderId={uuid}</code>
+            <div style="font-size:11px;color:#64748B;margin-top:3px">${w.desc} · Header: <code>X-Signature</code></div>
+          </div>`).join('')}
+        <div style="margin-top:10px;padding:10px 12px;background:#F0FDF4;border-radius:8px;border-left:3px solid #10b981">
+          <div style="font-size:11px;font-weight:700;color:#065f46;margin-bottom:2px">Payment Status Poll</div>
+          <code style="font-size:10px;color:#0f172a">GET /api/payments/status/{orderId}</code>
+          <div style="font-size:11px;color:#64748B;margin-top:3px">Frontend polls this every 3s while awaiting MTN confirmation</div>
+        </div>
+      </div>
+
+      <!-- Product test ping -->
+      <div style="border:1.5px solid #e2e8f0;border-radius:12px;padding:18px">
+        <div style="font-weight:700;font-size:13px;margin-bottom:4px">🏓 API Health Pings</div>
+        <div style="font-size:12px;color:#64748B;margin-bottom:14px">Quick connectivity checks against key backend endpoints. These are internal test endpoints not exposed to the public.</div>
+        <div id="ping-results" style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px">
+          ${[
+            { id:'ping-products', label:'Product API', endpoint:'GET /api/products/_test' },
+            { id:'ping-auth',     label:'Auth Service', endpoint:'GET /api/auth/health (inferred)' },
+            { id:'ping-db',       label:'Inventory sync', endpoint:'GET /api/inventory' },
+          ].map(p => `
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;background:#F8FAFC;border-radius:8px" id="${p.id}-row">
+              <div>
+                <div style="font-size:12px;font-weight:600">${p.label}</div>
+                <code style="font-size:10px;color:#94A3B8">${p.endpoint}</code>
+              </div>
+              <span id="${p.id}-badge" class="bdg bdg-blue">Untested</span>
+            </div>`).join('')}
+        </div>
+        <button class="btn-d btn-d-sec" id="btn-run-pings" style="width:100%">🏓 Ping All Endpoints</button>
+      </div>
+
     </div>
   </div>`;
 };
@@ -1714,6 +2621,16 @@ TAB.pos = async () => {
 // ══════════════════════════════════════════════════════════
 function drawerBody(type, data) {
   if (type === 'product') return `
+    <div class="f-field" style="margin-bottom:14px;">
+      <label class="f-lbl" style="color:#FF6B00;font-weight:700;">📋 Load from existing product</label>
+      <div style="position:relative;" id="prod-combo-wrap">
+        <input class="f-inp" id="prod-combo-input" placeholder="Type to search products…" autocomplete="off"
+          style="padding-right:32px;">
+        <span style="position:absolute;right:10px;top:50%;transform:translateY(-50%);color:#94a3b8;pointer-events:none;">▾</span>
+        <div id="prod-combo-list" style="display:none;position:absolute;z-index:999;left:0;right:0;top:100%;background:#fff;border:1px solid #e2e8f0;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,0.12);max-height:220px;overflow-y:auto;margin-top:2px;"></div>
+      </div>
+    </div>
+    <hr style="border:none;border-top:1px dashed #e2e8f0;margin-bottom:14px;">
     <div class="f-row"><div class="f-field"><label class="f-lbl">Product Name *</label><input class="f-inp" id="d-prod-name" value="${data?.name||''}"></div><div class="f-field"><label class="f-lbl">SKU</label><input class="f-inp" id="d-prod-sku" value="${data?.sku||''}"></div></div>
     <div class="f-field"><label class="f-lbl">Description</label><textarea class="f-ta" id="d-prod-desc">${data?.description||''}</textarea></div>
     <div class="f-row"><div class="f-field"><label class="f-lbl">Price *</label><input class="f-inp" type="number" id="d-prod-price" value="${data?.price||''}"></div><div class="f-field"><label class="f-lbl">Compare Price</label><input class="f-inp" type="number" id="d-prod-compare" value="${data?.comparePrice||''}"></div></div>
@@ -1743,18 +2660,46 @@ function drawerBody(type, data) {
     </div>
     <div class="f-row"><div class="f-field"><label class="f-lbl">Status</label><select class="f-sel" id="d-prod-status"><option value="ACTIVE" ${data?.status==='ACTIVE'?'selected':''}>Active</option><option value="INACTIVE" ${data?.status==='INACTIVE'?'selected':''}>Inactive</option></select></div><div class="f-field"><label class="f-lbl">Featured</label><label class="d-toggle" style="margin-top:8px"><input type="checkbox" id="d-prod-featured" ${data?.featured?'checked':''}><span class="d-tog-slider"></span></label></div></div>`;
 
+  if (type === 'discount') return `
+    <div class="f-field"><label class="f-lbl">Name *</label><input class="f-inp" id="d-disc-name" value="${data?.name||''}"></div>
+    <div class="f-field"><label class="f-lbl">Description *</label><input class="f-inp" id="d-disc-desc" value="${data?.description||''}"></div>
+    <div class="f-field"><label class="f-lbl">Discount Percentage * <small style="color:#94A3B8">(e.g. 15 for 15%)</small></label><input class="f-inp" type="number" min="0.01" max="100" step="0.01" id="d-disc-pct" value="${data?.discountPercentage||''}"></div>
+    <div class="f-row">
+      <div class="f-field"><label class="f-lbl">Start Date</label><input class="f-inp" type="datetime-local" id="d-disc-start" value="${data?.startDate ? data.startDate.slice(0,16) : ''}"></div>
+      <div class="f-field"><label class="f-lbl">End Date</label><input class="f-inp" type="datetime-local" id="d-disc-end" value="${data?.endDate ? data.endDate.slice(0,16) : ''}"></div>
+    </div>
+    <div class="f-field"><label class="f-lbl">Active</label><label class="d-toggle" style="margin-top:8px"><input type="checkbox" id="d-disc-active" ${data?.active!==false?'checked':''}><span class="d-tog-slider"></span></label></div>`;
+
   if (type === 'coupon') return `
     <div class="f-row"><div class="f-field"><label class="f-lbl">Coupon Code *</label><input class="f-inp" id="d-coup-code" value="${data?.code||''}" style="text-transform:uppercase"></div><div class="f-field"><label class="f-lbl">Discount Type</label><select class="f-sel" id="d-coup-type"><option value="PERCENTAGE" ${data?.discountType==='PERCENTAGE'?'selected':''}>Percentage</option><option value="FIXED" ${data?.discountType==='FIXED'?'selected':''}>Fixed Amount</option></select></div></div>
     <div class="f-row"><div class="f-field"><label class="f-lbl">Discount Value *</label><input class="f-inp" type="number" id="d-coup-val" value="${data?.discountValue||''}"></div><div class="f-field"><label class="f-lbl">Min. Purchase</label><input class="f-inp" type="number" id="d-coup-min" value="${data?.minimumPurchase||''}"></div></div>
     <div class="f-row"><div class="f-field"><label class="f-lbl">Usage Limit</label><input class="f-inp" type="number" id="d-coup-limit" value="${data?.usageLimit||''}"></div><div class="f-field"><label class="f-lbl">Expiry Date</label><input class="f-inp" type="date" id="d-coup-exp" value="${data?.expiryDate||''}"></div></div>`;
 
-  if (type === 'banner') return `
+  if (type === 'banner') {
+    const existingImg = data?.imageUrl
+      ? (data.imageUrl.startsWith('/uploads/') ? 'http://localhost:8080' + data.imageUrl : data.imageUrl)
+      : '';
+    return `
     <div class="f-field"><label class="f-lbl">Title *</label><input class="f-inp" id="d-ban-title" value="${data?.title||''}"></div>
     <div class="f-field"><label class="f-lbl">Subtitle</label><input class="f-inp" id="d-ban-sub" value="${data?.subtitle||''}"></div>
     <div class="f-field"><label class="f-lbl">CTA Button Text</label><input class="f-inp" id="d-ban-cta" value="${data?.ctaText||data?.buttonText||''}"></div>
-    <div class="f-field"><label class="f-lbl">CTA Link</label><input class="f-inp" id="d-ban-link" value="${data?.ctaLink||data?.link||''}"></div>
-    <div class="f-field"><label class="f-lbl">Image URL</label><input class="f-inp" id="d-ban-img" value="${data?.imageUrl||''}"></div>
-    <div class="f-row"><div class="f-field"><label class="f-lbl">Display Order</label><input class="f-inp" type="number" id="d-ban-order" value="${data?.displayOrder||0}"></div><div class="f-field"><label class="f-lbl">Active</label><label class="d-toggle" style="margin-top:8px"><input type="checkbox" id="d-ban-active" ${data?.active!==false?'checked':''}><span class="d-tog-slider"></span></label></div></div>`;
+    <div class="f-field"><label class="f-lbl">CTA Link</label><input class="f-inp" id="d-ban-link" value="${data?.ctaLink||data?.linkUrl||''}"></div>
+    <div class="f-field">
+      <label class="f-lbl">Banner Image</label>
+      <div id="d-ban-img-wrap" style="border:2px dashed #e2e8f0;border-radius:10px;padding:16px;text-align:center;cursor:pointer;background:#fafafa;transition:border-color .2s;" onclick="document.getElementById('d-ban-img-file').click()">
+        ${existingImg
+          ? `<img id="d-ban-img-preview" src="${existingImg}" style="max-height:120px;max-width:100%;border-radius:6px;display:block;margin:0 auto 8px;">`
+          : `<div id="d-ban-img-preview" style="font-size:32px;margin-bottom:6px;">🖼️</div>`}
+        <div style="font-size:12px;color:#94a3b8;">Click to choose an image from your computer</div>
+      </div>
+      <input type="file" id="d-ban-img-file" accept="image/*" style="display:none">
+      <input type="hidden" id="d-ban-img-existing" value="${data?.imageUrl||''}">
+    </div>
+    <div class="f-row">
+      <div class="f-field"><label class="f-lbl">Display Order</label><input class="f-inp" type="number" id="d-ban-order" value="${data?.displayOrder||0}"></div>
+      <div class="f-field"><label class="f-lbl">Active</label><label class="d-toggle" style="margin-top:8px"><input type="checkbox" id="d-ban-active" ${data?.active!==false?'checked':''}><span class="d-tog-slider"></span></label></div>
+    </div>`;
+  }
 
   if (type === 'user') return `
     <div class="f-row"><div class="f-field"><label class="f-lbl">First Name</label><input class="f-inp" id="d-usr-fn" value="${data?.firstName||''}"></div><div class="f-field"><label class="f-lbl">Last Name</label><input class="f-inp" id="d-usr-ln" value="${data?.lastName||''}"></div></div>
@@ -1839,6 +2784,23 @@ function drawerBody(type, data) {
       <input class="f-inp" type="number" min="0" id="d-thresh-val" value="${data?.threshold||10}">
     </div>`;
 
+  if (type === 'inv-item') return `
+    <div class="d-alert d-alert-info" style="margin-bottom:14px">
+      Creates a standalone inventory item. For product-linked inventory, use the sync button on the Inventory tab instead.
+    </div>
+    <div class="f-row">
+      <div class="f-field"><label class="f-lbl">Product Name *</label><input class="f-inp" id="d-inv-name" placeholder="e.g. USB Hub 4-Port" value="${data?.productName||''}"></div>
+      <div class="f-field"><label class="f-lbl">SKU</label><input class="f-inp" id="d-inv-sku" placeholder="e.g. USB-HUB-001" value="${data?.sku||''}"></div>
+    </div>
+    <div class="f-row">
+      <div class="f-field"><label class="f-lbl">Initial Quantity *</label><input class="f-inp" type="number" min="0" id="d-inv-qty" value="${data?.quantity||0}"></div>
+      <div class="f-field"><label class="f-lbl">Low Stock Threshold</label><input class="f-inp" type="number" min="0" id="d-inv-thresh" value="${data?.lowStockThreshold||10}"></div>
+    </div>
+    <div class="f-row">
+      <div class="f-field"><label class="f-lbl">Location / Warehouse</label><input class="f-inp" id="d-inv-location" placeholder="e.g. Main Warehouse, Shelf A3" value="${data?.location||''}"></div>
+      <div class="f-field"><label class="f-lbl">Unit</label><input class="f-inp" id="d-inv-unit" placeholder="e.g. pcs, kg, box" value="${data?.unit||''}"></div>
+    </div>`;
+
   return `<div class="d-empty"><div class="d-empty-ico">📝</div><div class="d-empty-ttl">Form coming soon</div></div>`;
 }
 
@@ -1856,6 +2818,99 @@ function bindDrawerEvents(type, data) {
   document.getElementById('d-btn-save')?.addEventListener('click', () => saveDrawer(type, data));
 
   if (type === 'product') {
+    // ── Product combobox: search & auto-fill ──────────────────
+    const comboInput = document.getElementById('prod-combo-input');
+    const comboList  = document.getElementById('prod-combo-list');
+
+    const renderComboItems = (q) => {
+      const term = (q || '').toLowerCase();
+      const matches = _productCache.filter(p =>
+        !term ||
+        (p.name || '').toLowerCase().includes(term) ||
+        (p.sku  || '').toLowerCase().includes(term)
+      );
+      if (!matches.length) {
+        comboList.innerHTML = `<div style="padding:10px 14px;font-size:13px;color:#94a3b8;">No products found</div>`;
+      } else {
+        comboList.innerHTML = matches.map(p => `
+          <div class="prod-combo-item" data-id="${p.id}"
+            style="padding:10px 14px;cursor:pointer;font-size:13px;border-bottom:1px solid #f1f5f9;display:flex;justify-content:space-between;align-items:center;">
+            <span style="font-weight:600;">${p.name||'—'}</span>
+            <span style="color:#94a3b8;font-size:11px;">${p.sku||''}</span>
+          </div>`).join('');
+      }
+      comboList.style.display = 'block';
+    };
+
+    comboInput?.addEventListener('focus', () => renderComboItems(comboInput.value));
+    comboInput?.addEventListener('input', () => renderComboItems(comboInput.value));
+
+    comboList?.addEventListener('click', e => {
+      const item = e.target.closest('.prod-combo-item');
+      if (!item) return;
+      const p = _productCache.find(x => x.id === item.dataset.id);
+      if (!p) return;
+
+      // Fill all form fields
+      const set = (id, val) => { const el = document.getElementById(id); if (el) el.value = val ?? ''; };
+      set('d-prod-name',    p.name);
+      set('d-prod-sku',     p.sku);
+      set('d-prod-desc',    p.description);
+      set('d-prod-price',   p.price);
+      set('d-prod-compare', p.comparePrice || '');
+      set('d-prod-stock',   p.stock ?? 0);
+      const statusEl = document.getElementById('d-prod-status');
+      if (statusEl) statusEl.value = p.status || 'ACTIVE';
+      const featuredEl = document.getElementById('d-prod-featured');
+      if (featuredEl) featuredEl.checked = !!p.featured;
+
+      // Fill category
+      if (p.categoryId || p.category?.id) {
+        const catSel = document.getElementById('d-prod-cat');
+        if (catSel) catSel.value = p.categoryId || p.category?.id || '';
+      }
+
+      // Fill image preview
+      const imgUrl = p.imageUrl || p.images?.[0]?.url || '';
+      if (imgUrl) {
+        const src = imgUrl.startsWith('/uploads/') ? 'http://localhost:8080' + imgUrl : imgUrl;
+        const preview = document.getElementById('d-prod-img-preview');
+        if (preview) {
+          if (preview.tagName === 'IMG') { preview.src = src; }
+          else {
+            const img = document.createElement('img');
+            img.id = 'd-prod-img-preview';
+            img.src = src;
+            img.style.cssText = 'max-height:120px;max-width:100%;border-radius:6px;display:block;margin:0 auto 8px;';
+            preview.replaceWith(img);
+          }
+        }
+        document.getElementById('d-prod-img-url').value = imgUrl;
+      }
+
+      comboInput.value = p.name;
+      comboList.style.display = 'none';
+      showToast(`Loaded "${p.name}" — edit fields and save`, 'info');
+    });
+
+    // Close dropdown when clicking outside
+    document.addEventListener('click', function closeCombo(e) {
+      if (!document.getElementById('prod-combo-wrap')?.contains(e.target)) {
+        comboList.style.display = 'none';
+        document.removeEventListener('click', closeCombo);
+      }
+    });
+
+    // Hover highlight
+    comboList?.addEventListener('mouseover', e => {
+      const item = e.target.closest('.prod-combo-item');
+      if (item) item.style.background = '#fff7f0';
+    });
+    comboList?.addEventListener('mouseout', e => {
+      const item = e.target.closest('.prod-combo-item');
+      if (item) item.style.background = '';
+    });
+
     // Image file picker → preview
     const fileInput = document.getElementById('d-prod-img-file');
     const wrap      = document.getElementById('d-prod-img-wrap');
@@ -1886,6 +2941,39 @@ function bindDrawerEvents(type, data) {
       }
     });
 
+  }
+
+  if (type === 'banner') {
+    const banFileInput = document.getElementById('d-ban-img-file');
+    const banWrap      = document.getElementById('d-ban-img-wrap');
+    const showBanPreview = (src) => {
+      const preview = document.getElementById('d-ban-img-preview');
+      if (preview?.tagName === 'IMG') { preview.src = src; }
+      else {
+        const img = document.createElement('img');
+        img.id = 'd-ban-img-preview';
+        img.src = src;
+        img.style.cssText = 'max-height:120px;max-width:100%;border-radius:6px;display:block;margin:0 auto 8px;';
+        preview?.replaceWith(img);
+      }
+    };
+    banFileInput?.addEventListener('change', () => {
+      const f = banFileInput.files[0];
+      if (f) showBanPreview(URL.createObjectURL(f));
+    });
+    banWrap?.addEventListener('dragover', e => { e.preventDefault(); banWrap.style.borderColor = '#FF6B00'; });
+    banWrap?.addEventListener('dragleave', () => { banWrap.style.borderColor = '#e2e8f0'; });
+    banWrap?.addEventListener('drop', e => {
+      e.preventDefault(); banWrap.style.borderColor = '#e2e8f0';
+      const f = e.dataTransfer.files[0];
+      if (f && f.type.startsWith('image/')) {
+        const dt = new DataTransfer(); dt.items.add(f); banFileInput.files = dt.files;
+        showBanPreview(URL.createObjectURL(f));
+      }
+    });
+  }
+
+  if (type === 'product') {
     // Add new category inline
     const addBtn    = document.getElementById('d-prod-cat-add');
     const newPanel  = document.getElementById('d-prod-cat-new');
@@ -1971,6 +3059,19 @@ async function saveDrawer(type, data) {
         };
         data ? await ApiService.updateProduct(data.id, payload) : await ApiService.createProduct(payload);
       }
+    } else if (type === 'discount') {
+      const payload = {
+        name:               document.getElementById('d-disc-name')?.value?.trim(),
+        description:        document.getElementById('d-disc-desc')?.value?.trim(),
+        discountPercentage: parseFloat(document.getElementById('d-disc-pct')?.value),
+        startDate:          document.getElementById('d-disc-start')?.value || null,
+        endDate:            document.getElementById('d-disc-end')?.value || null,
+        active:             document.getElementById('d-disc-active')?.checked ?? true,
+      };
+      if (!payload.name) throw new Error('Name is required');
+      if (!payload.description) throw new Error('Description is required');
+      if (!payload.discountPercentage || payload.discountPercentage <= 0) throw new Error('Enter a valid percentage');
+      await ApiService.createDiscount(payload);
     } else if (type === 'coupon') {
       const payload = {
         code:            (document.getElementById('d-coup-code')?.value||'').toUpperCase(),
@@ -1986,16 +3087,36 @@ async function saveDrawer(type, data) {
         await ApiService.createCoupon(payload);
       }
     } else if (type === 'banner') {
-      const payload = {
-        title:        document.getElementById('d-ban-title')?.value,
-        subtitle:     document.getElementById('d-ban-sub')?.value,
-        ctaText:      document.getElementById('d-ban-cta')?.value,
-        ctaLink:      document.getElementById('d-ban-link')?.value,
-        imageUrl:     document.getElementById('d-ban-img')?.value,
-        displayOrder: parseInt(document.getElementById('d-ban-order')?.value)||0,
-        active:       document.getElementById('d-ban-active')?.checked,
-      };
-      data ? await ApiService.updateBanner(data.id, payload) : await ApiService.createBanner(payload);
+      const file        = document.getElementById('d-ban-img-file')?.files?.[0];
+      const title       = document.getElementById('d-ban-title')?.value || '';
+      const subtitle    = document.getElementById('d-ban-sub')?.value || '';
+      const buttonText  = document.getElementById('d-ban-cta')?.value || '';
+      const linkUrl     = document.getElementById('d-ban-link')?.value || '';
+      const displayOrder = parseInt(document.getElementById('d-ban-order')?.value) || 0;
+      const active      = document.getElementById('d-ban-active')?.checked ?? true;
+      if (!title) throw new Error('Title is required');
+      if (file) {
+        const fd = new FormData();
+        fd.append('file', file);
+        fd.append('title', title);
+        if (subtitle)   fd.append('subtitle', subtitle);
+        if (buttonText) fd.append('buttonText', buttonText);
+        if (linkUrl)    fd.append('linkUrl', linkUrl);
+        fd.append('displayOrder', displayOrder);
+        fd.append('active', active);
+        const headers = { 'Authorization': 'Bearer ' + localStorage.getItem('luz_jwt') };
+        const endpoint = data
+          ? `http://localhost:8080/api/banners/${data.id}/upload`
+          : 'http://localhost:8080/api/banners/upload';
+        const method = data ? 'PUT' : 'POST';
+        const res = await fetch(endpoint, { method, headers, body: fd });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json?.message || 'Banner save failed');
+      } else {
+        const existingUrl = document.getElementById('d-ban-img-existing')?.value || '';
+        const payload = { title, subtitle, buttonText, linkUrl, imageUrl: existingUrl, displayOrder, active };
+        data ? await ApiService.updateBanner(data.id, payload) : await ApiService.createBanner(payload);
+      }
     } else if (type === 'adjust') {
       const adjType = document.getElementById('adj-type')?.value || 'ADD';
       const rawQty  = parseInt(document.getElementById('adj-qty')?.value) || 0;
@@ -2018,12 +3139,13 @@ async function saveDrawer(type, data) {
         await ApiService.createUser({ firstName: fn, lastName: ln, email, password: pw, roleName: roleName || 'ROLE_CUSTOMER' });
       }
     } else if (type === 'shipment') {
-      const eta = document.getElementById('d-shp-eta')?.value;
+      const etaRaw = document.getElementById('d-shp-eta')?.value;
+      const eta = etaRaw ? (etaRaw.length === 16 ? etaRaw + ':00' : etaRaw) : null;
       const payload = {
         orderId:               document.getElementById('d-shp-order')?.value?.trim(),
         carrier:               document.getElementById('d-shp-carrier')?.value?.trim(),
         trackingNumber:        document.getElementById('d-shp-tracking')?.value?.trim() || null,
-        estimatedDeliveryDate: eta || null,
+        estimatedDeliveryDate: eta,
       };
       if (!payload.orderId) throw new Error('Order ID is required');
       if (!payload.carrier) throw new Error('Carrier is required');
@@ -2088,6 +3210,18 @@ async function saveDrawer(type, data) {
       closeDrawer(); showToast('Threshold updated', 'success');
       setTimeout(() => loadTab('inventory'), 300);
       return;
+    } else if (type === 'inv-item') {
+      const productName = document.getElementById('d-inv-name')?.value?.trim();
+      const sku         = document.getElementById('d-inv-sku')?.value?.trim() || null;
+      const quantity    = parseInt(document.getElementById('d-inv-qty')?.value) || 0;
+      const threshold   = parseInt(document.getElementById('d-inv-thresh')?.value) || 10;
+      const location    = document.getElementById('d-inv-location')?.value?.trim() || null;
+      const unit        = document.getElementById('d-inv-unit')?.value?.trim() || null;
+      if (!productName) throw new Error('Product name is required');
+      await ApiService.inventory.createItem({ productName, sku, quantity, lowStockThreshold: threshold, location, unit });
+      closeDrawer(); showToast('Inventory item created', 'success');
+      setTimeout(() => loadTab('inventory'), 300);
+      return;
     }
     closeDrawer();
     showToast('Saved successfully', 'success');
@@ -2109,7 +3243,96 @@ function bindTab(tab) {
     const { action, id, name, type: rtype, format, key, value, category, desc, status } = el.dataset;
 
     if (action === 'edit-product') { const res = await ApiService.getProduct(id).catch(()=>null); const p = res?.data || res || { id }; openDrawer('product', p); }
-    else if (action === 'delete-product') { if(confirm('Delete this product?')) { await ApiService.deleteProduct(id).catch(()=>{}); loadTab('products'); } }
+    else if (action === 'delete-product') { await ApiService.deleteProduct(id).catch(()=>{}); showToast('Product deleted', 'success'); loadTab('products'); }
+    else if (action === 'apply-discount') {
+      const modal = document.getElementById('discount-apply-modal');
+      if (!modal) return;
+      document.getElementById('da-product-id').value = id;
+      document.getElementById('da-product-name').textContent = el.dataset.name || id;
+      modal.style.display = 'flex';
+      document.getElementById('btn-da-cancel')?.addEventListener('click', () => { modal.style.display = 'none'; }, { once: true });
+      document.getElementById('btn-da-save')?.addEventListener('click', async () => {
+        const discountId = document.getElementById('da-discount-sel')?.value;
+        const pid = document.getElementById('da-product-id')?.value;
+        try {
+          if (discountId) await ApiService.applyProductDiscount(pid, discountId);
+          else            await ApiService.removeProductDiscount(pid);
+          modal.style.display = 'none';
+          showToast(discountId ? 'Discount applied' : 'Discount removed', 'success');
+          loadTab('products');
+        } catch(err) { showToast(err.message || 'Failed', 'error'); }
+      }, { once: true });
+    }
+    else if (action === 'manage-images') {
+      const modal = document.getElementById('img-mgmt-modal');
+      if (!modal) return;
+      document.getElementById('img-mgmt-product-id').value = id;
+      const gallery = document.getElementById('img-mgmt-gallery');
+      if (gallery) {
+        const prod = _productCache.find(p => p.id === id);
+        const images = prod?.images || [];
+        if (images.length) {
+          gallery.innerHTML = images.map(img => {
+            const src = img.url?.startsWith('/uploads/') ? 'http://localhost:8080' + img.url : (img.url||'');
+            return `<div style="position:relative;width:100px">
+              <img src="${src}" style="width:100px;height:80px;object-fit:cover;border-radius:6px;border:1px solid #e2e8f0">
+              ${img.isPrimary ? '<span style="position:absolute;top:2px;left:2px;background:#FF6B00;color:#fff;font-size:9px;padding:1px 4px;border-radius:3px">Primary</span>' : ''}
+              <button class="btn-d btn-d-danger btn-d-sm btn-d-ico img-delete-btn" data-image-id="${img.id}" style="position:absolute;top:2px;right:2px;width:20px;height:20px;padding:0;font-size:10px">${I.x}</button>
+            </div>`;
+          }).join('');
+          gallery.querySelectorAll('.img-delete-btn').forEach(btn => {
+            btn.addEventListener('click', async () => {
+              if (!confirm('Remove this image?')) return;
+              try {
+                await ApiService.removeProductImage(id, btn.dataset.imageId);
+                btn.closest('div[style*="width:100px"]').remove();
+                showToast('Image removed', 'success');
+                const pIdx = _productCache.findIndex(p => p.id === id);
+                if (pIdx >= 0 && _productCache[pIdx].images) {
+                  _productCache[pIdx].images = _productCache[pIdx].images.filter(i => i.id !== btn.dataset.imageId);
+                }
+              } catch(err) { showToast(err.message || 'Remove failed', 'error'); }
+            });
+          });
+        } else {
+          gallery.innerHTML = `<div style="font-size:13px;color:#94A3B8">No images uploaded yet.</div>`;
+        }
+      }
+      const msgEl = document.getElementById('img-upload-msg');
+      modal.style.display = 'flex';
+      document.getElementById('btn-img-close')?.addEventListener('click', () => { modal.style.display = 'none'; }, { once: true });
+      document.getElementById('btn-img-upload')?.addEventListener('click', async () => {
+        const file = document.getElementById('img-upload-file')?.files?.[0];
+        const alt  = document.getElementById('img-upload-alt')?.value?.trim() || '';
+        const prim = document.getElementById('img-upload-primary')?.checked || false;
+        if (!file) { showToast('Choose an image file first', 'error'); return; }
+        const pid = document.getElementById('img-mgmt-product-id')?.value;
+        if (msgEl) { msgEl.style.display = 'block'; msgEl.textContent = 'Uploading…'; msgEl.style.color = '#64748B'; }
+        try {
+          const res = await ApiService.uploadProductImage(pid, file, alt, prim);
+          if (msgEl) { msgEl.textContent = 'Upload successful!'; msgEl.style.color = '#16a34a'; }
+          showToast('Image uploaded', 'success');
+          modal.style.display = 'none';
+          loadTab('products');
+        } catch(err) {
+          if (msgEl) { msgEl.textContent = err.message || 'Upload failed'; msgEl.style.color = '#ef4444'; }
+          showToast(err.message || 'Upload failed', 'error');
+        }
+      }, { once: true });
+    }
+    else if (action === 'toggle-discount') {
+      try { await ApiService.toggleDiscount(id); showToast('Discount toggled', 'success'); loadTab('discounts'); }
+      catch(e) { showToast(e.message || 'Failed', 'error'); }
+    }
+    else if (action === 'edit-discount') {
+      const d = _discountCache.find(x => x.id === id) || { id };
+      openDrawer('discount', d);
+    }
+    else if (action === 'delete-discount') {
+      if (!confirm('Delete this discount? It will be removed from all products.')) return;
+      try { await ApiService.deleteDiscount(id); showToast('Discount deleted', 'success'); loadTab('discounts'); }
+      catch(e) { showToast(e.message || 'Delete failed', 'error'); }
+    }
     else if (action === 'edit-coupon') {
       try {
         const raw = await ApiService.getCoupon(id).then(r => r.data || r);
@@ -2129,15 +3352,67 @@ function bindTab(tab) {
     else if (action === 'delete-banner') { if(confirm('Delete banner?')) { await ApiService.deleteBanner(id).catch(()=>{}); loadTab('banners'); } }
     else if (action === 'adjust-stock')  { openDrawer('adjust', { id, name: el.dataset.itemName || name }); }
     else if (action === 'edit-threshold') { openDrawer('inv-threshold', { id, name: el.dataset.itemName || name, threshold: parseInt(el.dataset.threshold)||10 }); }
+    else if (action === 'view-inv-item') {
+      try {
+        const res = await ApiService.inventory.getItem(id);
+        const item = res?.data || res;
+        const reorder = item.reorderPoint || item.lowStockThreshold || 10;
+        document.getElementById('d-drawer-title').textContent = item.productName || item.name || 'Inventory Item';
+        document.getElementById('d-drawer-body').innerHTML = `
+          <div class="d-alert d-alert-info" style="margin-bottom:14px">SKU: <b>${esc(item.sku||'—')}</b> · Location: <b>${esc(item.location||item.warehouse||'Main')}</b></div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
+            <div class="dash-stat" style="padding:12px"><div class="dash-stat-lbl">In Stock</div><div class="dash-stat-val" style="color:${item.quantity<=0?'#ef4444':item.quantity<=reorder?'#f59e0b':'#10b981'}">${item.quantity||0}</div></div>
+            <div class="dash-stat" style="padding:12px"><div class="dash-stat-lbl">Reorder Point</div><div class="dash-stat-val">${reorder}</div></div>
+          </div>
+          ${item.unitCost ? `<div class="f-field"><label class="f-lbl">Unit Cost</label><div class="f-val">${fmt.money(item.unitCost)}</div></div>` : ''}
+          ${item.unit ? `<div class="f-field"><label class="f-lbl">Unit</label><div class="f-val">${esc(item.unit)}</div></div>` : ''}
+          ${item.product ? `<div class="f-field"><label class="f-lbl">Linked Product</label><div class="f-val">${esc(item.product.name||item.product.id||'—')}</div></div>` : ''}
+          <div class="f-field"><label class="f-lbl">Last Updated</label><div class="f-val">${fmt.ago(item.updatedAt||item.createdAt)}</div></div>`;
+        document.getElementById('d-drawer-footer').innerHTML = `<button class="btn-d btn-d-sec" id="d-btn-cancel">Close</button>`;
+        document.getElementById('d-btn-cancel')?.addEventListener('click', closeDrawer);
+        document.getElementById('d-overlay').classList.add('open');
+      } catch(e) { showToast(e.message || 'Failed to load item', 'error'); }
+    }
     else if (action === 'edit-supplier')  {
-      const s = _supplierCache.find(x=>x.id===id) || { id };
-      openDrawer('supplier', s);
+      try {
+        const res = await ApiService.suppliers.getById(id);
+        const s = res?.data || res || _supplierCache.find(x=>x.id===id) || { id };
+        openDrawer('supplier', s);
+      } catch(_) {
+        const s = _supplierCache.find(x=>x.id===id) || { id };
+        openDrawer('supplier', s);
+      }
     }
     else if (action === 'toggle-supplier') {
       const active = el.dataset.active === 'true';
       if (!confirm(`${active?'Deactivate':'Activate'} this supplier?`)) return;
       await ApiService.suppliers.setActive(id, !active).catch(()=>{});
       loadTab('suppliers');
+    }
+    else if (action === 'view-po') {
+      try {
+        const res = await ApiService.procurement.getById(id);
+        const o = res?.data || res;
+        const st = (o.status||'PENDING').toUpperCase();
+        const statusColor = { PENDING:'bdg-yellow', RECEIVED:'bdg-green', PARTIALLY_RECEIVED:'bdg-blue', CANCELLED:'bdg-red', DRAFT:'bdg-gray' };
+        document.getElementById('d-drawer-title').textContent = `PO #${(o.id||'').toString().slice(-8)}`;
+        document.getElementById('d-drawer-body').innerHTML = `
+          <div class="d-alert d-alert-info" style="margin-bottom:14px">
+            Supplier: <b>${esc(o.supplier?.name||'—')}</b> · <span class="bdg ${statusColor[st]||'bdg-gray'}">${st.replace('_',' ')}</span>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
+            <div class="dash-stat" style="padding:12px"><div class="dash-stat-lbl">Ordered</div><div class="dash-stat-val">${o.quantityOrdered||0}</div></div>
+            <div class="dash-stat" style="padding:12px"><div class="dash-stat-lbl">Received</div><div class="dash-stat-val" style="color:${(o.quantityReceived||0)>=(o.quantityOrdered||0)?'#10b981':'#f59e0b'}">${o.quantityReceived||0}</div></div>
+          </div>
+          <div class="f-field"><label class="f-lbl">Item</label><div class="f-val">${esc(o.inventoryItem?.productName||o.inventoryItem?.name||'—')}</div></div>
+          ${o.totalCost ? `<div class="f-field"><label class="f-lbl">Total Cost</label><div class="f-val">${fmt.money(o.totalCost)}</div></div>` : ''}
+          ${o.expectedDeliveryDate ? `<div class="f-field"><label class="f-lbl">Expected Delivery</label><div class="f-val">${fmt.date(o.expectedDeliveryDate)}</div></div>` : ''}
+          ${o.notes ? `<div class="f-field"><label class="f-lbl">Notes</label><div class="f-val" style="white-space:pre-wrap;font-size:13px">${esc(o.notes)}</div></div>` : ''}
+          <div class="f-field"><label class="f-lbl">Created</label><div class="f-val">${fmt.ago(o.createdAt)}</div></div>`;
+        document.getElementById('d-drawer-footer').innerHTML = `<button class="btn-d btn-d-sec" id="d-btn-cancel">Close</button>`;
+        document.getElementById('d-btn-cancel')?.addEventListener('click', closeDrawer);
+        document.getElementById('d-overlay').classList.add('open');
+      } catch(e) { showToast(e.message || 'Failed to load order', 'error'); }
     }
     else if (action === 'receive-po') {
       openDrawer('receive-po', { id, ordered: parseInt(el.dataset.ordered)||0 });
@@ -2179,24 +3454,62 @@ function bindTab(tab) {
         } catch(err) { showToast(err.message||'Cancel failed', 'error'); el.disabled = false; }
       }
     }
+    else if (action === 'view-backup') {
+      try {
+        const res = await ApiService.getBackup(id);
+        const b = res?.data || res;
+        document.getElementById('d-drawer-title').textContent = `Backup — ${fmt.date(b.createdAt)}`;
+        document.getElementById('d-drawer-body').innerHTML = `
+          <div class="d-alert d-alert-info" style="margin-bottom:14px">
+            Status: ${statusBdg(b.status||'COMPLETED')}
+          </div>
+          ${b.filePath||b.path ? `<div class="f-field"><label class="f-lbl">File Path</label><div class="f-val" style="font-family:monospace;font-size:12px;word-break:break-all">${esc(b.filePath||b.path)}</div></div>` : ''}
+          ${b.fileSize||b.size ? `<div class="f-field"><label class="f-lbl">File Size</label><div class="f-val">${Math.round((b.fileSize||b.size)/1024)} KB</div></div>` : ''}
+          ${b.type ? `<div class="f-field"><label class="f-lbl">Type</label><div class="f-val">${esc(b.type)}</div></div>` : ''}
+          ${b.description ? `<div class="f-field"><label class="f-lbl">Description</label><div class="f-val">${esc(b.description)}</div></div>` : ''}
+          <div class="f-field"><label class="f-lbl">Created</label><div class="f-val">${fmt.ago(b.createdAt)}</div></div>
+          ${b.completedAt ? `<div class="f-field"><label class="f-lbl">Completed</label><div class="f-val">${fmt.ago(b.completedAt)}</div></div>` : ''}`;
+        document.getElementById('d-drawer-footer').innerHTML = `
+          <button class="btn-d btn-d-sec" id="d-btn-cancel">Close</button>
+          <button class="btn-d btn-d-danger" data-action="restore-backup" data-id="${b.id}">Restore This Backup</button>`;
+        document.getElementById('d-btn-cancel')?.addEventListener('click', closeDrawer);
+        document.getElementById('d-overlay').classList.add('open');
+      } catch(e) { showToast(e.message || 'Failed to load backup', 'error'); }
+    }
     else if (action === 'restore-backup') {
       if (confirm('Restore from this backup? Current data will be replaced.')) {
         el.disabled = true; el.textContent = 'Restoring…';
         try {
           await ApiService.restoreBackup(id);
           showToast('Restore started successfully', 'success');
+          closeDrawer();
         } catch(err) { showToast(err.message||'Restore failed', 'error'); el.disabled = false; el.textContent = 'Restore'; }
       }
     }
     else if (action === 'edit-config') {
-      const keyEl = document.getElementById('sys-cfg-key');
-      const valEl = document.getElementById('sys-cfg-val');
-      const catEl = document.getElementById('sys-cfg-cat');
-      const dscEl = document.getElementById('sys-cfg-desc');
-      if (keyEl) keyEl.value = key || '';
-      if (valEl) valEl.value = value || '';
-      if (catEl) catEl.value = category || '';
-      if (dscEl) dscEl.value = desc || '';
+      try {
+        const res = await ApiService.getSystemConfiguration(key);
+        const c = res?.data || res;
+        const keyEl = document.getElementById('sys-cfg-key');
+        const valEl = document.getElementById('sys-cfg-val');
+        const catEl = document.getElementById('sys-cfg-cat');
+        const dscEl = document.getElementById('sys-cfg-desc');
+        if (keyEl) keyEl.value = c.configKey || c.key || key || '';
+        if (valEl) valEl.value = c.sensitive ? '' : (c.configValue || c.value || value || '');
+        if (catEl) catEl.value = c.category || category || '';
+        if (dscEl) dscEl.value = c.description || desc || '';
+        if (c.sensitive) showToast('Sensitive value — re-enter to update', 'info');
+      } catch(_) {
+        const keyEl = document.getElementById('sys-cfg-key');
+        const valEl = document.getElementById('sys-cfg-val');
+        const catEl = document.getElementById('sys-cfg-cat');
+        const dscEl = document.getElementById('sys-cfg-desc');
+        if (keyEl) keyEl.value = key || '';
+        if (valEl) valEl.value = value || '';
+        if (catEl) catEl.value = category || '';
+        if (dscEl) dscEl.value = desc || '';
+      }
+      document.getElementById('sys-cfg-key')?.scrollIntoView({ behavior:'smooth', block:'nearest' });
     }
   });
 
@@ -2224,13 +3537,13 @@ function bindTab(tab) {
     document.getElementById('product-cat-filter')?.addEventListener('change', filterProducts);
     document.getElementById('product-status-filter')?.addEventListener('change', filterProducts);
 
-    // Export CSV
+    // Export CSV (local)
     document.getElementById('btn-export-products')?.addEventListener('click', () => {
       if (!_productCache.length) { showToast('No products to export', 'error'); return; }
-      const header = 'Name,Category,Price,Status,Featured,SKU';
+      const header = 'Name,Category,Price,Status,Featured,SKU,Discount';
       const rows = _productCache.map(p => [
         p.name||'', p.categoryName||p.category?.name||'',
-        p.price||0, p.status||'', p.featured?'Yes':'No', p.sku||''
+        p.price||0, p.status||'', p.featured?'Yes':'No', p.sku||'', p.discountName||''
       ].map(v=>`"${String(v).replace(/"/g,'""')}"`).join(','));
       const csv = header + '\n' + rows.join('\n');
       const a = document.createElement('a');
@@ -2240,21 +3553,151 @@ function bindTab(tab) {
       showToast('Products exported', 'success');
     });
 
-    // Featured toggle
-    document.getElementById('products-tbody')?.addEventListener('change', async e => {
-      const cb = e.target.closest('.prod-featured-toggle');
-      if (!cb) return;
-      const id = cb.dataset.id;
-      const featured = cb.checked;
+    // Bulk export Excel
+    document.getElementById('btn-bulk-export')?.addEventListener('click', async () => {
+      try { showToast('Preparing Excel export…'); await ApiService.exportProductsBulk(); showToast('Download started', 'success'); }
+      catch(e) { showToast(e.message || 'Export failed', 'error'); }
+    });
+
+    // Bulk import Excel
+    document.getElementById('bulk-import-file')?.addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const resultEl = document.getElementById('bulk-import-result');
+      if (resultEl) { resultEl.style.display = 'block'; resultEl.innerHTML = `<div class="d-alert d-alert-info">Importing <b>${file.name}</b>…</div>`; }
       try {
-        await ApiService.setProductFeatured(id, featured);
-        const p = _productCache.find(x => x.id === id);
-        if (p) p.featured = featured;
-        showToast(featured ? 'Marked as featured' : 'Removed from featured', 'success');
-      } catch(e) {
-        showToast(e.message || 'Failed', 'error');
-        cb.checked = !featured; // revert
+        const res = await ApiService.importProductsBulk(file);
+        const d = res.data || res || {};
+        const errors = (d.errors || []).map(err => `<li>Row ${err.rowNumber}: ${err.message}</li>`).join('');
+        if (resultEl) resultEl.innerHTML = `
+          <div class="d-alert" style="background:#f0fdf4;border:1px solid #bbf7d0;color:#166534;border-radius:8px;padding:12px">
+            <b>Import complete:</b> ${d.createdCount||0} created · ${d.updatedCount||0} updated · ${d.skippedCount||0} skipped
+            ${errors ? `<ul style="margin:8px 0 0;padding-left:18px;color:#991b1b">${errors}</ul>` : ''}
+          </div>`;
+        showToast('Import complete', 'success');
+        setTimeout(() => loadTab('products'), 800);
+      } catch(err) {
+        if (resultEl) resultEl.innerHTML = `<div class="d-alert d-alert-err">${err.message||'Import failed'}</div>`;
+        showToast(err.message || 'Import failed', 'error');
       }
+      e.target.value = '';
+    });
+
+    // Quick status change
+    document.getElementById('products-tbody')?.addEventListener('change', async e => {
+      const sel = e.target.closest('.prod-status-sel');
+      if (sel) {
+        const id = sel.dataset.id;
+        const status = sel.value;
+        try {
+          await ApiService.updateProductStatus(id, status);
+          const p = _productCache.find(x => x.id === id);
+          if (p) p.status = status;
+          showToast(`Status set to ${status.toLowerCase()}`, 'success');
+        } catch(err) { showToast(err.message || 'Status update failed', 'error'); }
+        return;
+      }
+      // Featured toggle (existing)
+      const cb = e.target.closest('.prod-featured-toggle');
+      if (cb) {
+        const id = cb.dataset.id;
+        const featured = cb.checked;
+        try {
+          await ApiService.setProductFeatured(id, featured);
+          const p = _productCache.find(x => x.id === id);
+          if (p) p.featured = featured;
+          showToast(featured ? 'Marked as featured' : 'Removed from featured', 'success');
+        } catch(err) { showToast(err.message || 'Failed', 'error'); cb.checked = !featured; }
+      }
+    });
+
+    // ── Category management ────────────────────────────────
+    const catAddForm = document.getElementById('cat-add-form');
+    const catErrEl   = document.getElementById('cat-form-err');
+
+    document.getElementById('btn-show-add-cat')?.addEventListener('click', () => {
+      if (catAddForm) catAddForm.style.display = '';
+      document.getElementById('cat-new-name')?.focus();
+    });
+
+    document.getElementById('btn-cancel-cat')?.addEventListener('click', () => {
+      if (catAddForm) catAddForm.style.display = 'none';
+      if (catErrEl) catErrEl.style.display = 'none';
+      if (document.getElementById('cat-new-name')) document.getElementById('cat-new-name').value = '';
+      if (document.getElementById('cat-new-desc')) document.getElementById('cat-new-desc').value = '';
+    });
+
+    document.getElementById('btn-save-cat')?.addEventListener('click', async () => {
+      const name = document.getElementById('cat-new-name')?.value?.trim();
+      const desc = document.getElementById('cat-new-desc')?.value?.trim() || '';
+      if (!name) {
+        if (catErrEl) { catErrEl.textContent = 'Category name is required.'; catErrEl.style.display = ''; }
+        return;
+      }
+      const btn = document.getElementById('btn-save-cat');
+      btn.disabled = true; btn.textContent = 'Saving…';
+      try {
+        const res = await ApiService.createCategory(name, desc);
+        const cat = res?.data || res;
+        // Append new chip without full reload
+        _categoryCache.push(cat);
+        const chipsEl = document.getElementById('cat-chips');
+        if (chipsEl) {
+          // Remove "No categories" placeholder if present
+          const placeholder = chipsEl.querySelector('div[style*="color:#94A3B8"]');
+          if (placeholder) placeholder.remove();
+          const chip = document.createElement('div');
+          chip.className = 'cat-chip';
+          chip.dataset.catId = cat.id;
+          chip.style.cssText = 'display:inline-flex;align-items:center;gap:6px;padding:6px 12px;background:#EEF2FF;border:1.5px solid #C7D2FE;border-radius:20px;font-size:13px;font-weight:600;color:#3730a3';
+          chip.innerHTML = `<span>${esc(cat.name)}</span>${isAdmin() ? `<button class="cat-chip-del" data-cat-id="${cat.id}" data-cat-name="${escAttr(cat.name)}" style="background:none;border:none;cursor:pointer;color:#6366f1;font-size:14px;line-height:1;padding:0 0 0 2px" title="Delete">${I.x}</button>` : ''}`;
+          chipsEl.appendChild(chip);
+        }
+        // Refresh category dropdown in product filter
+        const catFilter = document.getElementById('product-cat-filter');
+        if (catFilter) {
+          const opt = document.createElement('option');
+          opt.value = cat.id; opt.textContent = cat.name;
+          catFilter.appendChild(opt);
+        }
+        // Reset form
+        document.getElementById('cat-new-name').value = '';
+        document.getElementById('cat-new-desc').value = '';
+        if (catAddForm) catAddForm.style.display = 'none';
+        if (catErrEl) catErrEl.style.display = 'none';
+        showToast(`Category "${cat.name}" created`, 'success');
+      } catch(e) {
+        if (catErrEl) { catErrEl.textContent = e.message || 'Failed to create category'; catErrEl.style.display = ''; }
+      } finally { btn.disabled = false; btn.textContent = 'Save'; }
+    });
+
+    // Enter key in name field triggers save
+    document.getElementById('cat-new-name')?.addEventListener('keydown', e => {
+      if (e.key === 'Enter') document.getElementById('btn-save-cat')?.click();
+    });
+
+    // Delete chip — delegated
+    document.getElementById('cat-chips')?.addEventListener('click', async e => {
+      const delBtn = e.target.closest('.cat-chip-del');
+      if (!delBtn) return;
+      const id   = delBtn.dataset.catId;
+      const name = delBtn.dataset.catName;
+      if (!confirm(`Delete category "${name}"?\n\nProducts assigned to this category will lose their category.`)) return;
+      delBtn.disabled = true;
+      try {
+        await ApiService.deleteCategory(id);
+        const chip = delBtn.closest('.cat-chip');
+        chip?.remove();
+        _categoryCache = _categoryCache.filter(c => c.id !== id);
+        // Remove from product filter dropdown
+        document.getElementById('product-cat-filter')?.querySelector(`option[value="${id}"]`)?.remove();
+        showToast(`Category "${name}" deleted`, 'success');
+        // If no categories left, show placeholder
+        const chipsEl = document.getElementById('cat-chips');
+        if (chipsEl && !chipsEl.querySelector('.cat-chip')) {
+          chipsEl.innerHTML = `<div style="color:#94A3B8;font-size:13px">No categories yet — add one above.</div>`;
+        }
+      } catch(e) { showToast(e.message || 'Delete failed', 'error'); delBtn.disabled = false; }
     });
   }
   if (tab === 'inventory') {
@@ -2449,11 +3892,24 @@ function bindTab(tab) {
   }
 
   if (tab === 'crm') {
+    // Sub-tab switching
+    document.querySelectorAll('[data-crm-tab]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        _crmSubTab = btn.dataset.crmTab;
+        document.querySelectorAll('[data-crm-tab]').forEach(b => b.classList.toggle('active', b===btn));
+        ['analytics','customers','comms'].forEach(id => {
+          const el = document.getElementById(`crm-panel-${id}`);
+          if (el) el.style.display = id === _crmSubTab ? '' : 'none';
+        });
+      });
+    });
+
+    // Export CSV
     document.getElementById('btn-export-customers')?.addEventListener('click', () => {
       if (!_customerCache.length) { showToast('No customers to export', 'error'); return; }
-      const header = 'ID,First Name,Last Name,Email,Phone,Status,Joined';
+      const header = 'First Name,Last Name,Email,Phone,Status,Joined';
       const rows = _customerCache.map(c => [
-        c.id||'', c.firstName||'', c.lastName||'', c.email||'',
+        c.firstName||'', c.lastName||'', c.email||'',
         c.phone||c.phoneNumber||'',
         c.locked?'BLOCKED':c.enabled===false?'DISABLED':'ACTIVE',
         c.createdAt||''
@@ -2465,27 +3921,99 @@ function bindTab(tab) {
       a.click();
       showToast('Customers exported', 'success');
     });
+
+    // Customer list search
     document.getElementById('crm-search')?.addEventListener('input', e => {
       const q = e.target.value.toLowerCase().trim();
       const tbody = document.getElementById('crm-tbody');
       if (!tbody) return;
-      const filtered = !q ? _customerCache : _customerCache.filter(c => {
+      const filtered = !q ? _crmCustomerCache : _crmCustomerCache.filter(c => {
         const name  = `${c.firstName||''} ${c.lastName||''}`.toLowerCase();
-        const email = (c.email||'').toLowerCase();
-        return name.includes(q) || email.includes(q);
+        return name.includes(q) || (c.email||'').toLowerCase().includes(q);
       });
       tbody.innerHTML = filtered.length ? filtered.map(c => `
         <tr>
-          <td class="td-m">${(c.id||'').toString().slice(0,8)}…</td>
-          <td class="td-b">${c.firstName||''} ${c.lastName||''}</td>
-          <td>${c.email||'—'}</td>
+          <td class="td-b">${esc(c.firstName||'')} ${esc(c.lastName||'')}</td>
+          <td>${esc(c.email||'—')}</td>
           <td>${c.orderCount||c.totalOrders||0}</td>
           <td>${fmt.money(c.totalSpent||c.lifetimeValue||0)}</td>
           <td>${statusBdg(c.locked?'BLOCKED':c.enabled===false?'DISABLED':'ACTIVE')}</td>
           <td class="td-sm">${fmt.date(c.createdAt||c.joinDate)}</td>
-          <td><button class="btn-d btn-d-sec btn-d-sm" data-action="view-customer" data-id="${c.id}">${I.eye} View</button></td>
+          <td style="display:flex;gap:4px">
+            <button class="btn-d btn-d-sec btn-d-sm" data-action="view-customer" data-id="${c.id}">${I.eye} View</button>
+            <button class="btn-d btn-d-primary btn-d-sm" data-action="log-comm" data-id="${c.id}" data-name="${esc(c.firstName||'')} ${esc(c.lastName||'')}">+ Log</button>
+          </td>
         </tr>`).join('') :
-        `<tr><td colspan="8"><div class="d-empty"><div class="d-empty-ico">🔍</div><div class="d-empty-ttl">No matching customers</div></div></td></tr>`;
+        `<tr><td colspan="7"><div class="d-empty"><div class="d-empty-ico">🔍</div><div class="d-empty-ttl">No matching customers</div></div></td></tr>`;
+    });
+
+    // Load communication logs for selected customer
+    document.getElementById('btn-load-comm-logs')?.addEventListener('click', async () => {
+      const customerId = document.getElementById('comm-customer-filter')?.value;
+      const body = document.getElementById('comm-logs-body');
+      if (!body) return;
+      if (!customerId) {
+        body.innerHTML = '<div style="text-align:center;padding:40px;color:#94A3B8">Select a customer first</div>';
+        return;
+      }
+      body.innerHTML = '<div style="padding:20px;color:#94A3B8">Loading…</div>';
+      try {
+        const res = await ApiService.getCommunicationLogs(customerId);
+        const logs = res?.data || [];
+        const channelClr = { EMAIL:'#3B82F6', PHONE:'#10B981', CHAT:'#8B5CF6', IN_PERSON:'#F59E0B', OTHER:'#94A3B8' };
+        body.innerHTML = logs.length ? `
+          <table class="d-table" style="width:100%">
+            <thead><tr><th>Channel</th><th>Subject</th><th>Notes</th><th>Outcome</th><th>Handled By</th><th>Date</th></tr></thead>
+            <tbody>${logs.map(l => `
+              <tr>
+                <td><span class="bdg" style="background:${channelClr[l.channel]||'#94A3B8'}1a;color:${channelClr[l.channel]||'#94A3B8'}">${l.channel||'—'}</span></td>
+                <td class="td-b">${esc(l.subject||'—')}</td>
+                <td style="max-width:220px;font-size:12px;color:#64748B">${esc(l.notes||'—')}</td>
+                <td>${esc(l.outcome||'—')}</td>
+                <td>${esc(l.handledBy ? `${l.handledBy.firstName||''} ${l.handledBy.lastName||''}` : '—')}</td>
+                <td class="td-sm">${fmt.date(l.createdAt)}</td>
+              </tr>`).join('')}
+            </tbody>
+          </table>` :
+          '<div style="text-align:center;padding:40px;color:#94A3B8">No communication logs for this customer</div>';
+      } catch(e) { body.innerHTML = `<div class="d-alert d-alert-err" style="margin:16px">${e.message}</div>`; }
+    });
+
+    // Log communication modal (delegated — opens from customer list "+ Log" button)
+    function openCommModal(customerId, customerName) {
+      document.getElementById('comm-customer-id').value  = customerId;
+      document.getElementById('comm-modal-cname').textContent = customerName;
+      document.getElementById('comm-subject').value  = '';
+      document.getElementById('comm-notes').value    = '';
+      document.getElementById('comm-outcome').value  = '';
+      document.getElementById('comm-modal').style.display = 'flex';
+      document.getElementById('comm-subject').focus();
+    }
+    function closeCommModal() { document.getElementById('comm-modal').style.display = 'none'; }
+
+    document.getElementById('comm-modal-cancel')?.addEventListener('click', closeCommModal);
+    document.getElementById('comm-modal')?.addEventListener('click', e => { if (e.target === e.currentTarget) closeCommModal(); });
+    document.getElementById('comm-modal-save')?.addEventListener('click', async () => {
+      const customerId = document.getElementById('comm-customer-id')?.value;
+      const channel    = document.getElementById('comm-channel')?.value;
+      const subject    = document.getElementById('comm-subject')?.value.trim();
+      const notes      = document.getElementById('comm-notes')?.value.trim();
+      const outcome    = document.getElementById('comm-outcome')?.value.trim();
+      if (!subject) return showToast('Subject is required', 'error');
+      const btn = document.getElementById('comm-modal-save');
+      btn.disabled = true; btn.textContent = 'Saving…';
+      try {
+        await ApiService.createCommunicationLog({ customerId, channel, subject, notes, outcome });
+        showToast('Communication log saved');
+        closeCommModal();
+      } catch(e) { showToast(e.message||'Save failed','error'); }
+      finally { btn.disabled = false; btn.textContent = 'Save Log'; }
+    });
+
+    // Delegated click for "log-comm" buttons rendered in tbody after search
+    document.getElementById('crm-tbody')?.addEventListener('click', e => {
+      const btn = e.target.closest('[data-action="log-comm"]');
+      if (btn) openCommModal(btn.dataset.id, btn.dataset.name);
     });
   }
 
@@ -2531,7 +4059,24 @@ function bindTab(tab) {
       tbody.innerHTML = buildAuditRows(filtered);
     }
 
-    document.getElementById('audit-search')?.addEventListener('input', applyAuditFilters);
+    let _auditSearchTimer = null;
+    document.getElementById('audit-search')?.addEventListener('input', (e) => {
+      applyAuditFilters();
+      clearTimeout(_auditSearchTimer);
+      const q = e.target.value.trim();
+      if (q.length < 2) return;
+      _auditSearchTimer = setTimeout(async () => {
+        try {
+          const res = await ApiService.searchAuditLogs({ q, size: 200 });
+          const rows = extractList(res);
+          if (rows.length) {
+            _auditCache = rows;
+            const tbody = document.getElementById('audit-tbody');
+            if (tbody) tbody.innerHTML = buildAuditRows(rows);
+          }
+        } catch(_) {}
+      }, 500);
+    });
     document.getElementById('audit-status-filter')?.addEventListener('change', applyAuditFilters);
 
     document.getElementById('btn-export-audit')?.addEventListener('click', () => {
@@ -2626,6 +4171,10 @@ function bindTab(tab) {
   if (tab === 'pos')      bindPOS();
   if (tab === 'security') bindSecurityTab();
   if (tab === 'system')   bindSystemTab();
+  if (tab === 'discounts') {
+    document.getElementById('btn-add-discount')?.addEventListener('click', () => openDrawer('discount', null));
+  }
+  if (tab === 'finance')  bindFinanceTab();
   if (tab === 'returns') {
     document.getElementById('btn-filter-returns')?.addEventListener('click', async () => {
       const status = document.getElementById('return-status-filter')?.value || '';
@@ -2656,8 +4205,200 @@ function bindTab(tab) {
       } catch(err) { tbody.innerHTML = `<tr><td colspan="8"><div class="d-alert d-alert-err">${err.message}</div></td></tr>`; }
     });
   }
+  if (tab === 'fulfillment') {
+    const STEPS = ['PICKED','PACKED','DISPATCHED','COMPLETED'];
+    const STEP_LABELS = { PICKED:'Picked', PACKED:'Packed', DISPATCHED:'Dispatched', COMPLETED:'Completed' };
+    const STEP_ICONS  = { PICKED:'🫳', PACKED:'📦', DISPATCHED:'🚚', COMPLETED:'✅' };
+    const STEP_COLORS = { PICKED:'#f59e0b', PACKED:'#3b82f6', DISPATCHED:'#8b5cf6', COMPLETED:'#10b981' };
+
+    function stepDot(step, fulfillmentStatus) {
+      const idx     = STEPS.indexOf(step);
+      const curIdx  = STEPS.indexOf(fulfillmentStatus);
+      const done    = curIdx >= idx;
+      const active  = curIdx === idx;
+      const clr     = done ? (STEP_COLORS[step]||'#10b981') : '#e2e8f0';
+      return `
+        <div style="display:flex;flex-direction:column;align-items:center;gap:4px;flex:1">
+          <div style="width:36px;height:36px;border-radius:50%;background:${clr};display:flex;align-items:center;justify-content:center;font-size:16px;box-shadow:${active?`0 0 0 3px ${clr}40`:'none'};transition:all .3s">${done?STEP_ICONS[step]:'○'}</div>
+          <div style="font-size:10px;font-weight:${active?'700':'500'};color:${done?'#0F172A':'#94A3B8'};text-align:center">${STEP_LABELS[step]}</div>
+        </div>`;
+    }
+
+    function buildFulPanel(orderId, f) {
+      const status = f?.fulfillmentStatus || null;
+      const curIdx = status ? STEPS.indexOf(status) : -1;
+
+      const nextStep    = STEPS[curIdx + 1];
+      const canPick     = !status;
+      const canPack     = status === 'PICKED';
+      const canDispatch = status === 'PACKED';
+      const canComplete = status === 'DISPATCHED';
+      const isDone      = status === 'COMPLETED';
+
+      const timelineHtml = `
+        <div style="display:flex;align-items:center;margin-bottom:24px">
+          ${STEPS.map((s, i) => `
+            ${stepDot(s, status||'')}
+            ${i < STEPS.length-1 ? `<div style="flex:0 0 20px;height:2px;background:${curIdx>i?'#10b981':'#e2e8f0'};margin-bottom:18px;transition:background .3s"></div>` : ''}
+          `).join('')}
+        </div>`;
+
+      const timestamps = status ? `
+        <div style="background:#F8FAFC;border-radius:10px;padding:14px 16px;margin-bottom:16px;font-size:12px">
+          ${f.pickedAt     ? `<div style="display:flex;justify-content:space-between;margin-bottom:4px"><span style="color:#64748B">Picked</span><span style="font-weight:600">${fmt.date(f.pickedAt)}</span></div>` : ''}
+          ${f.packedAt     ? `<div style="display:flex;justify-content:space-between;margin-bottom:4px"><span style="color:#64748B">Packed</span><span style="font-weight:600">${fmt.date(f.packedAt)}</span></div>` : ''}
+          ${f.dispatchedAt ? `<div style="display:flex;justify-content:space-between;margin-bottom:4px"><span style="color:#64748B">Dispatched</span><span style="font-weight:600">${fmt.date(f.dispatchedAt)}</span></div>` : ''}
+          ${f.completedAt  ? `<div style="display:flex;justify-content:space-between"><span style="color:#64748B">Completed</span><span style="font-weight:600;color:#10b981">${fmt.date(f.completedAt)}</span></div>` : ''}
+          ${f.trackingNumber ? `<div style="display:flex;justify-content:space-between;margin-top:8px;padding-top:8px;border-top:1px solid #E2E8F0"><span style="color:#64748B">Tracking</span><span style="font-weight:600;color:#3b82f6">${f.trackingNumber}</span></div>` : ''}
+          ${f.carrier ? `<div style="display:flex;justify-content:space-between;margin-top:4px"><span style="color:#64748B">Carrier</span><span style="font-weight:600">${f.carrier}</span></div>` : ''}
+        </div>` : '';
+
+      const actionBtn = isDone
+        ? `<div class="d-alert d-alert-ok" style="text-align:center">✅ Fulfillment complete</div>`
+        : canPick
+        ? `<button class="btn-d btn-d-primary" style="width:100%" id="ful-action-btn" data-action-type="pick" data-order-id="${orderId}">🫳 Mark as Picked</button>`
+        : canPack
+        ? `<button class="btn-d btn-d-primary" style="width:100%" id="ful-action-btn" data-action-type="pack" data-order-id="${orderId}">📦 Mark as Packed</button>`
+        : canDispatch
+        ? `<button class="btn-d btn-d-primary" style="width:100%;background:linear-gradient(90deg,#8b5cf6,#7c3aed)" id="ful-action-btn" data-action-type="dispatch" data-order-id="${orderId}">🚚 Dispatch Order…</button>`
+        : canComplete
+        ? `<button class="btn-d btn-d-success" style="width:100%" id="ful-action-btn" data-action-type="complete" data-order-id="${orderId}">✅ Mark as Delivered</button>`
+        : '';
+
+      return `
+        <div style="font-size:13px;font-weight:700;color:#0F172A;margin-bottom:16px">Order #${(f?.orderNumber||orderId||'').toString().slice(-8)}</div>
+        ${timelineHtml}
+        ${timestamps}
+        ${actionBtn}`;
+    }
+
+    async function loadFulPanel(orderId) {
+      const panel = document.getElementById('ful-panel-body');
+      if (!panel) return;
+      panel.innerHTML = '<div style="text-align:center;padding:30px;color:#94A3B8">Loading…</div>';
+      try {
+        const res = await ApiService.getFulfillment(orderId);
+        const f = res?.data || res;
+        panel.innerHTML = buildFulPanel(orderId, f);
+      } catch(e) {
+        // No fulfillment yet — show start panel
+        panel.innerHTML = buildFulPanel(orderId, null);
+      }
+      bindPanelBtn(orderId);
+    }
+
+    function bindPanelBtn(orderId) {
+      const btn = document.getElementById('ful-action-btn');
+      if (!btn) return;
+      btn.addEventListener('click', async () => {
+        const type = btn.dataset.actionType;
+        if (type === 'dispatch') {
+          document.getElementById('dispatch-order-id').value = orderId;
+          document.getElementById('dispatch-modal').style.display = 'flex';
+          return;
+        }
+        btn.disabled = true; btn.textContent = 'Working…';
+        try {
+          if (type === 'pick')     await ApiService.pickOrder(orderId);
+          if (type === 'pack')     await ApiService.packOrder(orderId);
+          if (type === 'complete') await ApiService.completeOrder(orderId);
+          await loadFulPanel(orderId);
+          showToast(`Order ${type === 'complete' ? 'completed' : type + 'ed'}!`);
+          if (type === 'complete') loadTab('fulfillment');
+        } catch(e) { showToast(e.message || 'Action failed', 'error'); btn.disabled = false; }
+      });
+    }
+
+    // Row click + "Fulfill" button → load panel
+    document.getElementById('ful-tbody')?.addEventListener('click', e => {
+      const row = e.target.closest('.ful-row');
+      const btn = e.target.closest('[data-action="start-fulfillment"]');
+      const orderId = (row || btn)?.dataset?.orderId || (row || btn)?.dataset?.id;
+      if (!orderId) return;
+      document.querySelectorAll('.ful-row').forEach(r => r.style.background = '');
+      if (row) row.style.background = '#FFF7ED';
+      loadFulPanel(orderId);
+    });
+
+    // Dispatch modal
+    document.getElementById('dispatch-cancel')?.addEventListener('click', () => {
+      document.getElementById('dispatch-modal').style.display = 'none';
+    });
+    document.getElementById('dispatch-modal')?.addEventListener('click', e => {
+      if (e.target === e.currentTarget) e.currentTarget.style.display = 'none';
+    });
+    document.getElementById('dispatch-confirm')?.addEventListener('click', async () => {
+      const orderId  = document.getElementById('dispatch-order-id')?.value;
+      const carrier  = document.getElementById('dispatch-carrier')?.value;
+      const tracking = document.getElementById('dispatch-tracking')?.value.trim() || undefined;
+      const eta      = document.getElementById('dispatch-eta')?.value || undefined;
+      if (!carrier) return showToast('Carrier is required', 'error');
+      const btn = document.getElementById('dispatch-confirm');
+      btn.disabled = true; btn.textContent = 'Dispatching…';
+      try {
+        await ApiService.dispatchOrder(orderId, {
+          carrier,
+          trackingNumber: tracking,
+          estimatedDeliveryDate: eta ? (eta.length === 16 ? eta + ':00' : eta) : undefined,
+        });
+        document.getElementById('dispatch-modal').style.display = 'none';
+        await loadFulPanel(orderId);
+        showToast('Order dispatched!');
+      } catch(e) { showToast(e.message || 'Dispatch failed', 'error'); }
+      finally { btn.disabled = false; btn.textContent = 'Dispatch'; }
+    });
+  }
+
   if (tab === 'shipments') {
     document.getElementById('btn-create-shipment')?.addEventListener('click', () => openDrawer('shipment', null));
+
+    // Track by tracking number
+    async function doTrack() {
+      const num = document.getElementById('track-number-input')?.value.trim();
+      const resultEl = document.getElementById('track-result');
+      if (!num || !resultEl) return;
+      resultEl.innerHTML = '<span style="color:#94A3B8;font-size:13px">Searching…</span>';
+      try {
+        const res = await ApiService.trackShipment(num);
+        const s = res?.data || res;
+        if (!s?.id) throw new Error('Not found');
+        const statusColors = { PENDING:'#f59e0b', IN_TRANSIT:'#3b82f6', OUT_FOR_DELIVERY:'#8b5cf6', DELIVERED:'#10b981', CANCELLED:'#ef4444' };
+        const clr = statusColors[s.status] || '#94a3b8';
+        resultEl.innerHTML = `
+          <div style="border:1.5px solid ${clr}30;border-radius:12px;padding:16px 20px;background:${clr}08;display:flex;gap:20px;flex-wrap:wrap;align-items:center">
+            <div>
+              <div style="font-size:11px;color:#94A3B8;font-weight:600;text-transform:uppercase;letter-spacing:.06em">Tracking #</div>
+              <div style="font-size:14px;font-weight:700;color:#0F172A">${esc(s.trackingNumber||num)}</div>
+            </div>
+            <div>
+              <div style="font-size:11px;color:#94A3B8;font-weight:600;text-transform:uppercase;letter-spacing:.06em">Carrier</div>
+              <div style="font-size:14px;font-weight:700;color:#0F172A">${esc(s.carrier||'—')}</div>
+            </div>
+            <div>
+              <div style="font-size:11px;color:#94A3B8;font-weight:600;text-transform:uppercase;letter-spacing:.06em">Status</div>
+              <span style="background:${clr}20;color:${clr};padding:3px 10px;border-radius:99px;font-size:12px;font-weight:700">${s.status||'—'}</span>
+            </div>
+            <div>
+              <div style="font-size:11px;color:#94A3B8;font-weight:600;text-transform:uppercase;letter-spacing:.06em">Est. Delivery</div>
+              <div style="font-size:14px;font-weight:700;color:#0F172A">${fmt.date(s.estimatedDeliveryDate||s.estimatedDelivery||null)}</div>
+            </div>
+            ${s.actualDeliveryDate ? `<div>
+              <div style="font-size:11px;color:#94A3B8;font-weight:600;text-transform:uppercase;letter-spacing:.06em">Delivered On</div>
+              <div style="font-size:14px;font-weight:700;color:#10b981">${fmt.date(s.actualDeliveryDate)}</div>
+            </div>` : ''}
+            <div style="margin-left:auto">
+              <div style="font-size:11px;color:#94A3B8;font-weight:600;text-transform:uppercase;letter-spacing:.06em">Order</div>
+              <div style="font-size:12px;color:#0F172A">#${(s.order?.id||s.orderId||'—').toString().slice(-8)}</div>
+            </div>
+          </div>`;
+      } catch(err) {
+        const msg = err?.message && err.message !== 'Not found' ? `: ${err.message}` : '';
+        resultEl.innerHTML = `<div class="d-alert d-alert-err" style="margin:0">No shipment found for tracking number "<strong>${esc(num)}</strong>"${msg}</div>`;
+      }
+    }
+    document.getElementById('btn-track-shipment')?.addEventListener('click', doTrack);
+    document.getElementById('track-number-input')?.addEventListener('keydown', e => { if (e.key === 'Enter') doTrack(); });
+
     document.getElementById('btn-filter-shipments')?.addEventListener('click', async () => {
       const status = document.getElementById('shipment-status-filter')?.value || '';
       const tbody = document.getElementById('shipments-tbody');
@@ -2689,14 +4430,9 @@ function bindTab(tab) {
 }
 
 async function loadCategories(selectedId) {
-  try {
-    const cats = await ApiService.getCategories();
-    const list = cats.content || cats || [];
-    if (list.length) _categoryCache = list;
-
+  const populateSel = (list) => {
     const sel = document.getElementById('d-prod-cat');
     const filterSel = document.getElementById('product-cat-filter');
-
     [sel, filterSel].filter(Boolean).forEach(el => {
       const existing = new Set([...el.options].map(o => o.value));
       list.forEach(c => {
@@ -2707,14 +4443,41 @@ async function loadCategories(selectedId) {
         }
       });
     });
+    const sel2 = document.getElementById('d-prod-cat');
+    if (sel2 && selectedId) sel2.value = selectedId;
+  };
 
-    if (sel && selectedId) sel.value = selectedId;
+  // Pre-fill immediately from cache so the dropdown isn't empty while fetching
+  if (_categoryCache.length) populateSel(_categoryCache);
+
+  try {
+    const cats = await ApiService.getCategories();
+    const list = Array.isArray(cats?.data) ? cats.data
+               : Array.isArray(cats?.content) ? cats.content
+               : Array.isArray(cats) ? cats : [];
+    if (list.length) { _categoryCache = list; populateSel(list); }
   } catch(_){}
 }
 
 async function viewOrderDetail(id) {
-  let order = {};
-  try { order = await ApiService.getOrder(id); } catch(_){}
+  let order = {}, shipment = null;
+  try {
+    [order, shipment] = await Promise.all([
+      ApiService.getOrder(id).catch(() => ({})),
+      ApiService.getShipmentByOrder(id).then(r => r?.data || r).catch(() => null)
+    ]);
+  } catch(_){}
+  const ship = Array.isArray(shipment) ? shipment[0] : shipment;
+  const shipSection = ship ? `
+    <div style="margin-top:16px;padding:12px;background:#F0FDF4;border-radius:10px;border:1px solid #BBF7D0">
+      <div style="font-size:12px;font-weight:700;color:#166534;margin-bottom:8px">🚚 Shipment</div>
+      <div style="font-size:12px;color:#15803D;display:flex;gap:16px;flex-wrap:wrap">
+        <span>Carrier: <b>${esc(ship.carrier||'—')}</b></span>
+        <span>Tracking: <b>${esc(ship.trackingNumber||'—')}</b></span>
+        <span>Status: ${statusBdg(ship.status||'PENDING')}</span>
+        ${ship.estimatedDelivery ? `<span>ETA: <b>${fmt.date(ship.estimatedDelivery)}</b></span>` : ''}
+      </div>
+    </div>` : '';
   document.getElementById('d-drawer-title').textContent = `Order #${id}`;
   document.getElementById('d-drawer-body').innerHTML = `
     <div class="d-alert d-alert-info">Customer: <b>${order.customerName||order.userName||'—'}</b> · ${order.email||''}</div>
@@ -2730,6 +4493,7 @@ async function viewOrderDetail(id) {
         </div>`).join('')}
       <div style="display:flex;justify-content:space-between;padding:12px 0 0;font-weight:700;font-size:14px"><span>Total</span><span>${fmt.money(order.totalAmount||order.total||0)}</span></div>
     </div>
+    ${shipSection}
     <div class="f-field" style="margin-top:16px"><label class="f-lbl">Update Status</label>
       <select class="f-sel" id="order-status-upd">
         ${['PENDING','PROCESSING','FULFILLED','DELIVERED','CANCELLED','REFUNDED'].map(s=>`<option ${order.status===s?'selected':''}>${s}</option>`).join('')}
@@ -2958,96 +4722,243 @@ function bindSystemTab() {
     } catch(e) { showMsg(e.message||'Save failed', false); }
     finally { btn.disabled=false; btn.textContent='Save Configuration'; }
   });
+
+  // ── MTN sandbox test runner ──────────────────────────────
+  document.getElementById('btn-run-mtn-tests')?.addEventListener('click', async () => {
+    const btn      = document.getElementById('btn-run-mtn-tests');
+    const statusEl = document.getElementById('mtn-test-status');
+    const resultsEl= document.getElementById('mtn-test-results');
+    const colKey   = document.getElementById('mtn-col-key')?.value.trim() || undefined;
+    const disKey   = document.getElementById('mtn-dis-key')?.value.trim() || undefined;
+
+    btn.disabled = true; btn.textContent = '⏳ Running 13 tests…';
+    if (statusEl) { statusEl.style.display=''; statusEl.style.color='#1E40AF'; statusEl.textContent='Connecting to MTN MoMo sandbox…'; }
+    if (resultsEl) resultsEl.style.display = 'none';
+
+    try {
+      const results = await ApiService.runMtnSandboxTests({ collectionKey: colKey, disbursementKey: disKey });
+      const list = Array.isArray(results) ? results : (results?.data || []);
+
+      const passed = list.filter(r => r.actualResult === 'Pass').length;
+      const failed = list.filter(r => r.actualResult === 'Fail').length;
+      const skipped= list.filter(r => r.actualResult === 'Not Tested').length;
+
+      if (statusEl) {
+        statusEl.style.color = failed > 0 ? '#991B1B' : '#065F46';
+        statusEl.textContent = `Done — ${passed} passed · ${failed} failed · ${skipped} skipped. Report saved to mtn_sandbox_test_report.md on server.`;
+      }
+
+      if (resultsEl && list.length) {
+        resultsEl.style.display = '';
+        resultsEl.innerHTML = `
+          <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">
+            <span class="bdg bdg-green">${passed} Pass</span>
+            <span class="bdg bdg-red">${failed} Fail</span>
+            ${skipped ? `<span class="bdg bdg-yellow">${skipped} Skipped</span>` : ''}
+          </div>
+          <table class="dt" style="font-size:11px">
+            <thead><tr><th>#</th><th>Scenario</th><th>Step</th><th>Result</th><th>Response</th></tr></thead>
+            <tbody>
+              ${list.map(r => `
+                <tr>
+                  <td>${r.testCaseId}</td>
+                  <td style="white-space:nowrap;font-weight:600">${esc(r.scenarioTitle||'')}</td>
+                  <td>${esc(r.stepDescription||'')}</td>
+                  <td><span class="bdg ${r.actualResult==='Pass'?'bdg-green':r.actualResult==='Fail'?'bdg-red':'bdg-yellow'}">${r.actualResult}</span></td>
+                  <td style="max-width:220px;white-space:normal;font-size:10px;color:#64748B">${esc(String(r.apiResponse||'').slice(0,120))}</td>
+                </tr>`).join('')}
+            </tbody>
+          </table>`;
+      }
+    } catch(e) {
+      if (statusEl) { statusEl.style.color='#991B1B'; statusEl.textContent = e.message || 'MTN test runner failed'; }
+    } finally {
+      btn.disabled = false; btn.textContent = '▶ Run MTN Sandbox Tests';
+    }
+  });
+
+  // ── API health pings ─────────────────────────────────────
+  document.getElementById('btn-run-pings')?.addEventListener('click', async () => {
+    const btn = document.getElementById('btn-run-pings');
+    btn.disabled = true; btn.textContent = '⏳ Pinging…';
+
+    async function ping(badgeId, fn) {
+      const badge = document.getElementById(badgeId);
+      if (badge) { badge.className = 'bdg bdg-yellow'; badge.textContent = 'Checking…'; }
+      try {
+        await fn();
+        if (badge) { badge.className = 'bdg bdg-green'; badge.textContent = 'OK'; }
+      } catch(_) {
+        if (badge) { badge.className = 'bdg bdg-red'; badge.textContent = 'Error'; }
+      }
+    }
+
+    await Promise.allSettled([
+      ping('ping-products-badge', () => ApiService.pingProductApi()),
+      ping('ping-auth-badge',     () => ApiService.getProfile()),
+      ping('ping-db-badge',       () => ApiService.inventory.getItems()),
+    ]);
+
+    btn.disabled = false; btn.textContent = '🏓 Ping All Endpoints';
+  });
 }
 
 // ── Support tab ───────────────────────────────────────────
 let _supActiveChatId = null;
 
 function bindSupportTab() {
-  // Tab switching (Tickets / Live Chat)
-  document.querySelectorAll('.sup-list-tab').forEach(btn => {
+  // ── Main sub-tab switching ─────────────────────────────
+  document.querySelectorAll('.sup-main-tab').forEach(btn => {
     btn.addEventListener('click', () => {
-      document.querySelectorAll('.sup-list-tab').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      const which = btn.dataset.supTab;
-      document.getElementById('sup-tab-tickets').style.display = which === 'tickets' ? '' : 'none';
-      document.getElementById('sup-tab-chats').style.display   = which === 'chats'   ? '' : 'none';
+      _supSubTab = btn.dataset.supMain;
+      document.querySelectorAll('.sup-main-tab').forEach(b => b.classList.toggle('active', b===btn));
+      ['tickets','chats','faq'].forEach(id => {
+        const el = document.getElementById(`sup-panel-${id}`);
+        if (el) el.style.display = id === _supSubTab ? '' : 'none';
+      });
     });
   });
 
-  // Ticket click → load messages (REST, no real-time needed for tickets)
-  document.querySelectorAll('.sup-item[data-ticket-id]').forEach(el => {
-    el.addEventListener('click', async () => {
-      // Disconnect any active chat WS
-      if (_supActiveChatId) {
-        unsubscribeWS(`/topic/live-chat/${_supActiveChatId}`);
-        _supActiveChatId = null;
-      }
-      document.querySelectorAll('.sup-item').forEach(x => x.classList.remove('sel'));
-      el.classList.add('sel');
-      const ticketId = el.dataset.ticketId;
-      const panel = document.getElementById('sup-chat-panel');
-      panel.innerHTML = `<div style="padding:20px;color:#94A3B8">Loading…</div>`;
-      try {
-        const [tRes, msgRes] = await Promise.all([
-          ApiService.getSupportTicket(ticketId),
-          ApiService.support.getTicketMessages(ticketId)
-        ]);
-        const ticket = tRes.data || tRes;
-        const msgs = msgRes.data || [];
-        const customerName = ticket.customer
-          ? `${ticket.customer.firstName||''} ${ticket.customer.lastName||''}`.trim()
-          : 'Customer';
-        panel.innerHTML = `
-          <div class="sup-chat-hd">
-            <div class="dash-user-av">${customerName[0]||'C'}</div>
-            <div><div style="font-size:13px;font-weight:700">${ticket.title||ticket.subject||'Ticket'}</div><div style="font-size:11px;color:#94A3B8">${customerName}</div></div>
-            ${statusBdg(ticket.status||'OPEN')}
-            <div style="margin-left:auto;display:flex;gap:6px">
-              <button class="btn-d btn-d-success btn-d-sm" id="btn-resolve-ticket" data-id="${ticketId}">Resolve</button>
+  // ── My Queue (assigned-to-me tickets) ──────────────────
+  document.querySelector('[data-action="sup-filter-assigned"]')?.addEventListener('click', async (e) => {
+    _supTicketFilter = '__assigned__';
+    document.querySelectorAll('[data-action="sup-filter"]').forEach(b => {
+      b.classList.remove('btn-d-primary'); b.classList.add('btn-d-sec');
+    });
+    e.currentTarget.classList.remove('btn-d-sec'); e.currentTarget.classList.add('btn-d-warning');
+    const res = await ApiService.getAssignedTickets().catch(() => null);
+    const tickets = extractList(res);
+    const priorityClr = { HIGH:'#ef4444', CRITICAL:'#dc2626', MEDIUM:'#f59e0b', LOW:'#10b981' };
+    const html = tickets.length ? tickets.map(t => `
+      <div class="sup-item" data-ticket-id="${t.id}" style="cursor:pointer">
+        <div class="sup-item-title">${esc(t.title||'Support Request')}</div>
+        <div class="sup-item-meta">
+          ${statusBdg(t.status||'OPEN')}
+          <span style="color:${priorityClr[t.priority]||'#94A3B8'};font-size:10px;font-weight:700">${t.priority||''}</span>
+          <span style="font-size:11px;color:#94A3B8">${fmt.ago(t.updatedAt||t.createdAt)}</span>
+        </div>
+        <div style="font-size:11px;color:#64748B;margin-top:3px">${esc(t.customer?.firstName||'')} ${esc(t.customer?.lastName||'')} · <em style="color:#3B82F6">Assigned to me</em></div>
+      </div>`).join('') :
+      `<div class="d-empty"><div class="d-empty-ico">✅</div><div class="d-empty-ttl">No tickets assigned to you</div></div>`;
+    const list = document.getElementById('sup-ticket-list');
+    if (list) { list.innerHTML = html; bindTicketClicks(); }
+  });
+
+  // ── Ticket status filter ───────────────────────────────
+  document.querySelectorAll('[data-action="sup-filter"]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      _supTicketFilter = btn.dataset.status;
+      document.querySelectorAll('[data-action="sup-filter"]').forEach(b => {
+        b.classList.toggle('btn-d-primary', b.dataset.status === _supTicketFilter);
+        b.classList.toggle('btn-d-sec',     b.dataset.status !== _supTicketFilter);
+      });
+      const myQ = document.querySelector('[data-action="sup-filter-assigned"]');
+      if (myQ) { myQ.classList.remove('btn-d-warning'); myQ.classList.add('btn-d-sec'); }
+      const res = await ApiService.getSupportTickets({ page:0, size:100, status: _supTicketFilter }).catch(() => null);
+      const tickets = extractList(res);
+      const priorityClr = { HIGH:'#ef4444', CRITICAL:'#dc2626', MEDIUM:'#f59e0b', LOW:'#10b981' };
+      const html = tickets.length ? tickets.map(t => `
+        <div class="sup-item" data-ticket-id="${t.id}" style="cursor:pointer">
+          <div class="sup-item-title">${esc(t.title||'Support Request')}</div>
+          <div class="sup-item-meta">
+            ${statusBdg(t.status||'OPEN')}
+            <span style="color:${priorityClr[t.priority]||'#94A3B8'};font-size:10px;font-weight:700">${t.priority||''}</span>
+            <span style="font-size:11px;color:#94A3B8">${fmt.ago(t.updatedAt||t.createdAt)}</span>
+          </div>
+          <div style="font-size:11px;color:#64748B;margin-top:3px">${esc(t.customer?.firstName||'')} ${esc(t.customer?.lastName||'')}${t.assignedAgent ? ` · Agent: ${esc(t.assignedAgent.firstName||'')}` : ' · <em style="color:#f59e0b">Unassigned</em>'}</div>
+        </div>`).join('') :
+        `<div class="d-empty"><div class="d-empty-ico">🎫</div><div class="d-empty-ttl">No tickets</div></div>`;
+      const list = document.getElementById('sup-ticket-list');
+      if (list) { list.innerHTML = html; bindTicketClicks(); }
+    });
+  });
+
+  // ── Ticket click → messages + assign panel ─────────────
+  function bindTicketClicks() {
+    document.querySelectorAll('#sup-ticket-list .sup-item[data-ticket-id]').forEach(el => {
+      el.addEventListener('click', async () => {
+        if (_supActiveChatId) { unsubscribeWS(`/topic/live-chat/${_supActiveChatId}`); _supActiveChatId = null; }
+        document.querySelectorAll('.sup-item').forEach(x => x.classList.remove('sel'));
+        el.classList.add('sel');
+        const ticketId = el.dataset.ticketId;
+        const panel = document.getElementById('sup-chat-panel');
+        panel.innerHTML = `<div style="padding:20px;color:#94A3B8">Loading…</div>`;
+        try {
+          const [tRes, msgRes] = await Promise.all([
+            ApiService.getSupportTicket(ticketId),
+            ApiService.support.getTicketMessages(ticketId)
+          ]);
+          const ticket = tRes.data || tRes;
+          const msgs   = msgRes.data || [];
+          const customerName = ticket.customer
+            ? `${ticket.customer.firstName||''} ${ticket.customer.lastName||''}`.trim() : 'Customer';
+          const agentOpts = _supAgentCache.map(a =>
+            `<option value="${a.id}" ${ticket.assignedAgent?.id===a.id?'selected':''}>${a.firstName||''} ${a.lastName||''} (${a.role})</option>`
+          ).join('');
+          panel.innerHTML = `
+            <div class="sup-chat-hd">
+              <div class="dash-user-av">${customerName[0]||'C'}</div>
+              <div>
+                <div style="font-size:13px;font-weight:700">${esc(ticket.title||ticket.subject||'Ticket')}</div>
+                <div style="font-size:11px;color:#94A3B8">${customerName} · Priority: <b>${ticket.priority||'—'}</b></div>
+              </div>
+              ${statusBdg(ticket.status||'OPEN')}
+              <div style="margin-left:auto;display:flex;gap:6px;align-items:center">
+                <select id="sup-assign-agent" class="dash-inp" style="font-size:12px;padding:4px 8px;width:170px">
+                  <option value="">— Assign agent —</option>
+                  ${agentOpts}
+                </select>
+                <button class="btn-d btn-d-primary btn-d-sm" id="btn-do-assign">Assign</button>
+                <button class="btn-d btn-d-success btn-d-sm" id="btn-resolve-ticket" data-id="${ticketId}">Resolve</button>
+              </div>
             </div>
-          </div>
-          <div class="sup-messages" id="sup-msgs">
-            ${msgs.length ? msgs.map(m => {
-              const isAgent = m.sender?.roles?.some(r => (r.name||r||'').includes('AGENT') || (r.name||r||'').includes('ADMIN')) ?? false;
-              return `<div><div class="sup-bubble ${isAgent?'agent':'customer'}">${m.message||m.content||''}</div><div style="font-size:10px;color:#94A3B8;text-align:${isAgent?'right':'left'};margin-top:3px">${fmt.ago(m.createdAt)}</div></div>`;
-            }).join('') : '<div style="text-align:center;color:#94A3B8;padding:24px">No messages yet</div>'}
-          </div>
-          <div class="sup-inp-row">
-            <textarea id="sup-reply" placeholder="Type your reply…"></textarea>
-            <button class="btn-d btn-d-primary" id="sup-send">Send</button>
-          </div>`;
-        document.getElementById('sup-send')?.addEventListener('click', async () => {
-          const msg = document.getElementById('sup-reply')?.value?.trim();
-          if (!msg) return;
-          await ApiService.replyToTicket(ticketId, { message: msg }).catch(() => {});
-          document.getElementById('sup-reply').value = '';
-          const box = document.getElementById('sup-msgs');
-          if (box) { box.innerHTML += `<div><div class="sup-bubble agent">${msg}</div><div style="font-size:10px;color:#94A3B8;text-align:right;margin-top:3px">just now</div></div>`; box.scrollTop = box.scrollHeight; }
-        });
-        document.getElementById('btn-resolve-ticket')?.addEventListener('click', async () => {
-          await ApiService.resolveTicket(ticketId).catch(() => {});
-          showToast('Ticket resolved'); loadTab('support');
-        });
-        document.getElementById('sup-msgs').scrollTop = 99999;
-      } catch(_) { panel.innerHTML = `<div class="d-alert d-alert-err" style="margin:16px">Failed to load ticket</div>`; }
+            <div class="sup-messages" id="sup-msgs">
+              ${msgs.length ? msgs.map(m => {
+                const isAgent = m.sender?.roles?.some(r => (r.name||r||'').includes('AGENT')||(r.name||r||'').includes('ADMIN')) ?? false;
+                return `<div><div class="sup-bubble ${isAgent?'agent':'customer'}">${m.message||m.content||''}</div><div style="font-size:10px;color:#94A3B8;text-align:${isAgent?'right':'left'};margin-top:3px">${fmt.ago(m.createdAt)}</div></div>`;
+              }).join('') : '<div style="text-align:center;color:#94A3B8;padding:24px">No messages yet</div>'}
+            </div>
+            <div class="sup-inp-row">
+              <textarea id="sup-reply" placeholder="Type your reply…"></textarea>
+              <button class="btn-d btn-d-primary" id="sup-send">Send</button>
+            </div>`;
+          document.getElementById('btn-do-assign')?.addEventListener('click', async () => {
+            const agentId = document.getElementById('sup-assign-agent')?.value;
+            if (!agentId) return showToast('Select an agent first', 'error');
+            await ApiService.assignTicket(ticketId, agentId).catch(e => { throw e; });
+            showToast('Ticket assigned'); loadTab('support');
+          });
+          document.getElementById('sup-send')?.addEventListener('click', async () => {
+            const msg = document.getElementById('sup-reply')?.value?.trim();
+            if (!msg) return;
+            await ApiService.replyToTicket(ticketId, { message: msg }).catch(() => {});
+            document.getElementById('sup-reply').value = '';
+            const box = document.getElementById('sup-msgs');
+            if (box) { box.innerHTML += `<div><div class="sup-bubble agent">${msg}</div><div style="font-size:10px;color:#94A3B8;text-align:right;margin-top:3px">just now</div></div>`; box.scrollTop = box.scrollHeight; }
+          });
+          document.getElementById('btn-resolve-ticket')?.addEventListener('click', async () => {
+            await ApiService.resolveTicket(ticketId).catch(() => {});
+            showToast('Ticket resolved'); loadTab('support');
+          });
+          document.getElementById('sup-msgs').scrollTop = 99999;
+        } catch(_) { panel.innerHTML = `<div class="d-alert d-alert-err" style="margin:16px">Failed to load ticket</div>`; }
+      });
     });
-  });
+  }
+  bindTicketClicks();
 
-  // Live chat session click → real-time STOMP chat
+  // ── Live chat session click ─────────────────────────────
   document.querySelectorAll('.sup-item[data-chat-id]').forEach(el => {
     el.addEventListener('click', async () => {
       document.querySelectorAll('.sup-item').forEach(x => x.classList.remove('sel'));
       el.classList.add('sel');
       const sessionId = el.dataset.chatId;
-      const panel = document.getElementById('sup-chat-panel');
+      const panel = document.getElementById('sup-chat-panel-live') || document.getElementById('sup-chat-panel');
       panel.innerHTML = `<div style="padding:20px;color:#94A3B8">Loading chat…</div>`;
-
       try {
         const msgRes = await ApiService.chat.getMessages(sessionId);
         const msgs = msgRes.data || [];
         const me = ApiService.getCurrentUser();
-
         panel.innerHTML = `
           <div class="sup-chat-hd">
             <div class="dash-user-av">💬</div>
@@ -3068,14 +4979,11 @@ function bindSupportTab() {
             }).join('') || '<div style="text-align:center;color:#94A3B8;padding:24px">No messages yet</div>'}
           </div>
           <div class="sup-inp-row">
-            <textarea id="sup-live-reply" placeholder="Type a message…" ${msgs.length === 0 ? '' : ''}></textarea>
+            <textarea id="sup-live-reply" placeholder="Type a message…"></textarea>
             <button class="btn-d btn-d-primary" id="sup-live-send">Send</button>
           </div>`;
-
-        // Load session info for header
         ApiService.chat.getSessions().then(r => {
-          const sessions = r.data || [];
-          const session = sessions.find(s => s.id === sessionId);
+          const session = (r.data||[]).find(s => s.id === sessionId);
           if (session) {
             const subEl = document.getElementById('sup-chat-subject');
             const stEl  = document.getElementById('sup-chat-status-label');
@@ -3083,70 +4991,104 @@ function bindSupportTab() {
             if (stEl)  stEl.textContent  = session.status + (session.agent ? ` · Agent: ${session.agent.firstName||session.agent.email}` : ' · Unassigned');
           }
         }).catch(() => {});
-
         document.getElementById('sup-msgs-live').scrollTop = 99999;
-
-        // Send button
         document.getElementById('sup-live-send')?.addEventListener('click', async () => {
           const ta = document.getElementById('sup-live-reply');
-          const msg = ta?.value?.trim();
-          if (!msg) return;
-          ta.value = '';
+          const msg = ta?.value?.trim(); if (!msg) return; ta.value = '';
           await ApiService.chat.sendMessage(sessionId, msg).catch(() => {});
         });
-
-        // Join / assign self as agent
         document.getElementById('btn-assign-self')?.addEventListener('click', async () => {
           if (!me?.id) return;
-          await ApiService.chat.assignSession(sessionId, me.id).catch(e => showToast(e.message, 'error'));
+          await ApiService.chat.assignSession(sessionId, me.id).catch(e => showToast(e.message,'error'));
           const stEl = document.getElementById('sup-chat-status-label');
           if (stEl) stEl.textContent = 'ASSIGNED · You are the agent';
           showToast('You joined this chat as agent');
         });
-
-        // Close session
         document.getElementById('btn-close-chat')?.addEventListener('click', async () => {
           if (!confirm('Close this chat session?')) return;
           await ApiService.chat.closeSession(sessionId).catch(() => {});
           if (_supActiveChatId) { unsubscribeWS(`/topic/live-chat/${_supActiveChatId}`); _supActiveChatId = null; }
-          showToast('Chat closed');
-          loadTab('support');
+          showToast('Chat closed'); loadTab('support');
         });
-
-        // Subscribe via STOMP for real-time messages
-        if (_supActiveChatId && _supActiveChatId !== sessionId) {
-          unsubscribeWS(`/topic/live-chat/${_supActiveChatId}`);
-        }
+        if (_supActiveChatId && _supActiveChatId !== sessionId) unsubscribeWS(`/topic/live-chat/${_supActiveChatId}`);
         _supActiveChatId = sessionId;
-
         connectWS(() => {
           subscribeWS(`/topic/live-chat/${sessionId}`, (msgData) => {
             const isMe = msgData.senderId === me?.id;
-            const box = document.getElementById('sup-msgs-live');
-            if (!box) return;
+            const box = document.getElementById('sup-msgs-live'); if (!box) return;
             const lbl = !isMe ? `<div style="font-size:10px;opacity:.6;margin-bottom:2px">${(msgData.senderEmail||'').split('@')[0]}</div>` : '';
             box.innerHTML += `<div style="display:flex;flex-direction:column;align-items:${isMe?'flex-end':'flex-start'};margin-bottom:8px">${lbl}<div class="sup-bubble ${isMe?'agent':'customer'}">${msgData.message||''}</div></div>`;
             box.scrollTop = box.scrollHeight;
           });
-          // Watch for session updates (e.g. close)
           subscribeWS('/topic/live-chat/sessions', (session) => {
-            if (session.id === sessionId && session.status === 'CLOSED') {
-              showToast('Chat session was closed');
-              loadTab('support');
-            }
+            if (session.id === sessionId && session.status === 'CLOSED') { showToast('Chat session was closed'); loadTab('support'); }
           });
         });
-
       } catch(_) { panel.innerHTML = `<div class="d-alert d-alert-err" style="margin:16px">Failed to load chat</div>`; }
     });
   });
 
-  // Real-time: new sessions notification for agents
+  // ── FAQ CRUD ───────────────────────────────────────────
+  function openFaqModal(faq = null) {
+    document.getElementById('faq-modal-title').textContent = faq ? 'Edit FAQ' : 'New FAQ';
+    document.getElementById('faq-question').value  = faq?.question  || '';
+    document.getElementById('faq-answer').value    = faq?.answer    || '';
+    document.getElementById('faq-category').value  = faq?.category  || '';
+    document.getElementById('faq-published').checked = faq ? faq.published : true;
+    document.getElementById('faq-edit-id').value   = faq?.id        || '';
+    document.getElementById('faq-modal').style.display = 'flex';
+    document.getElementById('faq-question').focus();
+  }
+  function closeFaqModal() { document.getElementById('faq-modal').style.display = 'none'; }
+
+  document.getElementById('btn-new-faq')?.addEventListener('click', () => openFaqModal());
+  document.getElementById('faq-modal-cancel')?.addEventListener('click', closeFaqModal);
+  document.getElementById('faq-modal')?.addEventListener('click', e => { if (e.target === e.currentTarget) closeFaqModal(); });
+
+  document.getElementById('faq-modal-save')?.addEventListener('click', async () => {
+    const question  = document.getElementById('faq-question')?.value.trim();
+    const answer    = document.getElementById('faq-answer')?.value.trim();
+    const category  = document.getElementById('faq-category')?.value.trim();
+    const published = document.getElementById('faq-published')?.checked ?? true;
+    const editId    = document.getElementById('faq-edit-id')?.value;
+    if (!question || !answer || !category) return showToast('Question, answer and category are required', 'error');
+    const btn = document.getElementById('faq-modal-save');
+    btn.disabled = true; btn.textContent = 'Saving…';
+    try {
+      const payload = { question, answer, category, published };
+      if (editId) await ApiService.updateFaq(editId, payload);
+      else        await ApiService.createFaq(payload);
+      showToast(editId ? 'FAQ updated' : 'FAQ created');
+      closeFaqModal();
+      loadTab('support');
+    } catch(e) { showToast(e.message||'Save failed','error'); }
+    finally { btn.disabled = false; btn.textContent = 'Save FAQ'; }
+  });
+
+  document.getElementById('faq-tbody')?.addEventListener('click', async e => {
+    const editBtn   = e.target.closest('[data-action="edit-faq"]');
+    const deleteBtn = e.target.closest('[data-action="delete-faq"]');
+    if (editBtn) {
+      try {
+        const res = await ApiService.getFaq(editBtn.dataset.id);
+        const faq = res?.data || res || _supFaqCache.find(f => f.id === editBtn.dataset.id);
+        if (faq) openFaqModal(faq);
+      } catch(_) {
+        const faq = _supFaqCache.find(f => f.id === editBtn.dataset.id);
+        if (faq) openFaqModal(faq);
+      }
+    }
+    if (deleteBtn) {
+      if (!confirm('Delete this FAQ article?')) return;
+      await ApiService.deleteFaq(deleteBtn.dataset.id).catch(e => showToast(e.message,'error'));
+      showToast('FAQ deleted'); loadTab('support');
+    }
+  });
+
+  // Real-time: new sessions notification
   connectWS(() => {
     subscribeWS('/topic/live-chat/sessions', (session) => {
-      if (session.status === 'OPEN') {
-        showToast(`New live chat: "${session.subject || 'Session'}"`, 'info');
-      }
+      if (session.status === 'OPEN') showToast(`New live chat: "${session.subject || 'Session'}"`, 'info');
     });
   });
 }
@@ -3466,14 +5408,290 @@ function showPOSReceipt(receipt) {
 }
 
 // ── Reports ───────────────────────────────────────────────
-function downloadReport(type, format) {
-  showToast(`Preparing ${type} report as ${format}…`);
-  setTimeout(() => {
-    const a = document.createElement('a');
-    a.download = `${type}-report.${format.toLowerCase()}`;
-    a.href = 'data:text/plain,Report data';
-    a.click();
-  }, 800);
+async function downloadReport(type, format) {
+  const from = document.getElementById('report-from')?.value || _finDateFrom;
+  const to   = document.getElementById('report-to')?.value   || _finDateTo;
+  showToast(`Preparing ${type} report…`);
+  try {
+    if (type === 'sales') {
+      await ApiService.downloadSalesReport({ startDate: from, endDate: to });
+    } else if (type === 'finance' && format === 'CSV') {
+      await ApiService.exportFinancialManagement({ startDate: from, endDate: to });
+    } else if (type === 'finance' && format === 'taxes') {
+      await ApiService.exportTaxRecords({ startDate: from, endDate: to });
+    } else {
+      showToast(`${type} ${format} export not yet available`, 'error');
+      return;
+    }
+    showToast('Download started', 'success');
+  } catch(e) {
+    showToast(e.message || 'Download failed', 'error');
+  }
+}
+
+// ── Finance tab bindings ──────────────────────────────────
+function bindFinanceTab() {
+  // Date range apply
+  document.getElementById('btn-fin-apply')?.addEventListener('click', () => {
+    const from = document.getElementById('fin-date-from')?.value;
+    const to   = document.getElementById('fin-date-to')?.value;
+    if (from) _finDateFrom = from;
+    if (to)   _finDateTo   = to;
+    loadTab('finance');
+  });
+
+  // Sub-tab switching (delegated via the action handler in bindEvents)
+  // but we also bind direct clicks here for the sub-tab buttons
+  document.querySelectorAll('[data-action="fin-subtab"]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      _finSubTab = btn.dataset.tab;
+      loadTab('finance');
+    });
+  });
+
+  // Export buttons
+  document.getElementById('btn-export-taxes')?.addEventListener('click', async () => {
+    try {
+      showToast('Exporting tax records…');
+      await ApiService.exportTaxRecords({ startDate: _finDateFrom, endDate: _finDateTo });
+      showToast('Download started', 'success');
+    } catch(e) { showToast(e.message || 'Export failed', 'error'); }
+  });
+
+  // ── Manual tax recording ─────────────────────────────────
+  const taxRecordForm  = document.getElementById('tax-record-form');
+  const showRecordBtn  = document.getElementById('btn-show-record-tax');
+  const cancelRecordBtn = document.getElementById('btn-cancel-record-tax');
+  showRecordBtn?.addEventListener('click', () => {
+    if (taxRecordForm) { taxRecordForm.style.display = 'flex'; showRecordBtn.style.display = 'none'; }
+    document.getElementById('tax-order-id')?.focus();
+  });
+  cancelRecordBtn?.addEventListener('click', () => {
+    if (taxRecordForm) { taxRecordForm.style.display = 'none'; showRecordBtn.style.display = ''; }
+    const inp = document.getElementById('tax-order-id'); if (inp) inp.value = '';
+  });
+  document.getElementById('btn-do-record-tax')?.addEventListener('click', async () => {
+    const orderId = document.getElementById('tax-order-id')?.value.trim();
+    if (!orderId) return showToast('Enter an Order UUID', 'error');
+    const btn = document.getElementById('btn-do-record-tax');
+    btn.disabled = true; btn.textContent = '…';
+    try {
+      const res = await ApiService.recordOrderTax(orderId);
+      const rec = res?.data || res;
+      showToast(`Tax recorded: ${fmt.money(rec?.amount || 0)} for order …${orderId.slice(-8)}`);
+      if (taxRecordForm) { taxRecordForm.style.display = 'none'; showRecordBtn.style.display = ''; }
+      loadTab('finance');
+    } catch(e) { showToast(e.message || 'Failed to record tax', 'error'); }
+    finally { btn.disabled = false; btn.textContent = 'Record'; }
+  });
+  document.getElementById('tax-order-id')?.addEventListener('keydown', e => {
+    if (e.key === 'Enter') document.getElementById('btn-do-record-tax')?.click();
+  });
+
+  document.getElementById('btn-export-fin-mgmt')?.addEventListener('click', async () => {
+    try {
+      showToast('Exporting financial management report…');
+      await ApiService.exportFinancialManagement({ startDate: _finDateFrom, endDate: _finDateTo });
+      showToast('Download started', 'success');
+    } catch(e) { showToast(e.message || 'Export failed', 'error'); }
+  });
+
+  // ── Reconciliation bindings ──────────────────────────────
+  if (_finSubTab === 'reconciliation') {
+    let _recTxnCache = [];
+
+    async function reloadRecTbody(search, statusFilter) {
+      const tbody = document.getElementById('rec-tbody');
+      if (!tbody) return;
+      let list = _recTxnCache;
+      if (search) list = list.filter(t => (t.provider||'').toLowerCase().includes(search) || (t.paymentReference||'').toLowerCase().includes(search));
+      if (statusFilter) list = list.filter(t => t.reconciliationStatus === statusFilter);
+      const rcBdg = s => {
+        const m = { MATCHED:'bdg-green', PENDING:'bdg-yellow', MISMATCH:'bdg-red', UNRECONCILED:'bdg-purple' };
+        return `<span class="bdg ${m[s]||'bdg-blue'}">${s||'—'}</span>`;
+      };
+      tbody.innerHTML = list.length ? list.map(t => `
+        <tr>
+          <td class="td-sm" title="${t.id||''}" style="font-size:10px;color:#94A3B8;max-width:80px;overflow:hidden;text-overflow:ellipsis">${(t.id||'').slice(0,8)}…</td>
+          <td class="td-b">${esc(t.provider||'—')}</td>
+          <td class="td-m">${esc(t.paymentReference||'—')}</td>
+          <td>${esc(t.transactionType||'—')}</td>
+          <td>${fmt.money(t.amount||0)}</td>
+          <td>${statusBdg(t.status)}</td>
+          <td>${rcBdg(t.reconciliationStatus)}</td>
+          <td class="td-sm" style="font-size:11px;max-width:180px;white-space:normal;color:#64748B">${esc(t.reconciliationNotes||'—')}</td>
+          <td class="td-sm">${t.reconciledAt ? fmt.date(t.reconciledAt) : '—'}</td>
+          <td>${t.reconciliationStatus !== 'MATCHED'
+            ? `<button class="btn-d btn-d-success btn-d-sm" data-action="reconcile-txn" data-id="${t.id}">Reconcile</button>`
+            : `<span style="color:#10b981;font-size:12px">✓ Matched</span>`}
+          </td>
+        </tr>`).join('') :
+        `<tr><td colspan="10"><div class="d-empty"><div class="d-empty-ico">💳</div><div class="d-empty-ttl">No matching transactions</div></div></td></tr>`;
+      // Re-bind reconcile buttons
+      tbody.querySelectorAll('[data-action="reconcile-txn"]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          btn.disabled = true; btn.textContent = 'Working…';
+          try {
+            await ApiService.reconcileTransaction(btn.dataset.id);
+            showToast('Transaction reconciled', 'success');
+            loadTab('finance');
+          } catch(e) { showToast(e.message || 'Failed', 'error'); btn.disabled = false; btn.textContent = 'Reconcile'; }
+        });
+      });
+    }
+
+    // Initial cache population (already rendered in HTML; populate cache from API for filtering)
+    ApiService.getReconciliationTransactions().then(res => {
+      _recTxnCache = Array.isArray(res?.data) ? res.data : (Array.isArray(res) ? res : []);
+    }).catch(() => {});
+
+    // Search + filter
+    const recSearch = document.getElementById('rec-search');
+    const recFilter = document.getElementById('rec-status-filter');
+    function applyRecFilter() {
+      reloadRecTbody(recSearch?.value.toLowerCase().trim(), recFilter?.value);
+    }
+    recSearch?.addEventListener('input', applyRecFilter);
+    recFilter?.addEventListener('change', applyRecFilter);
+
+    // Reconcile All
+    document.getElementById('btn-reconcile-all')?.addEventListener('click', async () => {
+      const btn = document.getElementById('btn-reconcile-all');
+      btn.disabled = true; btn.textContent = '⏳ Running…';
+      try {
+        const res = await ApiService.reconcileAll();
+        const s = res?.data || res || {};
+        showToast(`Reconciliation complete — ${s.statusBreakdown?.MATCHED||0} matched`, 'success');
+        loadTab('finance');
+      } catch(e) { showToast(e.message || 'Reconcile all failed', 'error'); }
+      finally { btn.disabled = false; btn.textContent = '⚡ Reconcile All'; }
+    });
+
+    // Individual reconcile buttons in initial render
+    document.querySelectorAll('[data-action="reconcile-txn"]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        btn.disabled = true; btn.textContent = 'Working…';
+        try {
+          await ApiService.reconcileTransaction(btn.dataset.id);
+          showToast('Transaction reconciled', 'success');
+          loadTab('finance');
+        } catch(e) { showToast(e.message || 'Failed', 'error'); btn.disabled = false; btn.textContent = 'Reconcile'; }
+      });
+    });
+
+    return; // Don't fall through to expense bindings
+  }
+
+  // Expense CRUD — only present when sub-tab is 'expenses'
+  if (_finSubTab !== 'expenses') return;
+
+  const modal    = document.getElementById('expense-modal');
+  const titleEl  = document.getElementById('expense-modal-title');
+  const idEl     = document.getElementById('expense-modal-id');
+  const catEl    = document.getElementById('exp-category');
+  const amtEl    = document.getElementById('exp-amount');
+  const dateEl   = document.getElementById('exp-date');
+  const statusEl = document.getElementById('exp-status');
+  const descEl   = document.getElementById('exp-desc');
+  const errEl    = document.getElementById('expense-modal-err');
+
+  function openExpenseModal(expense = null) {
+    if (!modal) return;
+    idEl.value     = expense?.id || '';
+    catEl.value    = expense?.category || '';
+    amtEl.value    = expense?.amount || '';
+    dateEl.value   = expense?.expenseDate || new Date().toISOString().slice(0,10);
+    statusEl.value = expense?.status || 'PENDING';
+    descEl.value   = expense?.description || '';
+    if (titleEl) titleEl.textContent = expense ? 'Edit Expense' : 'Add Expense';
+    if (errEl) { errEl.style.display = 'none'; errEl.textContent = ''; }
+    modal.style.display = 'flex';
+  }
+  function closeExpenseModal() { if (modal) modal.style.display = 'none'; }
+
+  document.getElementById('btn-add-expense')?.addEventListener('click', () => openExpenseModal(null));
+  document.getElementById('btn-close-expense-modal')?.addEventListener('click', closeExpenseModal);
+  document.getElementById('btn-cancel-expense')?.addEventListener('click', closeExpenseModal);
+
+  document.getElementById('btn-save-expense')?.addEventListener('click', async () => {
+    const id = idEl?.value;
+    const payload = {
+      category:    catEl?.value?.trim(),
+      amount:      parseFloat(amtEl?.value),
+      expenseDate: dateEl?.value,
+      status:      statusEl?.value,
+      description: descEl?.value?.trim() || null,
+    };
+    if (!payload.category || !payload.amount || !payload.expenseDate || !payload.status) {
+      if (errEl) { errEl.textContent = 'Category, amount, date and status are required.'; errEl.style.display = 'block'; }
+      return;
+    }
+    try {
+      if (id) await ApiService.updateExpense(id, payload);
+      else    await ApiService.createExpense(payload);
+      closeExpenseModal();
+      showToast(id ? 'Expense updated' : 'Expense added', 'success');
+      loadTab('finance');
+    } catch(e) {
+      if (errEl) { errEl.textContent = e.message || 'Save failed'; errEl.style.display = 'block'; }
+    }
+  });
+
+  // Edit expense — populate modal from cache
+  document.querySelectorAll('[data-action="edit-expense"]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const exp = _expenseCache.find(e => e.id === btn.dataset.id);
+      if (exp) openExpenseModal(exp);
+    });
+  });
+
+  // Quick status update
+  document.querySelectorAll('[data-action="expense-status"]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      try {
+        await ApiService.updateExpenseStatus(btn.dataset.id, btn.dataset.status);
+        showToast(`Expense marked ${btn.dataset.status.toLowerCase()}`, 'success');
+        loadTab('finance');
+      } catch(e) { showToast(e.message || 'Update failed', 'error'); }
+    });
+  });
+
+  // Delete expense
+  document.querySelectorAll('[data-action="delete-expense"]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if (!confirm('Delete this expense?')) return;
+      try {
+        await ApiService.deleteExpense(btn.dataset.id);
+        showToast('Expense deleted', 'success');
+        loadTab('finance');
+      } catch(e) { showToast(e.message || 'Delete failed', 'error'); }
+    });
+  });
+
+  // Status filter
+  document.getElementById('expense-status-filter')?.addEventListener('change', (e) => {
+    const val = e.target.value;
+    const filtered = val ? _expenseCache.filter(ex => ex.status === val) : _expenseCache;
+    const tbody = document.getElementById('expenses-tbody');
+    if (!tbody) return;
+    const rows = filtered.length ? filtered.map(ex => `
+      <tr>
+        <td class="td-sm">${fmt.date(ex.expenseDate)}</td>
+        <td class="td-b">${ex.category||'—'}</td>
+        <td>${ex.description||'—'}</td>
+        <td>${fmt.money(ex.amount||0)}</td>
+        <td>${statusBdg(ex.status||'PENDING')}</td>
+        <td>
+          <button class="btn-d btn-d-sec btn-d-sm btn-d-ico" data-action="edit-expense" data-id="${ex.id}">${I.edit}</button>
+          <button class="btn-d btn-d-sec btn-d-sm" data-action="expense-status" data-id="${ex.id}" data-status="APPROVED">✓</button>
+          <button class="btn-d btn-d-sec btn-d-sm" data-action="expense-status" data-id="${ex.id}" data-status="PAID">$</button>
+          <button class="btn-d btn-d-danger btn-d-sm btn-d-ico" data-action="delete-expense" data-id="${ex.id}">${I.trash}</button>
+        </td>
+      </tr>`) .join('') :
+      `<tr><td colspan="6"><div class="d-empty"><div class="d-empty-ico">💸</div><div class="d-empty-ttl">No expenses found</div></div></td></tr>`;
+    tbody.innerHTML = rows;
+    bindFinanceTab();
+  });
 }
 
 // ── Toast ─────────────────────────────────────────────────

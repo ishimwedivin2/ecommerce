@@ -72,7 +72,7 @@ export async function render() {
 
   const user = ApiService.getCurrentUser() || {};
   const items = _cart.items || [];
-  const subtotal = Number(_cart.totalPrice || 0);
+  const subtotal = Number(_cart.totalAmount || 0);
 
   const itemsHtml = items.map(item => `
     <div class="chk-item">
@@ -316,7 +316,7 @@ export function bindEvents(state, helpers) {
       _appliedCoupon = coupon;
       setState({ appliedCoupon: coupon });
 
-      const subtotal = Number(_cart?.totalPrice || 0);
+      const subtotal = Number(_cart?.totalAmount || 0);
       const discount = coupon.type === 'PERCENTAGE'
         ? Math.min(subtotal * coupon.amount / 100, subtotal)
         : Math.min(Number(coupon.amount), subtotal);
@@ -396,7 +396,7 @@ export function bindEvents(state, helpers) {
       setStep(2);
       showError('step2-err', err.message || 'Payment failed. Please try again.');
       btn.disabled = false;
-      const subtotal = Number(_cart?.totalPrice || 0);
+      const subtotal = Number(_cart?.totalAmount || 0);
       btn.textContent = 'Pay ' + fmtMoney(subtotal * 1.18);
     }
   });

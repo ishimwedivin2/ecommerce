@@ -299,7 +299,7 @@ export const ApiService = {
           subtotal: Number(item.subTotal) || 0
         }));
         const totalItems = res.data.totalItems ?? items.reduce((s, i) => s + (i.quantity || 0), 0);
-        res.data = { ...res.data, items, totalItems, totalPrice: Number(res.data.totalAmount) || 0 };
+        res.data = { ...res.data, items, totalItems, totalAmount: Number(res.data.totalAmount) || 0 };
       }
       return res;
     },
@@ -404,6 +404,12 @@ export const ApiService = {
     },
     async closeTicket(ticketId) {
       return await request(`/api/support/tickets/${ticketId}/close`, { method: 'PATCH' });
+    },
+    async submitSurvey(ticketId, { rating, feedback = '' } = {}) {
+      return await request(`/api/support/tickets/${ticketId}/survey`, {
+        method: 'POST',
+        body: JSON.stringify({ rating, feedback })
+      });
     }
   },
 
@@ -521,6 +527,12 @@ export const ApiService = {
     async getMovements(page = 0, size = 50) {
       return await request(`/api/inventory/movements?page=${page}&size=${size}`);
     },
+    async createItem(data) {
+      return await request('/api/inventory', { method: 'POST', body: JSON.stringify(data) });
+    },
+    async getItem(id) {
+      return await request(`/api/inventory/${id}`);
+    },
   },
 
   suppliers: {
@@ -536,6 +548,9 @@ export const ApiService = {
     },
     async setActive(id, active) {
       return await request(`/api/inventory/suppliers/${id}/active?active=${active}`, { method: 'PATCH' });
+    },
+    async getById(id) {
+      return await request(`/api/inventory/suppliers/${id}`);
     },
   },
 
@@ -557,6 +572,9 @@ export const ApiService = {
     },
     async cancel(id) {
       return await request(`/api/inventory/procurements/${id}/cancel`, { method: 'POST' });
+    },
+    async getById(id) {
+      return await request(`/api/inventory/procurements/${id}`);
     },
   },
 
@@ -723,6 +741,9 @@ export const ApiService = {
   async getShipment(id) {
     return await request(`/api/shipments/${id}`);
   },
+  async getShipmentByOrder(orderId) {
+    return await request(`/api/shipments/order/${orderId}`);
+  },
   async createShipment(data) {
     return await request('/api/shipments', { method: 'POST', body: JSON.stringify(data) });
   },
@@ -731,6 +752,41 @@ export const ApiService = {
   },
   async cancelShipment(id) {
     return await request(`/api/shipments/${id}/cancel`, { method: 'POST' });
+  },
+  async trackShipment(trackingNumber) {
+    return await request(`/api/shipments/track/${encodeURIComponent(trackingNumber)}`);
+  },
+
+  // ── Fulfillment ─────────────────────────────────────────
+  async getFulfillment(orderId) {
+    return await request(`/api/fulfillment/orders/${orderId}`);
+  },
+  async pickOrder(orderId) {
+    return await request(`/api/fulfillment/orders/${orderId}/pick`, { method: 'POST' });
+  },
+  async packOrder(orderId) {
+    return await request(`/api/fulfillment/orders/${orderId}/pack`, { method: 'POST' });
+  },
+  async dispatchOrder(orderId, data) {
+    return await request(`/api/fulfillment/orders/${orderId}/dispatch`, { method: 'POST', body: JSON.stringify(data) });
+  },
+  async completeOrder(orderId) {
+    return await request(`/api/fulfillment/orders/${orderId}/complete`, { method: 'POST' });
+  },
+
+  // ── Payment Reconciliation ───────────────────────────────
+  async getReconciliationSummary() {
+    return await request('/api/payments/reconciliation/summary');
+  },
+  async getReconciliationTransactions(orderId) {
+    const q = orderId ? `?orderId=${orderId}` : '';
+    return await request(`/api/payments/reconciliation/transactions${q}`);
+  },
+  async reconcileTransaction(id) {
+    return await request(`/api/payments/reconciliation/transactions/${id}`, { method: 'PATCH' });
+  },
+  async reconcileAll() {
+    return await request('/api/payments/reconciliation/run', { method: 'PATCH' });
   },
 
   // ── POS ─────────────────────────────────────────────────
@@ -764,6 +820,9 @@ export const ApiService = {
   async getSystemConfigurations() {
     return await request('/api/admin/configurations');
   },
+  async getSystemConfiguration(key) {
+    return await request(`/api/admin/configurations/${key}`);
+  },
   async saveSystemConfiguration(key, data) {
     return await request(`/api/admin/configurations/${key}`, { method: 'PUT', body: JSON.stringify(data) });
   },
@@ -776,8 +835,26 @@ export const ApiService = {
   async getBackups() {
     return await request('/api/admin/backups');
   },
+  async getBackup(id) {
+    return await request(`/api/admin/backups/${id}`);
+  },
   async restoreBackup(id) {
     return await request(`/api/admin/backups/${id}/restore`, { method: 'POST' });
+  },
+
+  // ── MTN Sandbox Tests ────────────────────────────────────
+  async runMtnSandboxTests({ collectionKey, disbursementKey } = {}) {
+    const headers = { 'Authorization': 'Bearer ' + localStorage.getItem('luz_jwt') };
+    if (collectionKey)   headers['X-Collection-Subscription-Key']   = collectionKey;
+    if (disbursementKey) headers['X-Disbursement-Subscription-Key'] = disbursementKey;
+    const res = await fetch('http://localhost:8080/api/payments/mtn/run-tests', { method: 'POST', headers });
+    if (!res.ok) throw new Error(`MTN test runner returned ${res.status}`);
+    return await res.json();
+  },
+
+  // ── Product test ping ─────────────────────────────────────
+  async pingProductApi() {
+    return await request('/api/products/_test');
   },
 
   // ── Coupons (admin flat methods) ─────────────────────────
@@ -824,6 +901,18 @@ export const ApiService = {
   async getCustomer(id) {
     return await request(`/api/crm/customers/${id}/summary`);
   },
+  async getCrmAnalytics() {
+    return await request('/api/crm/analytics');
+  },
+  async getCustomerAnalytics(id) {
+    return await request(`/api/crm/customers/${id}/analytics`);
+  },
+  async getCommunicationLogs(customerId) {
+    return await request(`/api/crm/customers/${customerId}/communications`);
+  },
+  async createCommunicationLog(data) {
+    return await request('/api/crm/communications', { method: 'POST', body: JSON.stringify(data) });
+  },
 
   // ── Support Tickets (admin) ──────────────────────────────
   async getSupportTickets({ page = 0, size = 30, status = '' } = {}) {
@@ -837,6 +926,32 @@ export const ApiService = {
   },
   async resolveTicket(id) {
     return await request(`/api/support/tickets/${id}/close`, { method: 'PATCH' });
+  },
+  async getAssignedTickets() {
+    return await request('/api/support/tickets/assigned');
+  },
+  async searchAuditLogs({ q = '', page = 0, size = 50 } = {}) {
+    return await request(`/api/admin/audit/search?q=${encodeURIComponent(q)}&page=${page}&size=${size}`);
+  },
+  async assignTicket(id, agentId) {
+    return await request(`/api/support/tickets/${id}/assign`, { method: 'PATCH', body: JSON.stringify({ agentId }) });
+  },
+
+  // ── FAQ Admin ────────────────────────────────────────────
+  async getAllFaqs() {
+    return await request('/api/support/knowledge-base/faqs/admin');
+  },
+  async getFaq(id) {
+    return await request(`/api/support/knowledge-base/faqs/${id}`);
+  },
+  async createFaq(data) {
+    return await request('/api/support/knowledge-base/faqs', { method: 'POST', body: JSON.stringify(data) });
+  },
+  async updateFaq(id, data) {
+    return await request(`/api/support/knowledge-base/faqs/${id}`, { method: 'PUT', body: JSON.stringify(data) });
+  },
+  async deleteFaq(id) {
+    return await request(`/api/support/knowledge-base/faqs/${id}`, { method: 'DELETE' });
   },
 
   // ── Users (admin) ────────────────────────────────────────
@@ -857,6 +972,28 @@ export const ApiService = {
   },
   async unblockUser(id) {
     return await request(`/api/admin/users/${id}/unblock`, { method: 'POST' });
+  },
+  async getRoles() {
+    return await request('/api/admin/roles');
+  },
+  async assignRole(userId, roleName) {
+    return await request(`/api/admin/users/${userId}/roles`, { method: 'POST', body: JSON.stringify({ roleName }) });
+  },
+  async replaceRoles(userId, roleNames) {
+    return await request(`/api/admin/users/${userId}/roles`, { method: 'PUT', body: JSON.stringify({ roleNames }) });
+  },
+  async removeRole(userId, roleName) {
+    return await request(`/api/admin/users/${userId}/roles/${encodeURIComponent(roleName)}`, { method: 'DELETE' });
+  },
+
+  // ── Analytics extras ─────────────────────────────────────
+  async getTotalRevenue({ startDate, endDate } = {}) {
+    const end   = endDate   || new Date().toISOString().slice(0, 10);
+    const start = startDate || new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+    return await request(`/api/analytics/revenue?startDate=${start}&endDate=${end}`);
+  },
+  async getFullDashboard() {
+    return await request('/api/analytics/dashboard');
   },
 
   // ── Audit Logs ───────────────────────────────────────────
@@ -880,6 +1017,62 @@ export const ApiService = {
   async setProductFeatured(id, featured) {
     return await request(`/api/products/${id}/featured?featured=${featured}`, { method: 'PATCH' });
   },
+  async updateProductStatus(id, status) {
+    return await request(`/api/products/${id}/status?status=${encodeURIComponent(status)}`, { method: 'PATCH' });
+  },
+  async assignProductCategory(id, categoryId) {
+    return await request(`/api/products/${id}/category/${categoryId}`, { method: 'PATCH' });
+  },
+  async applyProductDiscount(id, discountId) {
+    return await request(`/api/products/${id}/discount/${discountId}`, { method: 'PATCH' });
+  },
+  async removeProductDiscount(id) {
+    return await request(`/api/products/${id}/discount`, { method: 'DELETE' });
+  },
+  async uploadProductImage(productId, file, altText = '', isPrimary = false) {
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('altText', altText);
+    fd.append('isPrimary', String(isPrimary));
+    const headers = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const res = await fetch(`${BASE_URL}/api/products/${productId}/images`, { method: 'POST', headers, body: fd });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data?.message || 'Image upload failed');
+    return data;
+  },
+  async removeProductImage(productId, imageId) {
+    return await request(`/api/products/${productId}/remove-image/${imageId}`, { method: 'PATCH' });
+  },
+
+  // ── Discounts ─────────────────────────────────────────────
+  async getDiscounts() {
+    return await request('/api/products/discounts');
+  },
+  async createDiscount(data) {
+    return await request('/api/products/discounts', { method: 'POST', body: JSON.stringify(data) });
+  },
+  async toggleDiscount(id) {
+    return await request(`/api/products/discounts/${id}/toggle`, { method: 'PATCH' });
+  },
+  async deleteDiscount(id) {
+    return await request(`/api/products/discounts/${id}`, { method: 'DELETE' });
+  },
+
+  // ── Bulk product import / export ──────────────────────────
+  async exportProductsBulk() {
+    return await this._downloadBlob('/api/products/bulk/export', 'products.xlsx');
+  },
+  async importProductsBulk(file) {
+    const fd = new FormData();
+    fd.append('file', file);
+    const headers = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const res = await fetch(`${BASE_URL}/api/products/bulk/import`, { method: 'POST', headers, body: fd });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data?.message || 'Import failed');
+    return data;
+  },
 
   // ── Orders (admin flat methods) ──────────────────────────
   async getOrder(id) {
@@ -895,5 +1088,95 @@ export const ApiService = {
   // ── Categories (flat) ────────────────────────────────────
   async getCategories() {
     return await request('/api/categories');
+  },
+  async createCategory(name, description = '') {
+    return await request('/api/categories', { method: 'POST', body: JSON.stringify({ name, description }) });
+  },
+  async deleteCategory(id) {
+    return await request(`/api/categories/${id}`, { method: 'DELETE' });
+  },
+
+  // ── File download helper ─────────────────────────────────
+  async _downloadBlob(path, filename) {
+    const headers = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const res = await fetch(`${BASE_URL}${path}`, { headers });
+    if (!res.ok) throw new Error(`Download failed: ${res.status}`);
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  },
+
+  // ── Expenses ─────────────────────────────────────────────
+  async getExpenses({ startDate, endDate, status } = {}) {
+    const p = new URLSearchParams();
+    if (startDate) p.set('startDate', startDate);
+    if (endDate)   p.set('endDate', endDate);
+    if (status)    p.set('status', status);
+    return await request(`/api/finance/expenses?${p}`);
+  },
+  async getExpense(id) {
+    return await request(`/api/finance/expenses/${id}`);
+  },
+  async createExpense(data) {
+    return await request('/api/finance/expenses', { method: 'POST', body: JSON.stringify(data) });
+  },
+  async updateExpense(id, data) {
+    return await request(`/api/finance/expenses/${id}`, { method: 'PUT', body: JSON.stringify(data) });
+  },
+  async updateExpenseStatus(id, status) {
+    return await request(`/api/finance/expenses/${id}/status?status=${encodeURIComponent(status)}`, { method: 'PATCH' });
+  },
+  async deleteExpense(id) {
+    return await request(`/api/finance/expenses/${id}`, { method: 'DELETE' });
+  },
+
+  // ── Tax records ──────────────────────────────────────────
+  async getTaxRecords({ startDate, endDate } = {}) {
+    const end   = endDate   || new Date().toISOString().slice(0, 10);
+    const start = startDate || new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+    return await request(`/api/finance/taxes?startDate=${start}&endDate=${end}`);
+  },
+  async getTaxSummary({ startDate, endDate } = {}) {
+    const end   = endDate   || new Date().toISOString().slice(0, 10);
+    const start = startDate || new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+    return await request(`/api/finance/taxes/summary?startDate=${start}&endDate=${end}`);
+  },
+  async exportTaxRecords({ startDate, endDate } = {}) {
+    const end   = endDate   || new Date().toISOString().slice(0, 10);
+    const start = startDate || new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+    return await this._downloadBlob(`/api/finance/taxes/export?startDate=${start}&endDate=${end}`, `tax-records-${start}-${end}.csv`);
+  },
+  async recordOrderTax(orderId) {
+    return await request(`/api/finance/taxes/orders/${orderId}/record`, { method: 'POST' });
+  },
+
+  // ── Finance reports ──────────────────────────────────────
+  async getProfitLoss({ startDate, endDate } = {}) {
+    const end   = endDate   || new Date().toISOString().slice(0, 10);
+    const start = startDate || new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+    return await request(`/api/finance/profit-loss?startDate=${start}&endDate=${end}`);
+  },
+  async getFinancialManagement({ startDate, endDate } = {}) {
+    const end   = endDate   || new Date().toISOString().slice(0, 10);
+    const start = startDate || new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+    return await request(`/api/finance/management?startDate=${start}&endDate=${end}`);
+  },
+  async exportFinancialManagement({ startDate, endDate } = {}) {
+    const end   = endDate   || new Date().toISOString().slice(0, 10);
+    const start = startDate || new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+    return await this._downloadBlob(`/api/finance/management/export?startDate=${start}&endDate=${end}`, `financial-management-${start}-${end}.csv`);
+  },
+
+  // ── Report downloads ─────────────────────────────────────
+  async downloadSalesReport({ startDate, endDate } = {}) {
+    const end   = endDate   || new Date().toISOString().slice(0, 10);
+    const start = startDate || new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+    return await this._downloadBlob(`/api/reports/sales?startDate=${start}&endDate=${end}`, `sales-report-${start}-${end}.xlsx`);
+  },
+  async downloadInvoice(orderId) {
+    return await this._downloadBlob(`/api/reports/invoices/${orderId}`, `invoice-${orderId}.pdf`);
   },
 };

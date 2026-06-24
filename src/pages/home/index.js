@@ -37,7 +37,8 @@ function renderStars(rating) {
 function renderSlide(banner, product) {
   const price = product ? `<div class="hero-price">RWF ${Math.round(parseFloat(product.price)||0).toLocaleString('en-US')} <span>(incl. VAT)</span></div>` : '';
   const badge = banner.tagLabel ? `<span class="hero-tag">${banner.tagLabel}</span>` : '';
-  const img = product ? getPrimaryImage(product) : (banner.imageUrl || '');
+  const rawImg = product ? getPrimaryImage(product) : (banner.imageUrl || '');
+  const img = rawImg.startsWith('/uploads/') ? `${BACKEND_URL}${rawImg}` : rawImg;
   const productId = product?.id || banner.productId || '';
   const discountBadge = product?.discountPercentage
     ? `<div class="hero-discount-badge">-${product.discountPercentage}% OFF</div>` : '';
@@ -59,7 +60,7 @@ function renderSlide(banner, product) {
             </button>
             <button class="btn-secondary" data-action="view-details" data-id="${productId}">View details</button>
           ` : `
-            <button class="btn-primary">${banner.buttonText || 'Shop Now'}</button>
+            <button class="btn-primary" data-action="go-shop">${banner.buttonText || 'Shop Now'}</button>
           `}
         </div>
         <div class="hero-stats">
@@ -406,6 +407,15 @@ function bindCardEvents(container, helpers) {
           renderHeader();
         } catch (err) { toast(err.message || 'Failed to add to cart'); }
       });
+    });
+  });
+
+  container.querySelectorAll('[data-action="go-shop"]').forEach(btn => {
+    if (btn._bound) return;
+    btn._bound = true;
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      navigate('shop');
     });
   });
 

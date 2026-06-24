@@ -352,7 +352,10 @@ table.dt .td-sm { font-size: 11.5px; color: #94A3B8; }
 .pos-total-row.grand { font-size:15px; font-weight:800; color:#0F172A; }
 
 /* ── Support Chat ─────────────────────────────────────────── */
-.sup-layout { display:grid; grid-template-columns:300px 1fr; height:calc(100vh - 156px); background:white; border-radius:11px; border:1px solid #E8ECF0; overflow:hidden; }
+.sup-main-tab { padding:9px 18px; font-size:13px; font-weight:600; color:#64748B; background:none; border:none; border-bottom:2px solid transparent; cursor:pointer; transition:color .15s, border-color .15s; }
+.sup-main-tab:hover { color:#FF6B00; }
+.sup-main-tab.active { color:#FF6B00; border-bottom-color:#FF6B00; }
+.sup-layout { display:grid; grid-template-columns:300px 1fr; height:calc(100vh - 220px); background:white; border-radius:11px; border:1px solid #E8ECF0; overflow:hidden; }
 .sup-list { border-right:1px solid #F1F5F9; overflow-y:auto; display:flex; flex-direction:column; }
 .sup-list-hd { padding:14px; border-bottom:1px solid #F1F5F9; font-weight:700; color:#0F172A; font-size:13px; flex-shrink:0; }
 .sup-list-tabs { display:flex; border-bottom:1px solid #F1F5F9; flex-shrink:0; }
