@@ -418,13 +418,20 @@ function buildTrackingPanel(data) {
 
 // ── receipt modal ────────────────────────────────────────
 function showReceiptModal(r, orderId) {
-  const itemsHtml = (r.items || []).map(item => `
+  const taxRate = Number(r.taxRate || 0);
+  const itemsHtml = (r.items || []).map(item => {
+    const unitPrice = Number(item.unitPrice || 0);
+    const unitWithTax = unitPrice * (1 + taxRate);
+    const subTotal = Number(item.subTotal || 0);
+    const totalWithTax = subTotal * (1 + taxRate);
+    return `
     <tr>
       <td>${item.productName || '—'}</td>
       <td style="text-align:center">${item.quantity}</td>
-      <td style="text-align:right">${fmtMoney(item.unitPrice)}</td>
-      <td style="text-align:right">${fmtMoney(item.subTotal)}</td>
-    </tr>`).join('');
+      <td style="text-align:right">${fmtMoney(unitWithTax)}</td>
+      <td style="text-align:right">${fmtMoney(totalWithTax)}</td>
+    </tr>`;
+  }).join('');
 
   document.getElementById('rcpt-overlay')?.remove();
   const div = document.createElement('div');
@@ -450,13 +457,13 @@ function showReceiptModal(r, orderId) {
         <div class="rcpt-mrow"><span>Date</span><span>${fmtDate(r.issuedAt)}</span></div>
       </div>
       <table class="rcpt-tbl">
-        <thead><tr><th>Item</th><th>Qty</th><th>Unit</th><th>Subtotal</th></tr></thead>
+        <thead><tr><th>Item</th><th>Qty</th><th>Unit</th><th>Total</th></tr></thead>
         <tbody>${itemsHtml}</tbody>
       </table>
       <div class="rcpt-totals">
-        <div class="rcpt-trow"><span>Subtotal</span><span>${fmtMoney(r.subTotalAmount)}</span></div>
-        <div class="rcpt-trow"><span>Tax (${Number((r.taxRate || 0) * 100).toFixed(0)}%)</span><span>${fmtMoney(r.taxAmount)}</span></div>
+        <div class="rcpt-trow"><span>Subtotal</span><span>${fmtMoney(Number(r.subTotalAmount || 0) * (1 + taxRate))}</span></div>
         <div class="rcpt-trow rcpt-grand"><span>Total Paid</span><span>${fmtMoney(r.totalAmount)}</span></div>
+        <div class="rcpt-trow" style="font-size:12px;color:#94a3b8"><span>Tax (${Number((r.taxRate || 0) * 100).toFixed(0)}%) included</span><span>${fmtMoney(r.taxAmount)}</span></div>
       </div>
       <div class="rcpt-thanks">Thank you for shopping at Luz Technology!</div>
     </div>
