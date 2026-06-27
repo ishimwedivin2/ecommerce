@@ -79,9 +79,9 @@ export async function render() {
       <img class="chk-item-img" src="${getItemImage(item)}" alt="" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2256%22 height=%2256%22><rect width=%2256%22 height=%2256%22 fill=%22%23f1f5f9%22/><text x=%2228%22 y=%2234%22 text-anchor=%22middle%22 font-size=%2220%22>📦</text></svg>'">
       <div class="chk-item-info">
         <div class="chk-item-name">${item.product?.name || item.productName || 'Product'}</div>
-        <div class="chk-item-meta">Qty ${item.quantity} × ${fmtMoney(item.product?.price || item.unitPrice || 0)}</div>
+        <div class="chk-item-meta">Qty ${item.quantity} × ${fmtMoney((item.product?.price || item.unitPrice || 0) * 1.18)}</div>
       </div>
-      <div class="chk-item-total">${fmtMoney((item.product?.price || item.unitPrice || 0) * item.quantity)}</div>
+      <div class="chk-item-total">${fmtMoney((item.product?.price || item.unitPrice || 0) * item.quantity * 1.18)}</div>
     </div>`).join('');
 
   return `
@@ -253,13 +253,12 @@ export async function render() {
         <h3 class="chk-summary-title">Your Order</h3>
         <div class="chk-summary-items">${itemsHtml}</div>
         <div class="chk-summary-divider"></div>
-        <div class="chk-summary-row"><span>Subtotal</span><span id="sum-sub">${fmtMoney(subtotal)}</span></div>
-        <div class="chk-summary-row" id="sum-tax-row"><span>Tax (18%)</span><span id="sum-tax">${fmtMoney(subtotal * 0.18)}</span></div>
         <div class="chk-summary-row" id="sum-discount-row" style="display:none;color:#10B981">
           <span>Discount</span><span id="sum-discount">-RWF 0</span>
         </div>
         <div class="chk-summary-divider"></div>
         <div class="chk-summary-row total"><span>Total</span><span id="sum-total">${fmtMoney(subtotal * 1.18)}</span></div>
+        <span id="sum-tax" style="display:none">${fmtMoney(subtotal * 0.18)}</span>
         <div class="chk-summary-method" id="sum-method">
           <span class="chk-method-ico">📱</span>
           <span id="sum-method-name">MTN MoMo</span>
@@ -323,8 +322,11 @@ export function bindEvents(state, helpers) {
 
       document.getElementById('sum-discount').textContent = '-' + fmtMoney(discount);
       document.getElementById('sum-discount-row').style.display = 'flex';
-      const newTotal = (subtotal - discount) * 1.18;
-      document.getElementById('sum-total').textContent  = fmtMoney(newTotal);
+      const newBase  = subtotal - discount;
+      const newTotal = newBase * 1.18;
+      const newTax   = newBase * 0.18;
+      document.getElementById('sum-total').textContent = fmtMoney(newTotal);
+      document.getElementById('sum-tax').textContent   = fmtMoney(newTax);
       document.getElementById('btn-step2-pay').textContent = 'Pay ' + fmtMoney(newTotal);
 
       if (fb) {
@@ -420,7 +422,7 @@ export function bindEvents(state, helpers) {
     if (!_receipt) { toast('Receipt not yet loaded — try again in a moment', 'error'); return; }
     const r = _receipt;
     const itemsHtml = (r.items || []).map(i =>
-      `<div class="pi"><span>${i.productName||'Product'} ×${i.quantity}</span><span>${fmtMoney(i.subTotal)}</span></div>`
+      `<div class="pi"><span>${i.productName||'Product'} ×${i.quantity}</span><span>${fmtMoney(Number(i.subTotal) * 1.18)}</span></div>`
     ).join('');
     const win = window.open('', '_blank', 'width=520,height=760');
     win.document.write(`<!DOCTYPE html><html><head>
@@ -454,11 +456,9 @@ export function bindEvents(state, helpers) {
         <div><span>Date</span><span>${r.issuedAt ? new Date(r.issuedAt).toLocaleString('en-GB',{dateStyle:'medium',timeStyle:'short'}) : '—'}</span></div>
       </div>
       <div class="items">${itemsHtml}</div>
-      <div class="totals">
-        <div class="tot-r"><span>Subtotal</span><span>${fmtMoney(r.subTotalAmount)}</span></div>
-        <div class="tot-r"><span>Tax (${Number((r.taxRate||0)*100).toFixed(0)}%)</span><span>${fmtMoney(r.taxAmount)}</span></div>
-      </div>
+      ${Number(r.discountAmount) > 0 ? `<div class="tot-r" style="color:#10b981;"><span>${r.couponCode ? 'Discount (' + r.couponCode + ')' : 'Discount'}</span><span>-${fmtMoney(r.discountAmount)}</span></div>` : ''}
       <div class="grand"><span>Total Paid</span><span>${fmtMoney(r.totalAmount)}</span></div>
+      <div class="tot-r" style="margin-top:4px;"><span>Includes VAT (${Number((r.taxRate||0)*100).toFixed(0)}%)</span><span>${fmtMoney(r.taxAmount)}</span></div>
       <div class="footer">Thank you for shopping at Luz Technology!</div>
     </body></html>`);
     win.document.close();
@@ -598,8 +598,8 @@ function renderReceiptBlock() {
     <tr>
       <td>${item.productName || '—'}</td>
       <td style="text-align:center">${item.quantity}</td>
-      <td style="text-align:right">${fmtMoney(item.unitPrice)}</td>
-      <td style="text-align:right">${fmtMoney(item.subTotal)}</td>
+      <td style="text-align:right">${fmtMoney(Number(item.unitPrice) * 1.18)}</td>
+      <td style="text-align:right">${fmtMoney(Number(item.subTotal) * 1.18)}</td>
     </tr>`).join('');
 
   el.innerHTML = `
@@ -621,9 +621,13 @@ function renderReceiptBlock() {
       <tbody>${itemsHtml}</tbody>
     </table>
     <div class="rcpt-totals">
-      <div class="rcpt-total-row"><span>Subtotal</span><span>${fmtMoney(r.subTotalAmount)}</span></div>
-      <div class="rcpt-total-row"><span>Tax (${Number((r.taxRate || 0) * 100).toFixed(0)}%)</span><span>${fmtMoney(r.taxAmount)}</span></div>
+      ${Number(r.discountAmount) > 0 ? `
+      <div class="rcpt-total-row" style="color:#10B981;">
+        <span>${r.couponCode ? 'Discount (' + r.couponCode + ')' : 'Discount'}</span>
+        <span>-${fmtMoney(r.discountAmount)}</span>
+      </div>` : ''}
       <div class="rcpt-total-row grand"><span>Total Paid</span><span>${fmtMoney(r.totalAmount)}</span></div>
+      <div class="rcpt-total-row" style="font-size:11px;color:#94a3b8;margin-top:2px;"><span>Includes VAT (${Number((r.taxRate || 0) * 100).toFixed(0)}%)</span><span>${fmtMoney(r.taxAmount)}</span></div>
     </div>
     <div class="rcpt-footer">Thank you for shopping at Luz Technology!</div>
   </div>`;

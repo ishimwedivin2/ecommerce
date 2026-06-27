@@ -159,23 +159,41 @@ export function bindEvents(helpers) {
     });
   });
 
-  // User dropdown
+  // User dropdown — hover open/close
   const dropdownTrigger = document.getElementById('header-user-dropdown-trigger');
-  const dropdownMenu = document.getElementById('header-user-dropdown');
+  const dropdownMenu    = document.getElementById('header-user-dropdown');
   if (dropdownTrigger && dropdownMenu) {
+    let accountCloseTimer = null;
+
+    const openAccount = () => {
+      clearTimeout(accountCloseTimer);
+      dropdownMenu.classList.add('open');
+      setState({ isUserDropdownOpen: true });
+    };
+    const closeAccount = () => {
+      accountCloseTimer = setTimeout(() => {
+        dropdownMenu.classList.remove('open');
+        setState({ isUserDropdownOpen: false });
+      }, 150);
+    };
+
+    dropdownTrigger.addEventListener('mouseenter', openAccount);
+    dropdownTrigger.addEventListener('mouseleave', closeAccount);
+    dropdownMenu.addEventListener('mouseenter', () => clearTimeout(accountCloseTimer));
+    dropdownMenu.addEventListener('mouseleave', closeAccount);
+    // keep click as fallback for keyboard/touch users
     dropdownTrigger.addEventListener('click', (e) => {
       e.stopPropagation();
-      const open = !appState.isUserDropdownOpen;
-      setState({ isUserDropdownOpen: open });
-      dropdownMenu.style.display = open ? 'block' : 'none';
+      dropdownMenu.classList.contains('open') ? closeAccount() : openAccount();
     });
   }
 
-  document.addEventListener('click', () => {
-    const menu = document.getElementById('header-user-dropdown');
-    if (menu && appState.isUserDropdownOpen) {
+  document.addEventListener('click', (e) => {
+    const trigger = document.getElementById('header-user-dropdown-trigger');
+    const menu    = document.getElementById('header-user-dropdown');
+    if (menu && !trigger?.contains(e.target) && !menu.contains(e.target)) {
+      menu.classList.remove('open');
       setState({ isUserDropdownOpen: false });
-      menu.style.display = 'none';
     }
   });
 
@@ -193,17 +211,22 @@ export function bindEvents(helpers) {
     navigate('home', { activeCategory: null, isUserDropdownOpen: false });
   });
 
-  // Notification bell
-  const notifBtn = document.getElementById('btn-notifications');
-  const notifPanel = document.getElementById('notifications-panel');
-  if (notifBtn && notifPanel) {
-    notifBtn.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      const open = !appState.isNotifPanelOpen;
-      setState({ isNotifPanelOpen: open });
-      notifPanel.style.display = open ? 'block' : 'none';
+  // Notification bell — hover open/close
+  const notifBtn     = document.getElementById('btn-notifications');
+  const notifWrapper = document.getElementById('notif-bell-wrapper');
+  const notifPanel   = document.getElementById('notifications-panel');
+  if (notifBtn && notifPanel && notifWrapper) {
+    let notifCloseTimer  = null;
+    let notifLoaded      = false;
 
-      if (open) {
+    const openNotif = async () => {
+      clearTimeout(notifCloseTimer);
+      if (notifPanel.classList.contains('open')) return;
+      notifPanel.classList.add('open');
+      setState({ isNotifPanelOpen: true });
+
+      if (notifLoaded) return;
+      notifLoaded = true;
         const user = ApiService.getCurrentUser();
         const roles = (user?.roles||[]).map(r=>(r?.name||r||'').toString());
         const isStaff = roles.some(r=>r==='ROLE_ADMIN'||r==='ROLE_EMPLOYEE');
@@ -261,7 +284,23 @@ export function bindEvents(helpers) {
             });
           });
         }
-      }
+    };
+
+    const closeNotif = () => {
+      notifCloseTimer = setTimeout(() => {
+        notifPanel.classList.remove('open');
+        setState({ isNotifPanelOpen: false });
+      }, 150);
+    };
+
+    notifWrapper.addEventListener('mouseenter', openNotif);
+    notifWrapper.addEventListener('mouseleave', closeNotif);
+    notifPanel.addEventListener('mouseenter', () => clearTimeout(notifCloseTimer));
+    notifPanel.addEventListener('mouseleave', closeNotif);
+    // click as fallback for touch/keyboard
+    notifBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      notifPanel.classList.contains('open') ? closeNotif() : openNotif();
     });
 
     document.getElementById('btn-mark-all-read')?.addEventListener('click', async (e) => {
@@ -274,9 +313,9 @@ export function bindEvents(helpers) {
     });
 
     document.addEventListener('click', (e) => {
-      if (appState.isNotifPanelOpen && !document.getElementById('notif-bell-wrapper')?.contains(e.target)) {
+      if (!notifWrapper.contains(e.target)) {
+        notifPanel.classList.remove('open');
         setState({ isNotifPanelOpen: false });
-        notifPanel.style.display = 'none';
       }
     });
   }
@@ -285,18 +324,18 @@ export function bindEvents(helpers) {
   const searchInput = document.getElementById('global-search-input');
   const searchBtn = document.getElementById('global-search-btn');
   if (searchInput) {
-    searchInput.value = appState.searchQuery;
+    searchInput.value = appState.searchQuery || '';
     searchInput.addEventListener('keypress', (e) => {
-      if (e.key === 'Enter') {
-        setState({ searchQuery: searchInput.value, currentView: 'home' });
-        renderView();
+      if (e.key === 'Enter' && searchInput.value.trim()) {
+        setState({ searchQuery: searchInput.value.trim() });
+        navigate('shop');
       }
     });
   }
   searchBtn?.addEventListener('click', () => {
-    if (searchInput) {
-      setState({ searchQuery: searchInput.value, currentView: 'home' });
-      renderView();
+    if (searchInput && searchInput.value.trim()) {
+      setState({ searchQuery: searchInput.value.trim() });
+      navigate('shop');
     }
   });
 }

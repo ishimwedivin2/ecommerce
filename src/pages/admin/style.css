@@ -408,3 +408,109 @@ table.dt .td-sm { font-size: 11.5px; color: #94A3B8; }
   .pos-layout { grid-template-columns:1fr; }
   .sup-layout { grid-template-columns:1fr; }
 }
+
+/* ── Orders role banners ──────────────────────────────────── */
+.ord-role-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  border-radius: 10px;
+  font-size: 13px;
+  margin-bottom: 16px;
+  border: 1px solid;
+}
+.ord-role-banner .ord-role-ico { font-size: 18px; flex-shrink: 0; }
+.ord-role-admin {
+  background: #FFF7ED;
+  border-color: #FED7AA;
+  color: #92400E;
+}
+.ord-role-emp {
+  background: #EFF6FF;
+  border-color: #BFDBFE;
+  color: #1E40AF;
+}
+
+/* ── Orders charts ────────────────────────────────────────── */
+.ord-charts-row {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: 14px;
+  margin-bottom: 20px;
+}
+.ord-charts-row:has(.ord-chart-card:nth-child(3)) {
+  grid-template-columns: 220px 1fr 1fr;
+}
+.ord-chart-card {
+  background: white;
+  border: 1px solid #E2E8F0;
+  border-radius: 12px;
+  padding: 16px 18px;
+  box-shadow: 0 1px 4px rgba(15,23,42,0.05);
+}
+.ord-donut-card { min-width: 0; }
+.ord-chart-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #1E293B;
+  margin-bottom: 2px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.ord-chart-meta {
+  font-size: 11px;
+  color: #94A3B8;
+  margin-bottom: 12px;
+}
+.ord-chart-badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 20px;
+  background: #F1F5F9;
+  color: #64748B;
+}
+.ord-badge-admin {
+  background: #FFF7ED;
+  color: #92400E;
+}
+
+/* ── Payments KPI cards ───────────────────────────────────── */
+.pay-kpi-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.pay-kpi-card {
+  background: white;
+  border: 1px solid #E2E8F0;
+  border-radius: 12px;
+  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  box-shadow: 0 1px 4px rgba(15,23,42,0.05);
+}
+.pay-kpi-ico {
+  width: 38px; height: 38px;
+  border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 16px; font-weight: 800;
+  flex-shrink: 0;
+}
+.pay-kpi-val {
+  font-size: 20px;
+  font-weight: 800;
+  color: #1E293B;
+  line-height: 1.1;
+}
+.pay-kpi-lbl {
+  font-size: 11px;
+  color: #94A3B8;
+  margin-top: 2px;
+  white-space: nowrap;
+}

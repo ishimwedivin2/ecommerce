@@ -35,7 +35,7 @@ export async function render() {
         }
       </div>
       <div class="cart-item-name">${item.productName}</div>
-      <div class="cart-item-price">RWF ${Math.round(price).toLocaleString('en-US')}</div>
+      <div class="cart-item-price">RWF ${Math.round(price * 1.18).toLocaleString('en-US')}</div>
       <div class="quantity-control" style="transform:scale(0.9);">
         <button class="quantity-btn" data-action="cart-qty-minus" data-id="${item.productId}">-</button>
         <input type="text" class="quantity-value" value="${item.quantity}">
@@ -62,14 +62,12 @@ export async function render() {
       <div class="cart-items-container">${itemsHtml}</div>
       <div class="cart-summary">
         <h3>Order Summary</h3>
-        <div class="summary-row"><span>Items (${cart.totalItems})</span><span>RWF ${Math.round(subtotal).toLocaleString('en-US')}</span></div>
+        <div class="summary-row"><span>Items (${cart.totalItems})</span><span>RWF ${Math.round(total).toLocaleString('en-US')}</span></div>
         <div class="summary-row"><span>Shipping</span><span style="color:var(--success);font-weight:600;">FREE</span></div>
-        <div class="summary-row" style="color:#64748b;font-size:13px;"><span>VAT / Tax (18%)</span><span>RWF ${Math.round(taxAmt).toLocaleString('en-US')}</span></div>
         <div class="summary-row total" style="border-top:2px solid var(--border);padding-top:12px;margin-top:4px;">
-          <span>Total (incl. tax)</span>
+          <span>Total</span>
           <span>RWF ${Math.round(total).toLocaleString('en-US')}</span>
         </div>
-        <p style="font-size:11px;color:#94a3b8;margin:6px 0 12px;text-align:center;">18% VAT included in total price</p>
         <button class="btn-primary" id="btn-proceed-checkout" style="justify-content:center;">Proceed to Checkout</button>
       </div>
     </div>
@@ -90,8 +88,7 @@ export function bindEvents(state, helpers) {
   });
 
   document.getElementById('btn-clear-cart')?.addEventListener('click', async () => {
-    if (!confirm('Remove all items from your cart?')) return;
-    await ApiService.cart.clearCart();
+    await ApiService.cart.clear();
     toast('Cart cleared');
     refresh();
     renderHeader();

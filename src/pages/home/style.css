@@ -212,129 +212,142 @@
 /* ── Product Card ─────────────────────────────────────── */
 .product-card {
   background: white;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
+  border: 1px solid var(--slate-200);
+  border-radius: 10px;
   overflow: hidden;
-  position: relative;
-  transition: box-shadow 0.2s, transform 0.2s;
+  transition: box-shadow 0.22s, transform 0.22s;
   display: flex;
   flex-direction: column;
 }
 .product-card:hover {
   box-shadow: var(--shadow-lg);
-  transform: translateY(-3px);
+  transform: translateY(-2px);
 }
 .card-badge {
   position: absolute;
-  top: 12px;
-  left: 12px;
+  top: 8px;
+  left: 8px;
   background: var(--primary);
   color: white;
   font-size: 10px;
-  font-weight: 700;
+  font-weight: 800;
   padding: 3px 8px;
-  border-radius: 10px;
+  border-radius: 20px;
   z-index: 2;
-  letter-spacing: 0.3px;
+  letter-spacing: 0.04em;
+  box-shadow: 0 2px 8px rgba(255, 107, 0, 0.4);
 }
 .wishlist-toggle {
   position: absolute;
-  top: 10px;
-  right: 10px;
-  width: 32px; height: 32px;
+  top: 8px;
+  right: 8px;
+  width: 30px; height: 30px;
   border-radius: 50%;
   background: white;
-  border: 1px solid var(--border);
+  border: 1px solid var(--slate-200);
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
   z-index: 2;
-  color: var(--text-light);
+  color: var(--slate-400);
   box-shadow: var(--shadow-sm);
-  transition: all 0.2s;
+  opacity: 0;
+  transition: opacity 0.2s, color 0.2s, border-color 0.2s;
 }
-.wishlist-toggle:hover, .wishlist-toggle.active { color: #ef4444; border-color: #ef4444; }
-.wishlist-toggle.active svg path { fill: #ef4444; stroke: #ef4444; }
+.product-card:hover .wishlist-toggle { opacity: 1; }
+.wishlist-toggle:hover { color: var(--danger); border-color: #fca5a5; }
+.wishlist-toggle.active { color: var(--danger); border-color: #fca5a5; opacity: 1; }
+.wishlist-toggle.active svg path { fill: var(--danger); stroke: var(--danger); }
 
 .product-card-img-container {
   position: relative;
   overflow: hidden;
   cursor: pointer;
-  background: var(--bg-main);
-  aspect-ratio: 4/3;
+  background: var(--slate-50);
+  aspect-ratio: 1;
 }
 .product-card-img {
   width: 100%;
   height: 100%;
-  object-fit: contain;
-  padding: 12px;
-  transition: transform 0.3s;
+  object-fit: cover;
+  padding: 0;
+  transition: transform 0.35s;
 }
-.product-card:hover .product-card-img { transform: scale(1.04); }
+.product-card:hover .product-card-img { transform: scale(1.05); }
 
-.product-card-overlay {
-  position: absolute;
-  inset: 0;
-  background: rgba(0,0,0,0.15);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  opacity: 0;
-  transition: opacity 0.2s;
-}
-.product-card:hover .product-card-overlay { opacity: 1; }
-.btn-quick-view {
-  background: white;
-  border: none;
-  border-radius: var(--radius-md);
-  padding: 8px 14px;
-  font-size: 12px;
+
+.product-card-info { padding: 12px 14px; flex: 1; }
+.product-sku { display: none; }
+.product-stock-indicator { display: none; }
+.product-cat-label {
+  font-size: 9.5px;
   font-weight: 700;
-  color: var(--text-dark);
-  cursor: pointer;
-  box-shadow: var(--shadow-md);
-  display: flex;
-  align-items: center;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #FF6B00;
+  display: block;
+  margin-bottom: 4px;
 }
-
-.product-card-info { padding: 14px 14px 8px; flex: 1; }
-.product-sku { font-size: 11px; font-weight: 600; color: var(--text-light); letter-spacing: 0.3px; }
-.product-stock-indicator { font-size: 11px; font-weight: 600; color: var(--success); }
 .product-title {
-  font-size: 14px;
+  font-size: 13.5px;
   font-weight: 700;
-  color: var(--text-dark);
-  margin: 6px 0 6px;
-  line-height: 1.4;
+  color: var(--slate-900);
+  margin: 0 0 6px;
+  line-height: 1.35;
   cursor: pointer;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+  transition: color 0.15s;
 }
-.product-price-row { display: flex; align-items: baseline; gap: 6px; margin-top: 8px; }
-.price-current { font-size: 18px; font-weight: 800; color: var(--text-dark); }
-.price-vat { font-size: 11px; color: var(--text-light); }
+.product-title:hover { color: #FF6B00; }
+.product-rating { font-size: 12px; color: var(--warning); margin-bottom: 8px; }
+.product-rating span { color: var(--slate-400); font-size: 11px; }
+.product-price-row { display: flex; align-items: baseline; gap: 6px; }
+.price-original { font-size: 11px; color: var(--slate-400); text-decoration: line-through; }
+.price-current { font-size: 15px; font-weight: 800; color: var(--slate-900); }
+.price-vat { display: none; }
 
-.product-card-actions { padding: 10px 14px 14px; }
+.product-card-actions {
+  display: flex;
+  gap: 6px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--slate-100);
+}
 .btn-card-add {
-  width: 100%;
+  flex: 1;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
-  padding: 9px;
-  background: var(--primary-light);
-  color: var(--primary);
-  border: 1.5px solid rgba(255,107,0,0.3);
-  border-radius: var(--radius-md);
-  font-size: 13px;
+  padding: 8px 10px;
+  background: #FF6B00;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 12px;
   font-weight: 700;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: opacity 0.2s, transform 0.15s;
+  box-shadow: 0 2px 8px rgba(255, 107, 0, 0.3);
 }
-.btn-card-add:hover { background: var(--primary); color: white; }
+.btn-card-add:hover { opacity: 0.88; transform: translateY(-1px); }
+.btn-card-add:active { transform: translateY(0); }
+.btn-card-view {
+  padding: 8px 12px;
+  background: white;
+  border: 1.5px solid var(--slate-200);
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--slate-700);
+  cursor: pointer;
+  transition: border-color 0.2s, color 0.2s, background 0.2s;
+  white-space: nowrap;
+}
+.btn-card-view:hover { border-color: #FF6B00; color: #FF6B00; background: var(--primary-light); }
 
 /* ── Hero Slider Wrappers ─────────────────────────────────── */
 .hero-slides-track {

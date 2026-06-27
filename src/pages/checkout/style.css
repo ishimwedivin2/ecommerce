@@ -366,6 +366,10 @@
   color: var(--text-dark, #1E293B);
   padding-top: 6px;
 }
+.chk-tax-row {
+  color: #059669;
+  font-weight: 600;
+}
 .chk-summary-method {
   display: flex;
   align-items: center;

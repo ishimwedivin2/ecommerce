@@ -26,13 +26,13 @@ export function bindEvents(helpers) {
     item.addEventListener('click', () => {
       const catId = item.getAttribute('data-cat-id');
       if (catId === 'all') {
-        setState({ activeCategory: null, currentView: 'home' });
+        setState({ activeCategory: null, searchQuery: '' });
       } else if (catId === 'hot') {
-        setState({ activeCategory: null, searchQuery: 'ASUS', currentView: 'home' });
+        setState({ activeCategory: null, searchQuery: 'ASUS' });
       } else {
-        setState({ activeCategory: catId, currentView: 'home' });
+        setState({ activeCategory: catId, searchQuery: '' });
       }
-      navigate('home');
+      navigate('shop');
     });
   });
 }

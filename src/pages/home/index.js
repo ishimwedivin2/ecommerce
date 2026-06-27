@@ -35,7 +35,7 @@ function renderStars(rating) {
 }
 
 function renderSlide(banner, product) {
-  const price = product ? `<div class="hero-price">RWF ${Math.round(parseFloat(product.price)||0).toLocaleString('en-US')} <span>(incl. VAT)</span></div>` : '';
+  const price = product ? `<div class="hero-price">RWF ${Math.round(parseFloat(product.price)||0).toLocaleString('en-US')}</div>` : '';
   const badge = banner.tagLabel ? `<span class="hero-tag">${banner.tagLabel}</span>` : '';
   const rawImg = product ? getPrimaryImage(product) : (banner.imageUrl || '');
   const img = rawImg.startsWith('/uploads/') ? `${BACKEND_URL}${rawImg}` : rawImg;
@@ -116,45 +116,40 @@ function buildHeroBanner(banners, featuredProducts) {
 
 function renderProductCard(p) {
   const image = getPrimaryImage(p);
-  const badge = p.discountPercentage
-    ? `<div class="card-badge">-${p.discountPercentage}%</div>`
-    : (p.badge ? `<div class="card-badge">${p.badge}</div>` : '');
+  const price = parseFloat(p.price) || 0;
+  const baseDiscounted = p.discountPercentage
+    ? price * (1 - parseFloat(p.discountPercentage) / 100) : null;
+  const vatPrice = Math.round(price * 1.18);
+  const vatDiscounted = baseDiscounted ? Math.round(baseDiscounted * 1.18) : null;
+  const categoryName = p.category?.name || p.categoryName || '';
+  const FALLBACK = 'https://images.unsplash.com/photo-1542751371-adc38448a05e?w=400&q=80';
 
   return `
-    <div class="product-card" data-id="${p.id}">
-      ${badge}
-      <button class="wishlist-toggle" data-action="toggle-wishlist" data-id="${p.id}">
-        <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"></path></svg>
-      </button>
-      <div class="product-card-img-container" data-action="view-details" data-id="${p.id}">
-        <img src="${image}" alt="${p.name}" class="product-card-img"
-          onerror="this.src='https://images.unsplash.com/photo-1542751371-adc38448a05e?w=400&q=80'">
-        <div class="product-card-overlay">
-          <button class="btn-quick-view" data-action="view-details" data-id="${p.id}">
-            <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" style="display:inline;vertical-align:middle;margin-right:5px;"><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
-            Quick View
-          </button>
+    <div class="sp-card" data-id="${p.id}">
+      <div class="sp-card-img-wrap">
+        <img src="${image || FALLBACK}" alt="${p.name}" class="sp-card-img"
+          onerror="this.onerror=null;this.src='${FALLBACK}'">
+        ${p.discountPercentage ? `<span class="sp-card-badge">-${p.discountPercentage}% OFF</span>` : ''}
+        <button class="sp-card-wish" data-action="toggle-wishlist" data-id="${p.id}" title="Add to wishlist">
+          <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78L12 21.23l8.84-8.84a5.5 5.5 0 000-7.78z"></path></svg>
+        </button>
+      </div>
+      <div class="sp-card-body">
+        ${categoryName ? `<span class="sp-card-cat">${categoryName}</span>` : ''}
+        <h3 class="sp-card-name" data-action="view-details" data-id="${p.id}">${p.name}</h3>
+        <div class="sp-card-rating">${renderStars(p.averageRating || p.rating || 4.5)} <span>(${p.reviewsCount || 0})</span></div>
+        <div class="sp-card-price-row">
+          ${vatDiscounted
+            ? `<span class="sp-price-orig">RWF ${vatPrice.toLocaleString('en-US')}</span><span class="sp-price-now">RWF ${vatDiscounted.toLocaleString('en-US')}</span>`
+            : `<span class="sp-price-now">RWF ${vatPrice.toLocaleString('en-US')}</span>`}
         </div>
       </div>
-      <div class="product-card-info">
-        <div style="display:flex;align-items:center;justify-content:space-between;">
-          <span class="product-sku">${p.sku}</span>
-          <span class="product-stock-indicator">In Stock</span>
-        </div>
-        <h3 class="product-title" data-action="view-details" data-id="${p.id}">${p.name}</h3>
-        <div class="product-rating">${renderStars(p.averageRating || p.rating || 4.5)} <span>(${p.reviewsCount || 0})</span></div>
-        <div class="product-price-row">
-          ${p.discountPercentage ? `<span class="price-original">RWF ${Math.round(parseFloat(p.price)||0).toLocaleString('en-US')}</span>
-            <span class="price-current">RWF ${Math.round((parseFloat(p.price)||0) * (1 - parseFloat(p.discountPercentage) / 100)).toLocaleString('en-US')}</span>` :
-            `<span class="price-current">RWF ${Math.round(parseFloat(p.price)||0).toLocaleString('en-US')}</span>`}
-          <span class="price-vat">(incl. VAT)</span>
-        </div>
-      </div>
-      <div class="product-card-actions">
-        <button class="btn-card-add" data-action="add-to-cart" data-id="${p.id}">
-          <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M12 4.5v15m7.5-7.5h-15"></path></svg>
+      <div class="sp-card-footer">
+        <button class="sp-btn-cart" data-action="add-to-cart" data-id="${p.id}">
+          <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
           Add to Cart
         </button>
+        <button class="sp-btn-detail" data-action="view-details" data-id="${p.id}">View</button>
       </div>
     </div>
   `;
@@ -162,11 +157,9 @@ function renderProductCard(p) {
 
 export async function render(state) {
   currentPage = 0;
-  currentFilters = {
-    categoryId: state.activeCategory || undefined,
-    name: state.searchQuery || undefined,
-    status: 'ACTIVE',
-  };
+  currentFilters = { status: 'ACTIVE' };
+  // clear any stale search/category state so returning home always shows all products
+  setState({ searchQuery: '', activeCategory: null });
 
   const [bannersRes, featuredRes, productsRes] = await Promise.all([
     ApiService.banners.getActive().catch(() => ({ data: [] })),
@@ -386,10 +379,21 @@ function bindCardEvents(container, helpers) {
   const { navigate, renderHeader, toast } = helpers;
 
   function checkAuth(cb) {
-    if (!ApiService.getCurrentUser()) {
-      toast('Please sign in to proceed');
+    const user = ApiService.getCurrentUser();
+    if (!user) {
+      toast('Please sign in to add items');
       setState({ authModalMode: 'login' });
       helpers.renderAuthModal();
+      return;
+    }
+    const roles = user.roles || [];
+    const isStaff = roles.some(r => {
+      const n = (typeof r === 'string' ? r : r.name || r.authority || '').toUpperCase();
+      return n.includes('ADMIN') || n.includes('EMPLOYEE') || n.includes('SUPPORT');
+    });
+    const isCustomerOnly = roles.some(r => (typeof r === 'string' ? r : r.name || r.authority || '').toUpperCase().includes('CUSTOMER'));
+    if (isStaff && !isCustomerOnly) {
+      toast('Cart is not available for staff accounts');
       return;
     }
     cb();

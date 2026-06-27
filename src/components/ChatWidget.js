@@ -117,6 +117,9 @@ export function bindEvents(helpers) {
     const msg = input.value.trim();
     if (!msg) return;
     input.value = '';
+    // Append locally immediately so the sender sees their message without waiting for WS echo
+    const me = ApiService.getCurrentUser();
+    _appendBubble(msg, true, me?.email);
     try {
       await ApiService.chat.sendMessage(_sessionId, msg);
     } catch (_) {}
@@ -126,8 +129,9 @@ export function bindEvents(helpers) {
     const me = ApiService.getCurrentUser();
     connectWS(() => {
       subscribeWS('/topic/live-chat/' + _sessionId, (msgData) => {
-        const isMe = msgData.senderId === me?.id;
-        _appendBubble(msgData.message, isMe, msgData.senderEmail);
+        // Skip own messages — already appended locally on submit
+        if (msgData.senderId === me?.id) return;
+        _appendBubble(msgData.message, false, msgData.senderEmail);
       });
       subscribeWS('/topic/live-chat/sessions', (session) => {
         if ((session.id || session.sessionId) === _sessionId) {

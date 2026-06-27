@@ -1,6 +1,7 @@
 import '../admin/style.css';
 import { ApiService } from '../../api.js';
 import { setState } from '../../store.js';
+import { connectWS, subscribeWS, unsubscribeWS } from '../../chat-ws.js';
 
 const BASE = 'http://localhost:8080';
 function authHeaders() {
@@ -89,6 +90,7 @@ function buildTicketRows(tickets) {
 
 function buildChatTab(sessions) {
   if (!sessions.length) return `<div class="dash-empty">No live chat sessions.</div>`;
+  const me = ApiService.getCurrentUser();
   return `
     <div class="dash-section-header">
       <h3>Live Chat Sessions</h3>
@@ -96,23 +98,29 @@ function buildChatTab(sessions) {
     <div class="dash-table-wrap">
       <table class="dash-table">
         <thead><tr>
-          <th>Session</th><th>Customer</th><th>Status</th><th>Started</th><th>Actions</th>
+          <th>Session</th><th>Customer</th><th>Subject</th><th>Status</th><th>Started</th><th>Actions</th>
         </tr></thead>
         <tbody>
-          ${sessions.map(s => `
+          ${sessions.map(s => {
+            const isAssignedToMe = s.agent?.id === me?.id;
+            return `
             <tr>
               <td style="font-size:11px;color:#94a3b8;">#${(s.id||'').toString().slice(0,8)}</td>
-              <td>${s.customerName || s.customer?.firstName || '—'}</td>
+              <td>${s.customer?.firstName || s.customerName || '—'} ${s.customer?.lastName || ''}</td>
+              <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${s.subject || '—'}</td>
               <td>${statusBadge(s.status || 'OPEN')}</td>
               <td style="font-size:12px;color:#64748b;">${fmtDate(s.createdAt)}</td>
-              <td>
-                <button class="dash-action-btn" data-action="sa-assign-chat" data-id="${s.id}">Assign to Me</button>
+              <td style="display:flex;gap:4px;flex-wrap:wrap;">
+                <button class="dash-action-btn" data-action="sa-view-chat" data-id="${s.id}">View Chat</button>
+                ${s.status !== 'CLOSED' && !isAssignedToMe
+                  ? `<button class="dash-action-btn" data-action="sa-assign-chat" data-id="${s.id}">Assign to Me</button>`
+                  : ''}
                 ${s.status !== 'CLOSED'
                   ? `<button class="dash-action-btn danger" data-action="sa-close-chat" data-id="${s.id}">Close</button>`
                   : ''}
               </td>
             </tr>
-          `).join('')}
+          `}).join('')}
         </tbody>
       </table>
     </div>
@@ -162,10 +170,10 @@ async function openTicketModal(ticketId) {
       </div>
       <div id="sa-msg-list" style="flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:10px;">
         ${messages.length ? messages.map(m => {
-          const isCustomer = m.sender?.id === ticket.customer?.id;
+          const isCustomer = m.senderId === (ticket.customerId || ticket.customer?.id);
           const senderName = isCustomer
-            ? (m.sender?.firstName || 'Customer')
-            : (m.sender?.firstName || 'Agent');
+            ? (m.senderFirstName || 'Customer')
+            : (m.senderFirstName || 'Agent');
           return `
           <div style="max-width:80%;${isCustomer?'align-self:flex-start;':'align-self:flex-end;'}">
             <div style="font-size:10px;color:#94a3b8;margin-bottom:3px;${isCustomer?'':'text-align:right'}">${senderName}</div>
@@ -204,6 +212,124 @@ async function openTicketModal(ticketId) {
 
   replyBtn?.addEventListener('click', sendReply);
   replyInput?.addEventListener('keydown', e => { if (e.key === 'Enter') sendReply(); });
+}
+
+// ── Chat session modal ─────────────────────────────────────
+async function openChatModal(sessionId) {
+  const me = ApiService.getCurrentUser();
+
+  const msgsRes = await api(`/api/support/live-chat/sessions/${sessionId}/messages`).catch(() => ({}));
+  const messages = Array.isArray(msgsRes.data) ? msgsRes.data : [];
+
+  // Find session in cache for subject / status
+  const session = _chatCache.find(s => s.id === sessionId) || {};
+  const isClosed = session.status === 'CLOSED';
+
+  function buildMsgHtml(msgs) {
+    if (!msgs.length) return '<div style="color:#94a3b8;text-align:center;padding:24px;">No messages yet</div>';
+    return msgs.map(m => {
+      const isMe = m.senderId === me?.id;
+      const label = isMe ? 'You' : (m.senderEmail ? m.senderEmail.split('@')[0] : 'Customer');
+      return `
+        <div style="max-width:80%;${isMe ? 'align-self:flex-end;' : 'align-self:flex-start;'}">
+          <div style="font-size:10px;color:#94a3b8;margin-bottom:3px;${isMe ? 'text-align:right;' : ''}">${label}</div>
+          <div style="background:${isMe ? '#FF6B00' : '#f1f5f9'};color:${isMe ? 'white' : '#1e293b'};padding:10px 14px;border-radius:12px;font-size:13px;">${String(m.message).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div>
+          <div style="font-size:11px;color:#94a3b8;margin-top:3px;text-align:${isMe ? 'right' : 'left'};">${fmtDate(m.sentAt || m.createdAt)}</div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  const overlay = document.createElement('div');
+  overlay.id = 'sa-chat-modal';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center;';
+  overlay.innerHTML = `
+    <div style="background:white;border-radius:14px;width:580px;max-height:82vh;display:flex;flex-direction:column;overflow:hidden;">
+      <div style="padding:16px 20px;border-bottom:1px solid #e2e8f0;display:flex;justify-content:space-between;align-items:center;">
+        <div>
+          <div style="font-weight:700;font-size:15px;">${session.subject || 'Live Chat'}</div>
+          <div style="font-size:12px;color:#64748b;margin-top:2px;">
+            Customer: ${session.customer?.firstName || '—'} ${session.customer?.lastName || ''}
+            &nbsp;·&nbsp; ${statusBadge(session.status || 'OPEN')}
+          </div>
+        </div>
+        <button id="sa-chat-modal-close" style="background:none;border:none;cursor:pointer;font-size:22px;color:#94a3b8;line-height:1;">×</button>
+      </div>
+      <div id="sa-chat-msg-list" style="flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:10px;">
+        ${buildMsgHtml(messages)}
+      </div>
+      ${!isClosed ? `
+        <div style="padding:14px 16px;border-top:1px solid #e2e8f0;display:flex;gap:8px;">
+          <input id="sa-chat-reply-input" style="flex:1;padding:9px 12px;border:1px solid #e2e8f0;border-radius:8px;font-size:13px;" placeholder="Type a reply…" autocomplete="off">
+          <button id="sa-chat-reply-send" class="dash-action-btn" style="padding:9px 18px;">Send</button>
+        </div>
+      ` : '<div style="padding:12px 16px;text-align:center;font-size:12px;color:#94a3b8;border-top:1px solid #e2e8f0;">This session is closed</div>'}
+    </div>
+  `;
+
+  document.body.appendChild(overlay);
+
+  const msgList = document.getElementById('sa-chat-msg-list');
+  function scrollBottom() { if (msgList) msgList.scrollTop = msgList.scrollHeight; }
+  scrollBottom();
+
+  // Real-time incoming messages
+  connectWS(() => {
+    subscribeWS('/topic/live-chat/' + sessionId, (msgData) => {
+      // Skip own messages — REST response already handles optimistic local append
+      if (msgData.senderId === me?.id) return;
+      const el = document.createElement('div');
+      const label = msgData.senderEmail ? msgData.senderEmail.split('@')[0] : 'Customer';
+      el.style.cssText = 'max-width:80%;align-self:flex-start;';
+      el.innerHTML = `
+        <div style="font-size:10px;color:#94a3b8;margin-bottom:3px;">${label}</div>
+        <div style="background:#f1f5f9;color:#1e293b;padding:10px 14px;border-radius:12px;font-size:13px;">${String(msgData.message).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div>
+        <div style="font-size:11px;color:#94a3b8;margin-top:3px;">${fmtDate(msgData.sentAt)}</div>
+      `;
+      msgList?.appendChild(el);
+      scrollBottom();
+    });
+  });
+
+  function closeModal() {
+    unsubscribeWS('/topic/live-chat/' + sessionId);
+    overlay.remove();
+  }
+
+  document.getElementById('sa-chat-modal-close').onclick = closeModal;
+  overlay.onclick = e => { if (e.target === overlay) closeModal(); };
+
+  if (!isClosed) {
+    const replyInput = document.getElementById('sa-chat-reply-input');
+    const replyBtn = document.getElementById('sa-chat-reply-send');
+
+    async function sendReply() {
+      const msg = replyInput?.value.trim();
+      if (!msg) return;
+      replyBtn.disabled = true;
+      replyBtn.textContent = 'Sending…';
+      // Optimistic local append
+      const el = document.createElement('div');
+      el.style.cssText = 'max-width:80%;align-self:flex-end;';
+      el.innerHTML = `
+        <div style="font-size:10px;color:#94a3b8;margin-bottom:3px;text-align:right;">You</div>
+        <div style="background:#FF6B00;color:white;padding:10px 14px;border-radius:12px;font-size:13px;">${String(msg).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div>
+      `;
+      msgList?.appendChild(el);
+      scrollBottom();
+      replyInput.value = '';
+      replyBtn.disabled = false;
+      replyBtn.textContent = 'Send';
+      await api(`/api/support/live-chat/sessions/${sessionId}/messages`, {
+        method: 'POST',
+        body: JSON.stringify({ message: msg })
+      }).catch(console.error);
+    }
+
+    replyBtn.addEventListener('click', sendReply);
+    replyInput.addEventListener('keydown', e => { if (e.key === 'Enter') sendReply(); });
+    replyInput.focus();
+  }
 }
 
 // ── render ─────────────────────────────────────────────────
@@ -245,6 +371,9 @@ export async function render(state) {
 }
 
 async function loadTab(tab) {
+  if (_activeTab === 'chat' && tab !== 'chat') {
+    unsubscribeWS('/topic/live-chat/sessions');
+  }
   _activeTab = tab;
   const body = document.getElementById('sa-tab-body');
   if (!body) return;
@@ -264,6 +393,23 @@ async function loadTab(tab) {
       _chatCache = (res.data?.content || res.data || []);
       body.innerHTML = buildChatTab(_chatCache);
       bindChatTabEvents();
+      connectWS(() => {
+        subscribeWS('/topic/live-chat/sessions', (session) => {
+          if (_activeTab !== 'chat') {
+            unsubscribeWS('/topic/live-chat/sessions');
+            return;
+          }
+          const sessionId = session.id || session.sessionId;
+          const idx = _chatCache.findIndex(s => s.id === sessionId);
+          if (idx >= 0) {
+            _chatCache[idx] = session;
+          } else {
+            _chatCache.unshift(session);
+          }
+          body.innerHTML = buildChatTab(_chatCache);
+          bindChatTabEvents();
+        });
+      });
     } else if (tab === 'profile') {
       body.innerHTML = buildProfileTab();
     }
@@ -314,7 +460,7 @@ function bindTicketRowActions() {
   document.querySelectorAll('[data-action="sa-resolve-ticket"]').forEach(btn => {
     btn.addEventListener('click', async () => {
       if (!confirm('Mark this ticket as resolved?')) return;
-      await api(`/api/support/tickets/${btn.dataset.id}/close`, { method: 'PATCH' }).catch(console.error);
+      await api(`/api/support/tickets/${btn.dataset.id}/resolve`, { method: 'PATCH' }).catch(console.error);
       loadTab('tickets');
     });
   });
@@ -329,13 +475,18 @@ function bindTicketRowActions() {
 }
 
 function bindChatTabEvents() {
+  document.querySelectorAll('[data-action="sa-view-chat"]').forEach(btn => {
+    btn.addEventListener('click', () => openChatModal(btn.dataset.id));
+  });
+
   document.querySelectorAll('[data-action="sa-assign-chat"]').forEach(btn => {
     btn.addEventListener('click', async () => {
       const me = ApiService.getCurrentUser();
+      if (!me?.id) return alert('Cannot determine your user ID.');
       btn.disabled = true;
       await api(`/api/support/live-chat/sessions/${btn.dataset.id}/assign`, {
         method: 'POST',
-        body: JSON.stringify({ agentId: me?.id })
+        body: JSON.stringify({ agentId: me.id })
       }).catch(console.error);
       loadTab('chat');
     });

@@ -147,6 +147,22 @@
 .header-action-btn:hover { background: var(--bg-main); color: var(--primary); }
 .badge-btn { position: relative; }
 
+/* ── Hover Dropdowns (Account + Notifications) ────────── */
+#header-user-dropdown,
+.notifications-panel {
+  display: block !important;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(6px);
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+#header-user-dropdown.open,
+.notifications-panel.open {
+  opacity: 1;
+  pointer-events: all;
+  transform: translateY(0);
+}
+
 /* ── Notifications Panel ──────────────────────────────── */
 .notifications-panel {
   position: absolute;

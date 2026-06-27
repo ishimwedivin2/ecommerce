@@ -31,8 +31,10 @@ function renderStars(rating) {
 function renderCard(p) {
   const img = getPrimaryImage(p);
   const price = parseFloat(p.price) || 0;
-  const discounted = p.discountPercentage
-    ? (price * (1 - parseFloat(p.discountPercentage) / 100)).toFixed(2) : null;
+  const baseDiscounted = p.discountPercentage
+    ? price * (1 - parseFloat(p.discountPercentage) / 100) : null;
+  const vatPrice = Math.round(price * 1.18);
+  const vatDiscounted = baseDiscounted ? Math.round(baseDiscounted * 1.18) : null;
 
   return `
     <div class="sp-card" data-id="${p.id}">
@@ -49,9 +51,9 @@ function renderCard(p) {
         <h3 class="sp-card-name" data-action="shop-detail" data-id="${p.id}">${p.name}</h3>
         <div class="sp-card-rating">${renderStars(p.averageRating)} <span>(${p.reviewsCount || 0})</span></div>
         <div class="sp-card-price-row">
-          ${discounted
-            ? `<span class="sp-price-orig">RWF ${Math.round(price).toLocaleString('en-US')}</span><span class="sp-price-now">RWF ${Math.round(parseFloat(discounted)).toLocaleString('en-US')}</span>`
-            : `<span class="sp-price-now">RWF ${Math.round(price).toLocaleString('en-US')}</span>`}
+          ${vatDiscounted
+            ? `<span class="sp-price-orig">RWF ${vatPrice.toLocaleString('en-US')}</span><span class="sp-price-now">RWF ${vatDiscounted.toLocaleString('en-US')}</span>`
+            : `<span class="sp-price-now">RWF ${vatPrice.toLocaleString('en-US')}</span>`}
         </div>
       </div>
       <div class="sp-card-footer">
@@ -91,16 +93,12 @@ function renderSidebar(cats, filters) {
       </div>
 
       <div class="sp-sidebar-section">
-        <h4 class="sp-sidebar-title">Price Range</h4>
+        <h4 class="sp-sidebar-title">Price Range (RWF)</h4>
         <div class="sp-price-range">
-          <div class="sp-range-track">
-            <div class="sp-range-fill" id="sp-range-fill"></div>
-            <input type="range" id="sp-min-range" class="sp-range" min="0" max="5000" step="10" value="${minVal || 0}">
-            <input type="range" id="sp-max-range" class="sp-range" min="0" max="5000" step="10" value="${maxVal || 5000}">
-          </div>
-          <div class="sp-range-labels">
-            <span>RWF <span id="sp-min-label">${(minVal || 0).toLocaleString('en-US')}</span></span>
-            <span>RWF <span id="sp-max-label">${(maxVal || 5000).toLocaleString('en-US')}</span></span>
+          <div class="sp-price-inputs">
+            <input type="number" id="sp-min-input" class="sp-price-input" min="0" placeholder="Min" value="${minVal || ''}">
+            <span class="sp-price-sep">—</span>
+            <input type="number" id="sp-max-input" class="sp-price-input" min="0" placeholder="Max" value="${maxVal || ''}">
           </div>
         </div>
         <button class="sp-apply-price" id="sp-apply-price">Apply</button>
@@ -228,19 +226,6 @@ function bindPagination() {
   });
 }
 
-function updateRangeFill() {
-  const minR = document.getElementById('sp-min-range');
-  const maxR = document.getElementById('sp-max-range');
-  const fill = document.getElementById('sp-range-fill');
-  if (!minR || !maxR || !fill) return;
-  const min = parseInt(minR.value), max = parseInt(maxR.value);
-  const pMin = (min / 5000) * 100;
-  const pMax = (max / 5000) * 100;
-  fill.style.left = pMin + '%';
-  fill.style.width = (pMax - pMin) + '%';
-  document.getElementById('sp-min-label').textContent = min;
-  document.getElementById('sp-max-label').textContent = max;
-}
 
 function bindCardActions() {
   document.querySelectorAll('[data-action="shop-detail"]').forEach(el => {
@@ -251,12 +236,27 @@ function bindCardActions() {
   });
   document.querySelectorAll('[data-action="shop-add-cart"]').forEach(el => {
     el.addEventListener('click', async () => {
+      const user = ApiService.getCurrentUser();
+      if (!user) {
+        import('../../components/toast.js').then(m => m.showToast('Please sign in to add items', 'error'));
+        return;
+      }
+      const roles = user.roles || [];
+      const isCustomerOnly = roles.some(r => (typeof r === 'string' ? r : r.name || r.authority || '').toUpperCase().includes('CUSTOMER'));
+      const isStaff = roles.some(r => {
+        const n = (typeof r === 'string' ? r : r.name || r.authority || '').toUpperCase();
+        return n.includes('ADMIN') || n.includes('EMPLOYEE') || n.includes('SUPPORT');
+      });
+      if (isStaff && !isCustomerOnly) {
+        import('../../components/toast.js').then(m => m.showToast('Cart is not available for staff accounts', 'info'));
+        return;
+      }
       try {
         await ApiService.cart.addItem(el.dataset.id, 1);
         import('../../components/toast.js').then(m => m.showToast('Added to cart!', 'success'));
         import('../../router.js').then(m => m.renderHeader());
-      } catch {
-        import('../../components/toast.js').then(m => m.showToast('Please sign in to add items', 'error'));
+      } catch (err) {
+        import('../../components/toast.js').then(m => m.showToast(err.message || 'Failed to add to cart', 'error'));
       }
     });
   });
@@ -273,6 +273,12 @@ function bindCardActions() {
 }
 
 export function bindEvents(state, helpers) {
+  // Set exact header height so both panels fill the remaining viewport
+  const headerEl = document.querySelector('.header-main');
+  const promoEl  = document.querySelector('.promo-banner');
+  const hh = (headerEl?.offsetHeight || 64) + (promoEl?.offsetHeight || 0);
+  document.documentElement.style.setProperty('--sp-header-h', hh + 'px');
+
   // Category filter
   document.querySelectorAll('input[name="sp-cat"]').forEach(radio => {
     radio.addEventListener('change', () => {
@@ -285,27 +291,31 @@ export function bindEvents(state, helpers) {
     });
   });
 
-  // Price range sliders
-  const minR = document.getElementById('sp-min-range');
-  const maxR = document.getElementById('sp-max-range');
-  updateRangeFill();
-
-  minR?.addEventListener('input', () => {
-    if (parseInt(minR.value) > parseInt(maxR.value) - 10) minR.value = parseInt(maxR.value) - 10;
-    updateRangeFill();
-  });
-  maxR?.addEventListener('input', () => {
-    if (parseInt(maxR.value) < parseInt(minR.value) + 10) maxR.value = parseInt(minR.value) + 10;
-    updateRangeFill();
-  });
+  // Price range inputs
+  const minInput = document.getElementById('sp-min-input');
+  const maxInput = document.getElementById('sp-max-input');
 
   document.getElementById('sp-apply-price')?.addEventListener('click', () => {
-    const min = parseInt(minR.value);
-    const max = parseInt(maxR.value);
-    _filters.minPrice = min > 0 ? min : undefined;
-    _filters.maxPrice = max < 5000 ? max : undefined;
+    const min = minInput?.value !== '' ? parseFloat(minInput.value) : undefined;
+    const max = maxInput?.value !== '' ? parseFloat(maxInput.value) : undefined;
+    if (min !== undefined && max !== undefined && min > max) {
+      minInput.style.borderColor = 'var(--danger)';
+      maxInput.style.borderColor = 'var(--danger)';
+      return;
+    }
+    if (minInput) minInput.style.borderColor = '';
+    if (maxInput) maxInput.style.borderColor = '';
+    _filters.minPrice = min;
+    _filters.maxPrice = max;
     _page = 0;
     fetchAndUpdate();
+  });
+
+  // Apply on Enter key in either input
+  [minInput, maxInput].forEach(inp => {
+    inp?.addEventListener('keydown', e => {
+      if (e.key === 'Enter') document.getElementById('sp-apply-price')?.click();
+    });
   });
 
   // Sort
@@ -325,9 +335,10 @@ export function bindEvents(state, helpers) {
     document.querySelectorAll('input[name="sp-cat"]').forEach(r => { r.checked = r.value === ''; });
     document.querySelectorAll('.sp-cat-item').forEach(l => l.classList.remove('active'));
     document.querySelector('.sp-cat-item')?.classList.add('active');
-    if (minR) minR.value = 0;
-    if (maxR) maxR.value = 5000;
-    updateRangeFill();
+    const minI = document.getElementById('sp-min-input');
+    const maxI = document.getElementById('sp-max-input');
+    if (minI) { minI.value = ''; minI.style.borderColor = ''; }
+    if (maxI) { maxI.value = ''; maxI.style.borderColor = ''; }
     fetchAndUpdate();
   });
 

@@ -1,10 +1,14 @@
 import { ApiService } from '../../api.js';
 import { setState } from '../../store.js';
+import { connectWS, subscribeWS, unsubscribeWS } from '../../chat-ws.js';
 
 export async function render(state) {
-  const ticketsRes = await ApiService.support.getMyTickets();
-  const tickets = ticketsRes.data || [];
-  const ticket = tickets.find(t => t.id === state.selectedTicketId);
+  // Fix 3: fetch single ticket by ID instead of loading all tickets to find one
+  let ticket = null;
+  try {
+    const res = await ApiService.support.getTicket(state.selectedTicketId);
+    ticket = res.data;
+  } catch (_) {}
 
   if (!ticket) return '<p style="padding:48px;text-align:center;color:var(--text-light);">Ticket not found.</p>';
 
@@ -16,9 +20,9 @@ export async function render(state) {
 
   const me = ApiService.getCurrentUser();
   const messagesHtml = msgs.map(m => {
-    const isMe = m.sender && m.sender.id === me?.id;
-    const label = isMe ? '' : '<strong style="font-size:11px;opacity:.7;">' + ((m.sender && (m.sender.firstName || m.sender.email)) || 'Support') + ': </strong>';
-    return '<div class="chat-bubble ' + (isMe ? 'sent' : 'received') + '">' + label + (m.message || '') + '<div style="font-size:9px;margin-top:4px;opacity:0.7;text-align:right;">' + _fmt(m.createdAt) + '</div></div>';
+    const isMe = m.senderId === me?.id;
+    const label = isMe ? '' : '<strong style="font-size:11px;opacity:.7;">' + ((m.senderFirstName || m.senderEmail) || 'Support') + ': </strong>';
+    return '<div class="chat-bubble ' + (isMe ? 'sent' : 'received') + '">' + label + _esc(m.message || '') + '<div style="font-size:9px;margin-top:4px;opacity:0.7;text-align:right;">' + _fmt(m.createdAt) + '</div></div>';
   }).join('');
 
   const isClosed = ticket.status === 'CLOSED' || ticket.status === 'RESOLVED';
@@ -26,7 +30,7 @@ export async function render(state) {
   return `
     <div style="display:flex;align-items:center;gap:12px;margin-bottom:24px;flex-wrap:wrap;">
       <button class="btn-secondary" id="btn-back-support" style="padding:6px 12px;font-size:13px;">← Back to Support</button>
-      <h2>Ticket: ${ticket.title}</h2>
+      <h2>Ticket: ${_esc(ticket.title)}</h2>
       <span class="status-badge ${ticket.status === 'OPEN' ? 'paid' : 'created'}">${ticket.status}</span>
       <span style="font-size:12px;color:var(--text-light);margin-left:auto;">Priority: <strong>${ticket.priority || 'MEDIUM'}</strong></span>
     </div>
@@ -64,13 +68,29 @@ export async function render(state) {
 
 export function bindEvents(state, helpers) {
   const { navigate, refresh, toast } = helpers;
+  const me = ApiService.getCurrentUser();
 
   const chatBox = document.getElementById('ticket-chat-box');
   if (chatBox) chatBox.scrollTop = chatBox.scrollHeight;
 
   document.getElementById('btn-back-support')?.addEventListener('click', () => {
+    unsubscribeWS('/topic/tickets/' + state.selectedTicketId);
     setState({ selectedTicketId: null });
     navigate('support');
+  });
+
+  // Fix 11: subscribe for real-time agent replies
+  connectWS(() => {
+    subscribeWS('/topic/tickets/' + state.selectedTicketId, (msgData) => {
+      // skip own messages — already appended locally on send
+      if (msgData.senderId === me?.id) return;
+      const box = document.getElementById('ticket-chat-box');
+      if (!box) return;
+      const label = '<strong style="font-size:11px;opacity:.7;">' + _esc(msgData.senderFirstName || msgData.senderEmail || 'Support') + ': </strong>';
+      box.insertAdjacentHTML('beforeend',
+        '<div class="chat-bubble received">' + label + _esc(msgData.message || '') + '<div style="font-size:9px;margin-top:4px;opacity:0.7;text-align:right;">' + _fmt(msgData.createdAt) + '</div></div>');
+      box.scrollTop = box.scrollHeight;
+    });
   });
 
   document.getElementById('ticket-chat-form')?.addEventListener('submit', async (e) => {
@@ -79,14 +99,15 @@ export function bindEvents(state, helpers) {
     const msg = input.value.trim();
     if (!msg) return;
     input.value = '';
+    // Optimistic local append
+    const box = document.getElementById('ticket-chat-box');
+    if (box) {
+      box.insertAdjacentHTML('beforeend',
+        '<div class="chat-bubble sent">' + _esc(msg) + '<div style="font-size:9px;margin-top:4px;opacity:0.7;text-align:right;">just now</div></div>');
+      box.scrollTop = box.scrollHeight;
+    }
     try {
       await ApiService.support.sendTicketMessage(state.selectedTicketId, msg);
-      const box = document.getElementById('ticket-chat-box');
-      if (box) {
-        box.insertAdjacentHTML('beforeend',
-          '<div class="chat-bubble sent">' + msg + '<div style="font-size:9px;margin-top:4px;opacity:0.7;text-align:right;">just now</div></div>');
-        box.scrollTop = box.scrollHeight;
-      }
     } catch (err) {
       toast((err && err.message) || 'Failed to send', 'error');
     }
@@ -96,6 +117,7 @@ export function bindEvents(state, helpers) {
     if (confirm('Close this support ticket?')) {
       try {
         await ApiService.support.closeTicket(state.selectedTicketId);
+        unsubscribeWS('/topic/tickets/' + state.selectedTicketId);
         toast('Ticket closed');
         refresh();
       } catch (err) {
@@ -121,7 +143,9 @@ export function bindEvents(state, helpers) {
     const feedback = document.getElementById('survey-feedback')?.value?.trim() || '';
     try {
       await ApiService.support.submitSurvey(state.selectedTicketId, { rating, feedback });
-      document.getElementById('survey-box').innerHTML = '<div style="text-align:center;color:#16a34a;font-weight:700;padding:8px">✓ Thank you for your feedback!</div>';
+      // Fix 4: hide the form and show success inline after submission
+      const box = document.getElementById('survey-box');
+      if (box) box.innerHTML = '<div style="text-align:center;color:#16a34a;font-weight:700;padding:8px">✓ Thank you for your feedback!</div>';
     } catch (err) {
       toast((err && err.message) || 'Failed to submit survey', 'error');
     }
@@ -130,7 +154,11 @@ export function bindEvents(state, helpers) {
 
 function _fmt(ts) {
   if (!ts) return '';
-  var d = new Date(ts);
+  const d = new Date(ts);
   if (isNaN(d)) return ts;
   return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function _esc(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }

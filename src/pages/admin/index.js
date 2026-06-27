@@ -21,6 +21,7 @@ const I = {
   log: `<svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>`,
   settings: `<svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>`,
   pos: `<svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>`,
+  card: `<svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>`,
   pkg: `<svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="16.5" y1="9.4" x2="7.5" y2="4.21"/><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>`,
   bell: `<svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>`,
   x: `<svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`,
@@ -63,6 +64,7 @@ function navItems() {
     { id:'analytics', label:'Dashboard', icon:I.grid },
     { section: 'Commerce' },
     { id:'orders',   label:'Orders',    icon:I.cart,    badge:'orders' },
+    { id:'payments', label:'Payments',  icon:I.card },
     { id:'products', label:'Products',  icon:I.box },
     { id:'inventory',    label:'Inventory',    icon:I.pkg },
     { id:'suppliers',    label:'Suppliers',    icon:I.users },
@@ -535,21 +537,168 @@ TAB.analytics = async () => {
   return html;
 };
 
+// ── Orders charts helpers ─────────────────────────────────
+function buildOrderCharts(orders, adminView) {
+  /* ── 1. Status donut ── */
+  const STATUS_COLORS = {
+    PENDING:'#F59E0B', PAID:'#10B981', PROCESSING:'#3B82F6',
+    FULFILLED:'#8B5CF6', SHIPPED:'#06B6D4', DELIVERED:'#22C55E',
+    CANCELLED:'#EF4444', RETURN_REQUESTED:'#F97316', RETURNED:'#94A3B8', REFUNDED:'#EC4899'
+  };
+  const statusCounts = {};
+  orders.forEach(o => { const s = o.status||'PENDING'; statusCounts[s] = (statusCounts[s]||0)+1; });
+  const statusEntries = Object.entries(statusCounts).sort((a,b)=>b[1]-a[1]);
+  const donutTotal = orders.length || 1;
+  let donutAngle = -Math.PI/2;
+  const cx=70, cy=70, r=52, rInner=34;
+  const slices = statusEntries.map(([s,cnt]) => {
+    const angle = (cnt/donutTotal)*2*Math.PI;
+    const x1=cx+r*Math.cos(donutAngle), y1=cy+r*Math.sin(donutAngle);
+    donutAngle += angle;
+    const x2=cx+r*Math.cos(donutAngle), y2=cy+r*Math.sin(donutAngle);
+    const xi1=cx+rInner*Math.cos(donutAngle-angle), yi1=cy+rInner*Math.sin(donutAngle-angle);
+    const xi2=cx+rInner*Math.cos(donutAngle), yi2=cy+rInner*Math.sin(donutAngle);
+    const large=angle>Math.PI?1:0;
+    const color=STATUS_COLORS[s]||'#94A3B8';
+    return `<path d="M${x1},${y1} A${r},${r},0,${large},1,${x2},${y2} L${xi2},${yi2} A${rInner},${rInner},0,${large},0,${xi1},${yi1} Z"
+      fill="${color}" opacity="0.9"><title>${s}: ${cnt}</title></path>`;
+  }).join('');
+  const legend = statusEntries.slice(0,6).map(([s,cnt])=>
+    `<div style="display:flex;align-items:center;gap:5px;font-size:11px;color:#475569">
+      <span style="width:9px;height:9px;border-radius:2px;background:${STATUS_COLORS[s]||'#94A3B8'};flex-shrink:0"></span>
+      <span style="flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${s}</span>
+      <b style="color:#1E293B">${cnt}</b>
+    </div>`).join('');
+
+  /* ── 2. Daily orders bar (last 7 days) ── */
+  const today = new Date(); today.setHours(23,59,59,999);
+  const days7 = Array.from({length:7}, (_,i)=>{
+    const d = new Date(today); d.setDate(d.getDate()-6+i);
+    return { label: d.toLocaleDateString('en-US',{weekday:'short'}), dateStr: d.toISOString().slice(0,10), count:0, rev:0 };
+  });
+  orders.forEach(o => {
+    const d = (o.createdAt||o.orderDate||'').slice(0,10);
+    const slot = days7.find(x=>x.dateStr===d);
+    if (slot) { slot.count++; slot.rev += Number(o.totalAmount||0); }
+  });
+  const maxCount = Math.max(...days7.map(d=>d.count), 1);
+  const barW=26, barGap=10, chartH=80, barsX=28;
+  const bars = days7.map((d,i)=>{
+    const bh = Math.max(4, (d.count/maxCount)*chartH);
+    const bx = barsX+i*(barW+barGap);
+    const by = chartH-bh+4;
+    return `
+      <rect x="${bx}" y="${by}" width="${barW}" height="${bh}" rx="4" fill="#FF6B00" opacity="${d.count?0.85:0.18}">
+        <title>${d.label}: ${d.count} orders</title></rect>
+      <text x="${bx+barW/2}" y="${chartH+18}" text-anchor="middle" font-size="9" fill="#94A3B8">${d.label}</text>
+      ${d.count?`<text x="${bx+barW/2}" y="${by-4}" text-anchor="middle" font-size="9" font-weight="700" fill="#FF6B00">${d.count}</text>`:''}`;
+  }).join('');
+  const barsTotal7 = days7.reduce((s,d)=>s+d.count,0);
+
+  /* ── 3. Daily revenue line (admin only) ── */
+  let revLineHtml = '';
+  if (adminView) {
+    const maxRev = Math.max(...days7.map(d=>d.rev), 1);
+    const lineW=252, lineH=80, lx=28;
+    const pts = days7.map((d,i)=>{
+      const x = lx + i*((lineW-lx)/6);
+      const y = 4 + (1-(d.rev/maxRev))*(lineH-8);
+      return {x,y,d};
+    });
+    const polyline = pts.map(p=>`${p.x},${p.y}`).join(' ');
+    const area = `${pts[0].x},${lineH+4} `+pts.map(p=>`${p.x},${p.y}`).join(' ')+` ${pts[pts.length-1].x},${lineH+4}`;
+    const dots = pts.map(p=>`<circle cx="${p.x}" cy="${p.y}" r="4" fill="${p.d.rev?'#10B981':'#E2E8F0'}" stroke="white" stroke-width="1.5"><title>${p.d.label}: ${fmt.money(p.d.rev)}</title></circle>`).join('');
+    const maxRevFmt = fmt.money(maxRev);
+    revLineHtml = `
+    <div class="ord-chart-card">
+      <div class="ord-chart-title">Revenue — Last 7 Days <span class="ord-chart-badge ord-badge-admin">Admin Only</span></div>
+      <div class="ord-chart-meta">From ${barsTotal7} orders in view</div>
+      <svg viewBox="0 0 280 110" width="100%" style="overflow:visible">
+        <defs><linearGradient id="revGrad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#10B981" stop-opacity="0.25"/>
+          <stop offset="100%" stop-color="#10B981" stop-opacity="0"/>
+        </linearGradient></defs>
+        <polygon points="${area}" fill="url(#revGrad)"/>
+        <polyline points="${polyline}" fill="none" stroke="#10B981" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+        ${dots}
+        <text x="${lx}" y="100" font-size="9" fill="#94A3B8">${days7[0].label}</text>
+        <text x="${pts[pts.length-1].x}" y="100" text-anchor="end" font-size="9" fill="#94A3B8">${days7[6].label}</text>
+        <text x="276" y="10" text-anchor="end" font-size="9" fill="#10B981">${maxRevFmt}</text>
+      </svg>
+    </div>`;
+  }
+
+  return `
+  <div class="ord-charts-row">
+    <div class="ord-chart-card ord-donut-card">
+      <div class="ord-chart-title">Orders by Status</div>
+      <div class="ord-chart-meta">${orders.length} orders loaded</div>
+      <div style="display:flex;align-items:center;gap:16px">
+        <svg viewBox="0 0 140 140" width="120" height="120" style="flex-shrink:0">
+          ${slices}
+          <text x="70" y="67" text-anchor="middle" font-size="18" font-weight="800" fill="#1E293B">${orders.length}</text>
+          <text x="70" y="81" text-anchor="middle" font-size="9" fill="#94A3B8">orders</text>
+        </svg>
+        <div style="display:flex;flex-direction:column;gap:5px;min-width:0;flex:1">${legend}</div>
+      </div>
+    </div>
+    <div class="ord-chart-card">
+      <div class="ord-chart-title">Orders per Day <span class="ord-chart-badge">Last 7 Days</span></div>
+      <div class="ord-chart-meta">${barsTotal7} orders this week</div>
+      <svg viewBox="0 0 280 110" width="100%" style="overflow:visible">
+        ${bars}
+        <line x1="28" y1="84" x2="270" y2="84" stroke="#F1F5F9" stroke-width="1"/>
+      </svg>
+    </div>
+    ${revLineHtml}
+  </div>`;
+}
+
 // ── Orders ────────────────────────────────────────────────
 TAB.orders = async () => {
   let orders = []; let total = 0;
+  const adminView = isAdmin();
   try {
-    const res = await ApiService.getOrders({ page:0, size:20 });
+    const res = await ApiService.getOrders({ page:0, size:50 });
     orders = extractList(res);
     total  = extractTotal(res, orders);
   } catch(_){}
 
-  const rows = orders.length ? orders.map(o => `
+  const getName  = o => o.customerName || o.userName || o.customer?.firstName
+    ? ((o.customer?.firstName||'') + ' ' + (o.customer?.lastName||'')).trim() || 'Customer'
+    : 'Customer';
+  const getEmail = o => o.email || o.customerEmail || o.customer?.email || '—';
+  const getPhone = o => o.phone || o.customerPhone || o.customer?.phoneNumber || '—';
+
+  /* ── Employee rows (limited) ── */
+  const empRows = orders.length ? orders.map(o => `
     <tr>
-      <td><span class="td-m">#${o.id||o.orderId||'—'}</span></td>
-      <td class="td-b">${o.customerName||o.userName||'Customer'}</td>
-      <td>${o.email||'—'}</td>
+      <td><span class="td-m">#${(o.orderNumber||o.id||'—').toString().slice(-8)}</span></td>
+      <td class="td-b">${esc(getName(o))}</td>
+      <td>${esc(getPhone(o))}</td>
+      <td>${esc(getEmail(o))}</td>
       <td>${fmt.money(o.totalAmount||o.total||0)}</td>
+      <td>${statusBdg(o.status||o.orderStatus)}</td>
+      <td class="td-sm">${fmt.date(o.createdAt||o.orderDate)}</td>
+      <td>
+        <button class="btn-d btn-d-sec btn-d-sm btn-d-ico" data-action="view-order" data-id="${o.id||o.orderId}" title="View Details">${I.eye}</button>
+        <button class="btn-d btn-d-sec btn-d-sm btn-d-ico" data-action="edit-order" data-id="${o.id||o.orderId}" title="Update Status">${I.edit}</button>
+      </td>
+    </tr>`).join('') :
+    `<tr><td colspan="8"><div class="d-empty"><div class="d-empty-ico">📦</div><div class="d-empty-ttl">No orders yet</div></div></td></tr>`;
+
+  /* ── Admin rows (full) ── */
+  const adminRows = orders.length ? orders.map(o => `
+    <tr>
+      <td><span class="td-m">#${(o.orderNumber||o.id||'—').toString().slice(-8)}</span></td>
+      <td class="td-b">${esc(getName(o))}</td>
+      <td>${esc(getEmail(o))}</td>
+      <td>${esc(getPhone(o))}</td>
+      <td>
+        <div style="font-size:13px;font-weight:700">${fmt.money(o.totalAmount||o.total||0)}</div>
+        ${o.taxAmount ? `<div style="font-size:10px;color:#64748b">Tax: ${fmt.money(o.taxAmount)}</div>` : ''}
+      </td>
+      <td style="font-size:11px;color:#64748b">${(o.paymentMethod||'—').replace(/_/g,' ')}</td>
       <td>${statusBdg(o.status||o.orderStatus)}</td>
       <td class="td-sm">${fmt.date(o.createdAt||o.orderDate)}</td>
       <td>
@@ -557,15 +706,25 @@ TAB.orders = async () => {
         <button class="btn-d btn-d-sec btn-d-sm btn-d-ico" data-action="edit-order" data-id="${o.id||o.orderId}" title="Update Status">${I.edit}</button>
       </td>
     </tr>`).join('') :
-    `<tr><td colspan="7"><div class="d-empty"><div class="d-empty-ico">📦</div><div class="d-empty-ttl">No orders yet</div></div></td></tr>`;
+    `<tr><td colspan="9"><div class="d-empty"><div class="d-empty-ico">📦</div><div class="d-empty-ttl">No orders yet</div></div></td></tr>`;
+
+  const thead = adminView
+    ? `<tr><th>Order #</th><th>Customer</th><th>Email</th><th>Phone</th><th>Total / Tax</th><th>Payment</th><th>Status</th><th>Date</th><th>Actions</th></tr>`
+    : `<tr><th>Order #</th><th>Customer</th><th>Phone</th><th>Email</th><th>Total Paid</th><th>Status</th><th>Date</th><th>Actions</th></tr>`;
+
+  const roleBanner = adminView
+    ? `<div class="ord-role-banner ord-role-admin"><span class="ord-role-ico">👑</span><span><b>Admin View</b> — Full access: payment details, revenue data, status edits, export</span></div>`
+    : `<div class="ord-role-banner ord-role-emp"><span class="ord-role-ico">👤</span><span><b>Employee View</b> — Customer contact info and order status. Revenue analytics are admin-only.</span></div>`;
 
   return `
   <div class="dash-page-hd">
     <div><div class="dash-page-title">Orders</div><div class="dash-page-sub">${fmt.num(total)} total orders</div></div>
     <div class="dash-page-acts">
-      <button class="btn-d btn-d-sec" id="btn-export-orders">${I.download} Export</button>
+      ${adminView ? `<button class="btn-d btn-d-sec" id="btn-export-orders">${I.download} Export</button>` : ''}
     </div>
   </div>
+  ${roleBanner}
+  ${buildOrderCharts(orders, adminView)}
   <div class="dash-tcard">
     <div class="dash-tcard-hd">
       <span class="dash-tcard-title">All Orders</span>
@@ -574,15 +733,158 @@ TAB.orders = async () => {
         <input class="dash-inp" placeholder="Search orders…" id="order-search" style="width:180px">
         <select class="dash-sel" id="order-status-filter">
           <option value="">All Statuses</option>
-          <option>PENDING</option><option>PROCESSING</option><option>FULFILLED</option>
+          <option>PENDING</option><option>PROCESSING</option><option>PAID</option><option>FULFILLED</option>
           <option>DELIVERED</option><option>CANCELLED</option><option>REFUNDED</option>
         </select>
         <button class="btn-d btn-d-sec btn-d-sm" id="btn-filter-orders">${I.search} Filter</button>
       </div>
     </div>
     <table class="dt">
-      <thead><tr><th>Order ID</th><th>Customer</th><th>Email</th><th>Total</th><th>Status</th><th>Date</th><th>Actions</th></tr></thead>
-      <tbody id="orders-tbody">${rows}</tbody>
+      <thead>${thead}</thead>
+      <tbody id="orders-tbody">${adminView ? adminRows : empRows}</tbody>
+    </table>
+  </div>`;
+};
+
+// ── Payments ──────────────────────────────────────────────
+TAB.payments = async () => {
+  const adminView = isAdmin();
+  let txns = [], summary = {};
+  try {
+    const [txRes, sumRes] = await Promise.all([
+      ApiService.getReconciliationTransactions(null),
+      adminView ? ApiService.getReconciliationSummary() : Promise.resolve({ data: {} }),
+    ]);
+    txns    = extractList(txRes);
+    summary = sumRes?.data || sumRes || {};
+  } catch(_){}
+
+  /* ── Status badge colours ── */
+  const txnStatusBdg = s => {
+    const map = { PAID:'bdg-green', INITIATED:'bdg-yellow', FAILED:'bdg-red',
+                  PENDING:'bdg-yellow', REFUND:'bdg-purple', REFUNDED:'bdg-purple' };
+    return `<span class="bdg ${map[s]||'bdg-gray'}">${s||'—'}</span>`;
+  };
+  const reconBdg = s => {
+    const map = { MATCHED:'bdg-green', MISMATCH:'bdg-red', PENDING:'bdg-yellow', UNRECONCILED:'bdg-gray' };
+    return `<span class="bdg ${map[s]||'bdg-gray'}">${s||'—'}</span>`;
+  };
+
+  /* ── KPI summary cards (admin only) ── */
+  const kpiSection = adminView ? (() => {
+    const total   = summary.totalTransactions || 0;
+    const byStatus = summary.statusBreakdown  || {};
+    const matched  = byStatus.MATCHED   || 0;
+    const mismatch = byStatus.MISMATCH  || 0;
+    const pending  = byStatus.PENDING   || 0;
+    const matchedAmt = fmt.money(summary.matchedAmount || 0);
+    const pendingAmt = fmt.money(summary.pendingOrMismatchAmount || 0);
+    return `
+    <div class="pay-kpi-row">
+      <div class="pay-kpi-card">
+        <div class="pay-kpi-ico" style="background:#EFF6FF;color:#3B82F6">💳</div>
+        <div><div class="pay-kpi-val">${total}</div><div class="pay-kpi-lbl">Total Transactions</div></div>
+      </div>
+      <div class="pay-kpi-card">
+        <div class="pay-kpi-ico" style="background:#F0FDF4;color:#22C55E">✓</div>
+        <div><div class="pay-kpi-val" style="color:#16A34A">${matched}</div><div class="pay-kpi-lbl">Matched</div></div>
+      </div>
+      <div class="pay-kpi-card">
+        <div class="pay-kpi-ico" style="background:#FFF7ED;color:#F97316">⚠</div>
+        <div><div class="pay-kpi-val" style="color:#EA580C">${mismatch}</div><div class="pay-kpi-lbl">Mismatched</div></div>
+      </div>
+      <div class="pay-kpi-card">
+        <div class="pay-kpi-ico" style="background:#FFF7ED;color:#F59E0B">⏳</div>
+        <div><div class="pay-kpi-val" style="color:#D97706">${pending}</div><div class="pay-kpi-lbl">Pending</div></div>
+      </div>
+      <div class="pay-kpi-card">
+        <div class="pay-kpi-ico" style="background:#F0FDF4;color:#10B981">RWF</div>
+        <div><div class="pay-kpi-val" style="color:#059669;font-size:13px">${matchedAmt}</div><div class="pay-kpi-lbl">Confirmed Revenue</div></div>
+      </div>
+      <div class="pay-kpi-card">
+        <div class="pay-kpi-ico" style="background:#FFF1F2;color:#EF4444">RWF</div>
+        <div><div class="pay-kpi-val" style="color:#DC2626;font-size:13px">${pendingAmt}</div><div class="pay-kpi-lbl">Unresolved Amount</div></div>
+      </div>
+    </div>`;
+  })() : '';
+
+  /* ── Table rows ── */
+  const rows = txns.length ? txns.map(t => {
+    const order    = t.order || {};
+    const orderNum = order.orderNumber || (order.id||'').toString().slice(-8) || '—';
+    const custName = (order.customer?.firstName||'') + ' ' + (order.customer?.lastName||'');
+    const provider = (t.provider||'—').replace(/_/g,' ');
+
+    if (adminView) {
+      return `<tr>
+        <td><span class="td-m">#${orderNum}</span></td>
+        <td class="td-b">${esc(custName.trim()||'Customer')}</td>
+        <td>${fmt.money(t.amount||0)}</td>
+        <td>${provider}</td>
+        <td><span style="font-family:monospace;font-size:11px">${esc(t.paymentReference||'—')}</span></td>
+        <td>${txnStatusBdg(t.status)}</td>
+        <td>${reconBdg(t.reconciliationStatus)}</td>
+        <td class="td-sm">${fmt.date(t.createdAt)}</td>
+        <td>
+          <button class="btn-d btn-d-sec btn-d-sm" data-action="reconcile-txn" data-id="${t.id}" title="Reconcile">
+            ${I.refresh} Reconcile
+          </button>
+        </td>
+      </tr>`;
+    } else {
+      /* Employee: no reference, no reconcile action */
+      return `<tr>
+        <td><span class="td-m">#${orderNum}</span></td>
+        <td class="td-b">${esc(custName.trim()||'Customer')}</td>
+        <td>${fmt.money(t.amount||0)}</td>
+        <td>${provider}</td>
+        <td>${txnStatusBdg(t.status)}</td>
+        <td class="td-sm">${fmt.date(t.createdAt)}</td>
+      </tr>`;
+    }
+  }).join('') :
+  `<tr><td colspan="${adminView?9:6}"><div class="d-empty">
+    <div class="d-empty-ico">💳</div>
+    <div class="d-empty-ttl">No payment transactions yet</div>
+    <div class="d-empty-txt">Transactions are created automatically when customers pay.</div>
+  </div></td></tr>`;
+
+  const roleBanner = adminView
+    ? `<div class="ord-role-banner ord-role-admin"><span class="ord-role-ico">👑</span><span><b>Admin View</b> — Payment references, reconciliation controls, and revenue totals visible.</span></div>`
+    : `<div class="ord-role-banner ord-role-emp"><span class="ord-role-ico">👤</span><span><b>Employee View</b> — Payment gateway references and reconciliation tools are admin-only.</span></div>`;
+
+  const thead = adminView
+    ? `<tr><th>Order #</th><th>Customer</th><th>Amount</th><th>Provider</th><th>Reference</th><th>Status</th><th>Reconciliation</th><th>Date</th><th>Actions</th></tr>`
+    : `<tr><th>Order #</th><th>Customer</th><th>Amount</th><th>Provider</th><th>Status</th><th>Date</th></tr>`;
+
+  return `
+  <div class="dash-page-hd">
+    <div><div class="dash-page-title">Payments</div><div class="dash-page-sub">${txns.length} transactions</div></div>
+    <div class="dash-page-acts">
+      ${adminView ? `<button class="btn-d btn-d-primary" id="btn-reconcile-all">${I.refresh} Run Reconciliation</button>` : ''}
+    </div>
+  </div>
+  ${roleBanner}
+  ${kpiSection}
+  <div class="dash-tcard">
+    <div class="dash-tcard-hd">
+      <span class="dash-tcard-title">All Transactions</span>
+      <span class="dash-tcard-count">${txns.length}</span>
+      <div class="dash-tcard-acts">
+        <input class="dash-inp" placeholder="Search by order # or customer…" id="pay-search" style="width:200px">
+        <select class="dash-sel" id="pay-status-filter">
+          <option value="">All Statuses</option>
+          <option>PAID</option><option>INITIATED</option><option>FAILED</option><option>REFUNDED</option>
+        </select>
+        ${adminView ? `<select class="dash-sel" id="pay-recon-filter">
+          <option value="">All Reconciliation</option>
+          <option>MATCHED</option><option>MISMATCH</option><option>PENDING</option>
+        </select>` : ''}
+      </div>
+    </div>
+    <table class="dt">
+      <thead>${thead}</thead>
+      <tbody id="pay-tbody">${rows}</tbody>
     </table>
   </div>`;
 };
@@ -2572,9 +2874,8 @@ TAB.pos = async () => {
           <div id="pos-customer-info" style="font-size:12px;margin-top:4px;color:#10B981"></div>
         </div>
         <div class="pos-totals" id="pos-totals">
-          <div class="pos-total-row"><span>Subtotal</span><span class="amount" id="pos-sub">RWF 0</span></div>
-          <div class="pos-total-row"><span>Tax</span><span class="amount" id="pos-tax">RWF 0</span></div>
-          <div class="pos-total-row grand"><span>Total</span><span id="pos-total">RWF 0</span></div>
+          <div class="pos-total-row grand"><span>Total (incl. VAT)</span><span id="pos-total">RWF 0</span></div>
+          <span id="pos-tax" style="display:none">RWF 0</span>
         </div>
         <div class="f-field" style="margin-bottom:8px">
           <label class="f-lbl" style="font-size:11px">Payment Method <span style="color:#EF4444">*</span></label>
@@ -3023,41 +3324,47 @@ async function saveDrawer(type, data) {
       const stock      = parseInt(document.getElementById('d-prod-stock')?.value) || 0;
       const featured   = document.getElementById('d-prod-featured')?.checked;
 
-      if (file) {
-        // Upload via multipart
-        const fd = new FormData();
-        fd.append('file', file);
-        fd.append('name', name);
-        fd.append('sku', sku);
-        fd.append('description', desc);
-        fd.append('price', price);
-        fd.append('status', status);
-        if (categoryId) fd.append('categoryId', categoryId);
+      const payload = {
+        name, sku, description: desc, price, comparePrice: compare, stock,
+        imageUrl: document.getElementById('d-prod-img-url')?.value,
+        status, featured, categoryId
+      };
 
-        const res = await fetch('http://localhost:8080/api/products/upload', {
-          method: 'POST',
-          headers: { 'Authorization': 'Bearer ' + localStorage.getItem('luz_jwt') },
-          body: fd
-        }).then(r => r.json());
-
-        if (data && res.data?.id) {
-          // For update: also update the existing product's other fields
-          await ApiService.updateProduct(data.id, { name, sku, description: desc, price, comparePrice: compare, stock, status, featured, categoryId });
-          // Then upload image to existing product
-          const fd2 = new FormData(); fd2.append('file', file); fd2.append('isPrimary', 'true');
-          await fetch(`http://localhost:8080/api/products/${data.id}/images`, {
+      if (data) {
+        // ── UPDATE existing product ──────────────────────────
+        await ApiService.updateProduct(data.id, payload);
+        if (file) {
+          // Upload new image to the existing product's image endpoint
+          const fd = new FormData();
+          fd.append('file', file);
+          fd.append('isPrimary', 'true');
+          const imgRes = await fetch(`http://localhost:8080/api/products/${data.id}/images`, {
             method: 'POST',
             headers: { 'Authorization': 'Bearer ' + localStorage.getItem('luz_jwt') },
-            body: fd2
-          });
+            body: fd
+          }).then(r => r.json());
+          if (!imgRes.success) throw new Error(imgRes.message || 'Image upload failed');
         }
       } else {
-        const payload = {
-          name, sku, description: desc, price, comparePrice: compare, stock,
-          imageUrl: document.getElementById('d-prod-img-url')?.value,
-          status, featured, categoryId
-        };
-        data ? await ApiService.updateProduct(data.id, payload) : await ApiService.createProduct(payload);
+        // ── CREATE new product ───────────────────────────────
+        if (file) {
+          const fd = new FormData();
+          fd.append('file', file);
+          fd.append('name', name);
+          fd.append('sku', sku);
+          fd.append('description', desc);
+          fd.append('price', price);
+          fd.append('status', status);
+          if (categoryId) fd.append('categoryId', categoryId);
+          const res = await fetch('http://localhost:8080/api/products/upload', {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + localStorage.getItem('luz_jwt') },
+            body: fd
+          }).then(r => r.json());
+          if (!res.success) throw new Error(res.message || 'Failed to create product');
+        } else {
+          await ApiService.createProduct(payload);
+        }
       }
     } else if (type === 'discount') {
       const payload = {
@@ -3243,7 +3550,15 @@ function bindTab(tab) {
     const { action, id, name, type: rtype, format, key, value, category, desc, status } = el.dataset;
 
     if (action === 'edit-product') { const res = await ApiService.getProduct(id).catch(()=>null); const p = res?.data || res || { id }; openDrawer('product', p); }
-    else if (action === 'delete-product') { await ApiService.deleteProduct(id).catch(()=>{}); showToast('Product deleted', 'success'); loadTab('products'); }
+    else if (action === 'delete-product') {
+      try {
+        await ApiService.deleteProduct(id);
+        showToast('Product deleted', 'success');
+        loadTab('products');
+      } catch (err) {
+        showToast(err.message || 'Failed to delete product', 'error');
+      }
+    }
     else if (action === 'apply-discount') {
       const modal = document.getElementById('discount-apply-modal');
       if (!modal) return;
@@ -3433,6 +3748,18 @@ function bindTab(tab) {
     }
     else if (action === 'download-report') { downloadReport(rtype, format); }
     else if (action === 'view-order')    { viewOrderDetail(id); }
+    else if (action === 'reconcile-txn') {
+      const btn = el;
+      btn.disabled = true; btn.innerHTML = `${I.refresh} Working…`;
+      try {
+        await ApiService.reconcileTransaction(id);
+        showToast('Transaction reconciled', 'success');
+        loadTab('payments');
+      } catch(err) {
+        showToast(err.message || 'Reconciliation failed', 'error');
+        btn.disabled = false; btn.innerHTML = `${I.refresh} Reconcile`;
+      }
+    }
     else if (action === 'view-customer') { viewCustomer(id); }
     else if (action === 'edit-user') {
       try { const u = await ApiService.getUser(id).then(r => r.data || r); openDrawer('user', u); }
@@ -4418,6 +4745,94 @@ function bindTab(tab) {
       } catch(err) { tbody.innerHTML = `<tr><td colspan="7"><div class="d-alert d-alert-err">${err.message}</div></td></tr>`; }
     });
   }
+
+  /* ── Payments tab bindings ── */
+  if (tab === 'payments') {
+    let _payTxnCache = [];
+
+    // Cache transactions for client-side filter
+    ApiService.getReconciliationTransactions(null).then(res => {
+      _payTxnCache = extractList(res);
+    }).catch(()=>{});
+
+    // Reconcile All button (admin only)
+    document.getElementById('btn-reconcile-all')?.addEventListener('click', async () => {
+      const btn = document.getElementById('btn-reconcile-all');
+      btn.disabled = true; btn.innerHTML = `${I.refresh} Running…`;
+      try {
+        const res  = await ApiService.reconcileAll();
+        const s    = res?.data || res || {};
+        const matched = s.statusBreakdown?.MATCHED || 0;
+        showToast(`Reconciliation done — ${matched} matched`, 'success');
+        loadTab('payments');
+      } catch(err) {
+        showToast(err.message || 'Reconcile all failed', 'error');
+        btn.disabled = false; btn.innerHTML = `${I.refresh} Run Reconciliation`;
+      }
+    });
+
+    // Search + filter
+    function applyPayFilter() {
+      const q       = document.getElementById('pay-search')?.value.toLowerCase().trim() || '';
+      const status  = document.getElementById('pay-status-filter')?.value || '';
+      const recon   = document.getElementById('pay-recon-filter')?.value  || '';
+      const tbody   = document.getElementById('pay-tbody');
+      if (!tbody) return;
+
+      const filtered = _payTxnCache.filter(t => {
+        const order    = t.order || {};
+        const orderNum = (order.orderNumber||order.id||'').toString().toLowerCase();
+        const custName = ((order.customer?.firstName||'')+(order.customer?.lastName||'')).toLowerCase();
+        const provider = (t.provider||'').toLowerCase();
+        const matchQ   = !q || orderNum.includes(q) || custName.includes(q) || provider.includes(q);
+        const matchS   = !status || t.status === status;
+        const matchR   = !recon  || t.reconciliationStatus === recon;
+        return matchQ && matchS && matchR;
+      });
+
+      const adminView = isAdmin();
+      const reconBdg  = s => {
+        const map = { MATCHED:'bdg-green', MISMATCH:'bdg-red', PENDING:'bdg-yellow', UNRECONCILED:'bdg-gray' };
+        return `<span class="bdg ${map[s]||'bdg-gray'}">${s||'—'}</span>`;
+      };
+      const txnStatusBdg = s => {
+        const map = { PAID:'bdg-green', INITIATED:'bdg-yellow', FAILED:'bdg-red', PENDING:'bdg-yellow', REFUNDED:'bdg-purple' };
+        return `<span class="bdg ${map[s]||'bdg-gray'}">${s||'—'}</span>`;
+      };
+
+      const rows = filtered.length ? filtered.map(t => {
+        const o = t.order || {};
+        const orderNum = o.orderNumber||(o.id||'').toString().slice(-8)||'—';
+        const custName = ((o.customer?.firstName||'')+' '+(o.customer?.lastName||'')).trim()||'Customer';
+        const provider = (t.provider||'—').replace(/_/g,' ');
+        if (adminView) return `<tr>
+          <td><span class="td-m">#${orderNum}</span></td>
+          <td class="td-b">${esc(custName)}</td>
+          <td>${fmt.money(t.amount||0)}</td>
+          <td>${provider}</td>
+          <td><span style="font-family:monospace;font-size:11px">${esc(t.paymentReference||'—')}</span></td>
+          <td>${txnStatusBdg(t.status)}</td>
+          <td>${reconBdg(t.reconciliationStatus)}</td>
+          <td class="td-sm">${fmt.date(t.createdAt)}</td>
+          <td><button class="btn-d btn-d-sec btn-d-sm" data-action="reconcile-txn" data-id="${t.id}">${I.refresh} Reconcile</button></td>
+        </tr>`;
+        return `<tr>
+          <td><span class="td-m">#${orderNum}</span></td>
+          <td class="td-b">${esc(custName)}</td>
+          <td>${fmt.money(t.amount||0)}</td>
+          <td>${provider}</td>
+          <td>${txnStatusBdg(t.status)}</td>
+          <td class="td-sm">${fmt.date(t.createdAt)}</td>
+        </tr>`;
+      }).join('') :
+      `<tr><td colspan="${adminView?9:6}"><div class="d-empty"><div class="d-empty-ico">💳</div><div class="d-empty-ttl">No matching transactions</div></div></td></tr>`;
+      tbody.innerHTML = rows;
+    }
+
+    document.getElementById('pay-search')?.addEventListener('input', applyPayFilter);
+    document.getElementById('pay-status-filter')?.addEventListener('change', applyPayFilter);
+    document.getElementById('pay-recon-filter')?.addEventListener('change', applyPayFilter);
+  }
 }
 
 async function loadCategories(selectedId) {
@@ -4454,11 +4869,19 @@ async function viewOrderDetail(id) {
   let order = {}, shipment = null;
   try {
     [order, shipment] = await Promise.all([
-      ApiService.getOrder(id).catch(() => ({})),
+      ApiService.getOrder(id).then(r => r?.data || r).catch(() => ({})),
       ApiService.getShipmentByOrder(id).then(r => r?.data || r).catch(() => null)
     ]);
   } catch(_){}
   const ship = Array.isArray(shipment) ? shipment[0] : shipment;
+  const adminView = isAdmin();
+
+  const custName  = order.customerName || order.userName ||
+    ((order.customer?.firstName||'') + ' ' + (order.customer?.lastName||'')).trim() || '—';
+  const custEmail = order.email || order.customerEmail || order.customer?.email || '—';
+  const custPhone = order.phone || order.customerPhone || order.customer?.phoneNumber || '—';
+  const orderNum  = order.orderNumber || id.toString().slice(-8);
+
   const shipSection = ship ? `
     <div style="margin-top:16px;padding:12px;background:#F0FDF4;border-radius:10px;border:1px solid #BBF7D0">
       <div style="font-size:12px;font-weight:700;color:#166534;margin-bottom:8px">🚚 Shipment</div>
@@ -4469,33 +4892,77 @@ async function viewOrderDetail(id) {
         ${ship.estimatedDelivery ? `<span>ETA: <b>${fmt.date(ship.estimatedDelivery)}</b></span>` : ''}
       </div>
     </div>` : '';
-  document.getElementById('d-drawer-title').textContent = `Order #${id}`;
-  document.getElementById('d-drawer-body').innerHTML = `
-    <div class="d-alert d-alert-info">Customer: <b>${order.customerName||order.userName||'—'}</b> · ${order.email||''}</div>
-    <div class="d-tabs" style="margin-bottom:14px">
-      <button class="d-tab active">Items</button>
-      <button class="d-tab">Timeline</button>
-    </div>
-    <div>
-      ${(order.items||order.orderItems||[{name:'Item',quantity:1,price:0}]).map(i=>`
-        <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #F1F5F9">
-          <span>${i.productName||i.name}</span>
-          <span>× ${i.quantity} <b style="margin-left:8px">${fmt.money((i.price||0)*(i.quantity||1))}</b></span>
-        </div>`).join('')}
-      <div style="display:flex;justify-content:space-between;padding:12px 0 0;font-weight:700;font-size:14px"><span>Total</span><span>${fmt.money(order.totalAmount||order.total||0)}</span></div>
-    </div>
-    ${shipSection}
-    <div class="f-field" style="margin-top:16px"><label class="f-lbl">Update Status</label>
+
+  /* ── Items list ── */
+  const itemsList = (order.items||order.orderItems||[]).map(i=>`
+    <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #F1F5F9;font-size:13px">
+      <span>${esc(i.productName||i.name||'Item')}</span>
+      <span style="white-space:nowrap">× ${i.quantity} <b style="margin-left:8px">${fmt.money((i.unitPrice||i.price||0)*(i.quantity||1))}</b></span>
+    </div>`).join('') || '<div style="color:#94a3b8;font-size:13px;padding:8px 0">No items</div>';
+
+  /* ── Totals block ── */
+  const totalsBlock = adminView ? `
+    <div style="margin-top:4px;padding-top:4px">
+      ${order.subTotalAmount ? `<div style="display:flex;justify-content:space-between;font-size:13px;color:#64748b;padding:3px 0"><span>Subtotal</span><span>${fmt.money(order.subTotalAmount)}</span></div>` : ''}
+      ${order.taxAmount ? `<div style="display:flex;justify-content:space-between;font-size:13px;color:#64748b;padding:3px 0"><span>VAT (${Math.round((order.taxRate||0.18)*100)}%)</span><span>${fmt.money(order.taxAmount)}</span></div>` : ''}
+      <div style="display:flex;justify-content:space-between;font-weight:700;font-size:14px;padding:10px 0 0"><span>Total Paid</span><span style="color:#FF6B00">${fmt.money(order.totalAmount||order.total||0)}</span></div>
+    </div>` : `
+    <div style="display:flex;justify-content:space-between;font-weight:700;font-size:14px;padding:10px 0 0"><span>Total Paid</span><span>${fmt.money(order.totalAmount||order.total||0)}</span></div>`;
+
+  /* ── Admin-only payment info ── */
+  const paymentBlock = adminView ? `
+    <div style="margin-top:14px;padding:12px;background:#FFF7ED;border-radius:10px;border:1px solid #FED7AA">
+      <div style="font-size:11px;font-weight:700;color:#92400E;margin-bottom:8px;text-transform:uppercase;letter-spacing:.05em">💳 Payment Details (Admin Only)</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:12px;color:#78350F">
+        <div><span style="color:#92400E;font-weight:600">Method: </span>${(order.paymentMethod||'—').replace(/_/g,' ')}</div>
+        <div><span style="color:#92400E;font-weight:600">Reference: </span><span style="font-family:monospace">${order.paymentReference||'—'}</span></div>
+        <div><span style="color:#92400E;font-weight:600">Channel: </span>${order.orderChannel||'ONLINE'}</div>
+        <div><span style="color:#92400E;font-weight:600">Billing: </span>${esc(order.billingAddress||order.shippingAddress||'—')}</div>
+      </div>
+    </div>` : '';
+
+  /* ── Status update (both roles can update status per backend) ── */
+  const statusBlock = `
+    <div class="f-field" style="margin-top:16px">
+      <label class="f-lbl">Update Order Status</label>
       <select class="f-sel" id="order-status-upd">
-        ${['PENDING','PROCESSING','FULFILLED','DELIVERED','CANCELLED','REFUNDED'].map(s=>`<option ${order.status===s?'selected':''}>${s}</option>`).join('')}
+        ${['PENDING','PAID','PROCESSING','FULFILLED','SHIPPED','DELIVERED','CANCELLED','RETURN_REQUESTED','RETURNED','REFUNDED']
+          .map(s=>`<option ${order.status===s?'selected':''}>${s}</option>`).join('')}
       </select>
+      ${!adminView ? `<small style="color:#64748b;font-size:11px;margin-top:4px;display:block">You can update the operational status. Refunds and payment changes require admin access.</small>` : ''}
     </div>`;
-  document.getElementById('d-drawer-footer').innerHTML = `<button class="btn-d btn-d-sec" id="d-btn-cancel">Cancel</button><button class="btn-d btn-d-primary" id="order-status-save">Update Status</button>`;
+
+  document.getElementById('d-drawer-title').textContent = `Order #${orderNum}`;
+  document.getElementById('d-drawer-body').innerHTML = `
+    <div class="d-alert d-alert-info" style="display:flex;flex-direction:column;gap:4px">
+      <div><b>${esc(custName)}</b> ${statusBdg(order.status||'PENDING')}</div>
+      <div style="display:flex;gap:16px;font-size:12px;flex-wrap:wrap">
+        <span>📞 ${esc(custPhone)}</span>
+        <span>✉️ ${esc(custEmail)}</span>
+        <span style="color:#64748b">🗓 ${fmt.date(order.createdAt||order.orderDate)}</span>
+      </div>
+    </div>
+    <div style="margin-top:14px;font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px">Items Ordered</div>
+    ${itemsList}
+    ${totalsBlock}
+    ${shipSection}
+    ${paymentBlock}
+    ${statusBlock}`;
+
+  document.getElementById('d-drawer-footer').innerHTML = `
+    <button class="btn-d btn-d-sec" id="d-btn-cancel">Close</button>
+    <button class="btn-d btn-d-primary" id="order-status-save">Update Status</button>`;
   document.getElementById('d-btn-cancel')?.addEventListener('click', closeDrawer);
   document.getElementById('order-status-save')?.addEventListener('click', async () => {
     const status = document.getElementById('order-status-upd').value;
-    await ApiService.updateOrderStatus(id, { status }).catch(()=>{});
-    showToast('Order updated'); closeDrawer(); loadTab('orders');
+    try {
+      await ApiService.updateOrderStatus(id, { status });
+      showToast('Order status updated');
+      closeDrawer();
+      loadTab('orders');
+    } catch(err) {
+      showToast(err.message || 'Failed to update status', 'error');
+    }
   });
   document.getElementById('d-overlay').classList.add('open');
   document.getElementById('d-drawer').classList.add('open');
@@ -5245,14 +5712,12 @@ function renderCart() {
         <button class="pos-qty-btn" data-pos-minus="${item.id}">−</button>
         <span style="font-size:13px;font-weight:700;min-width:20px;text-align:center">${item.qty}</span>
         <button class="pos-qty-btn" data-pos-plus="${item.id}">+</button>
-        <span class="pos-item-price">${fmt.money(item.price*item.qty)}</span>
+        <span class="pos-item-price">${fmt.money(item.price*item.qty*1.18)}</span>
       </div>`).join('');
   }
-  const subEl = document.getElementById('pos-sub');
   const taxEl = document.getElementById('pos-tax');
   const totEl = document.getElementById('pos-total');
-  if (subEl) subEl.textContent = fmt.money(sub);
-  if (taxEl) taxEl.textContent = fmt.money(tax) + ' (est.)';
+  if (taxEl) taxEl.textContent = fmt.money(tax);
   if (totEl) totEl.textContent = fmt.money(total);
   const btn = document.getElementById('pos-checkout');
   if (btn) btn.textContent = `Charge ${fmt.money(total)}`;
@@ -5290,19 +5755,16 @@ function showPOSReceipt(receipt) {
           ${items.length ? items.map(i=>`
             <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:5px;">
               <span style="max-width:220px;">${i.productName||'Product'} <span style="color:#94A3B8">×${i.quantity}</span></span>
-              <span style="font-weight:600;">${fmt.money(i.subTotal||((i.unitPrice||0)*(i.quantity||1)))}</span>
+              <span style="font-weight:600;">${fmt.money((i.subTotal||((i.unitPrice||0)*(i.quantity||1)))*1.18)}</span>
             </div>`).join('') :
             '<div style="font-size:13px;color:#94A3B8;text-align:center;">Items processed successfully.</div>'}
         </div>
 
         <!-- Totals -->
-        <div style="font-size:13px;">
-          ${subtotal ? `<div style="display:flex;justify-content:space-between;margin-bottom:4px;color:#64748B;"><span>Subtotal</span><span>${fmt.money(subtotal)}</span></div>` : ''}
-          ${taxAmt   ? `<div style="display:flex;justify-content:space-between;margin-bottom:4px;color:#64748B;"><span>Tax (18%)</span><span>${fmt.money(taxAmt)}</span></div>` : ''}
-        </div>
         <div style="display:flex;justify-content:space-between;font-size:16px;font-weight:800;padding-top:8px;border-top:2px solid #F1F5F9;margin-top:4px;">
           <span>Total Paid</span><span style="color:#FF6B00;">${fmt.money(total)}</span>
         </div>
+        ${taxAmt ? `<div style="display:flex;justify-content:space-between;font-size:11px;color:#94A3B8;margin-top:4px;"><span>Includes VAT (18%)</span><span>${fmt.money(taxAmt)}</span></div>` : ''}
 
         <!-- Meta -->
         <div style="margin-top:12px;padding:10px;background:#F8FAFC;border-radius:8px;font-size:12px;color:#64748B;line-height:1.8;">
@@ -5375,13 +5837,10 @@ function showPOSReceipt(receipt) {
       <div class="title">Sale Complete — #${orderNum}</div>
       <div class="meta">${new Date().toLocaleString('en-GB',{dateStyle:'medium',timeStyle:'short'})}</div>
       <div class="items">
-        ${items.map(i=>`<div class="item"><span>${i.productName||'Product'} ×${i.quantity}</span><span>${fmt.money(i.subTotal||((i.unitPrice||0)*(i.quantity||1)))}</span></div>`).join('')}
-      </div>
-      <div class="totals">
-        ${subtotal ? `<div class="tot-row"><span>Subtotal</span><span>${fmt.money(subtotal)}</span></div>` : ''}
-        ${taxAmt   ? `<div class="tot-row"><span>Tax (18%)</span><span>${fmt.money(taxAmt)}</span></div>` : ''}
+        ${items.map(i=>`<div class="item"><span>${i.productName||'Product'} ×${i.quantity}</span><span>${fmt.money((i.subTotal||((i.unitPrice||0)*(i.quantity||1)))*1.18)}</span></div>`).join('')}
       </div>
       <div class="grand"><span>Total Paid</span><span>${fmt.money(total)}</span></div>
+      ${taxAmt ? `<div class="tot-row" style="font-size:11px;color:#94a3b8;margin-top:4px;"><span>Includes VAT (18%)</span><span>${fmt.money(taxAmt)}</span></div>` : ''}
       <div class="info">
         <div><strong>Payment:</strong> ${(receipt.paymentMethod||'—').replace(/_/g,' ')}</div>
         ${receipt.paymentReference ? `<div><strong>Reference:</strong> ${receipt.paymentReference}</div>` : ''}

@@ -393,6 +393,12 @@ export const ApiService = {
     async getMyTickets() {
       return await request('/api/support/tickets/my');
     },
+    async getTicket(ticketId) {
+      return await request(`/api/support/tickets/${ticketId}`);
+    },
+    async resolveTicket(ticketId) {
+      return await request(`/api/support/tickets/${ticketId}/resolve`, { method: 'PATCH' });
+    },
     async getTicketMessages(ticketId) {
       return await request(`/api/support/tickets/${ticketId}/messages`);
     },
