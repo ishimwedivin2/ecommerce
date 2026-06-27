@@ -375,8 +375,9 @@ export function bindEvents(state, helpers) {
           payment_method: { card: window._stripeCardElement }
         });
         if (error) throw new Error(error.message);
-        // Stripe confirmed on client side — now wait for backend webhook to mark order PAID
-        startPolling(_order.id);
+        // Verify server-side with Stripe API and mark order PAID
+        await ApiService.payments.confirmStripe(_order.id, paymentIntent.id);
+        await handlePaymentConfirmed();
       } else if (payData.paid) {
         // Immediate confirmation (Airtel stub)
         await handlePaymentConfirmed();
@@ -591,8 +592,8 @@ function renderReceiptBlock() {
     <tr>
       <td>${item.productName || '—'}</td>
       <td style="text-align:center">${item.quantity}</td>
-      <td style="text-align:right">${fmtMoney(Number(item.unitPrice) * 1.18)}</td>
-      <td style="text-align:right">${fmtMoney(Number(item.subTotal) * 1.18)}</td>
+      <td style="text-align:right">${fmtMoney(item.unitPrice)}</td>
+      <td style="text-align:right">${fmtMoney(item.subTotal)}</td>
     </tr>`).join('');
 
   el.innerHTML = `
@@ -614,13 +615,14 @@ function renderReceiptBlock() {
       <tbody>${itemsHtml}</tbody>
     </table>
     <div class="rcpt-totals">
+      <div class="rcpt-total-row"><span>Subtotal</span><span>${fmtMoney(r.subTotalAmount)}</span></div>
       ${Number(r.discountAmount) > 0 ? `
       <div class="rcpt-total-row" style="color:#10B981;">
         <span>${r.couponCode ? 'Discount (' + r.couponCode + ')' : 'Discount'}</span>
         <span>-${fmtMoney(r.discountAmount)}</span>
       </div>` : ''}
+      <div class="rcpt-total-row"><span>Tax (${Number((r.taxRate || 0) * 100).toFixed(0)}%)</span><span>${fmtMoney(r.taxAmount)}</span></div>
       <div class="rcpt-total-row grand"><span>Total Paid</span><span>${fmtMoney(r.totalAmount)}</span></div>
-      <div class="rcpt-total-row" style="font-size:11px;color:#94a3b8;margin-top:2px;"><span>Includes VAT (${Number((r.taxRate || 0) * 100).toFixed(0)}%)</span><span>${fmtMoney(r.taxAmount)}</span></div>
     </div>
     <div class="rcpt-footer">Thank you for shopping at Luz Technology!</div>
   </div>`;

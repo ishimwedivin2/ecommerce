@@ -651,6 +651,12 @@ export const ApiService = {
     async checkStatus(orderId) {
       return await request(`/api/payments/status/${orderId}`);
     },
+    async confirmStripe(orderId, paymentIntentId) {
+      return await request(
+        `/api/payments/stripe/confirm/${orderId}?paymentIntentId=${encodeURIComponent(paymentIntentId)}`,
+        { method: 'POST' }
+      );
+    },
   },
 
   // RECEIPTS
