@@ -381,8 +381,11 @@ export const ApiService = {
 
   // 7. SUPPORT, FAQ & LIVE CHAT
   support: {
-    async getFAQs(category = 'general') {
-      return await request(`/api/support/knowledge-base/faqs?category=${category}`);
+    async getFAQs(category = null) {
+      const url = category
+        ? `/api/support/knowledge-base/faqs?category=${category}`
+        : '/api/support/knowledge-base/faqs';
+      return await request(url);
     },
     async createTicket(title, description, priority) {
       return await request('/api/support/tickets', {

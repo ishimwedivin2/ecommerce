@@ -139,20 +139,15 @@ export async function render() {
             <strong>MTN MoMo</strong>
             <span>Mobile Money</span>
           </div>
-          <div class="payment-method-card" data-method="BK_CARD">
-            <span class="payment-method-icon">💳</span>
-            <strong>BK Card</strong>
-            <span>Debit / Credit</span>
-          </div>
           <div class="payment-method-card" data-method="AIRTEL_MONEY">
             <span class="payment-method-icon">📲</span>
             <strong>Airtel Money</strong>
             <span>Mobile Wallet</span>
           </div>
-          <div class="payment-method-card" data-method="PAYPAL">
-            <span class="payment-method-icon">💸</span>
-            <strong>PayPal</strong>
-            <span>Global Checkout</span>
+          <div class="payment-method-card" data-method="STRIPE">
+            <span class="payment-method-icon">💳</span>
+            <strong>Card (Stripe)</strong>
+            <span>Visa / Mastercard</span>
           </div>
         </div>
 
@@ -166,30 +161,6 @@ export async function render() {
           </div>
         </div>
 
-        <!-- BK Card fields -->
-        <div id="fields-BK_CARD" class="pay-fields" style="display:none">
-          <h3 class="chk-sect-title">Card Details</h3>
-          <div class="chk-field">
-            <label>Cardholder Name <span class="req">*</span></label>
-            <input id="card-name" type="text" placeholder="Name as shown on card">
-          </div>
-          <div class="chk-field">
-            <label>Card Number <span class="req">*</span></label>
-            <input id="card-number" type="text" inputmode="numeric" placeholder="0000 0000 0000 0000" maxlength="19">
-          </div>
-          <div class="chk-card-row">
-            <div class="chk-field">
-              <label>Expiry <span class="req">*</span></label>
-              <input id="card-expiry" type="text" inputmode="numeric" placeholder="MM/YY" maxlength="5">
-            </div>
-            <div class="chk-field">
-              <label>CVV <span class="req">*</span></label>
-              <input id="card-cvv" type="text" inputmode="numeric" placeholder="123" maxlength="4">
-            </div>
-          </div>
-          <small class="chk-hint">🔒 Card details are encrypted and not stored</small>
-        </div>
-
         <!-- Airtel Money fields -->
         <div id="fields-AIRTEL_MONEY" class="pay-fields" style="display:none">
           <h3 class="chk-sect-title">Airtel Money</h3>
@@ -200,13 +171,13 @@ export async function render() {
           </div>
         </div>
 
-        <!-- PayPal fields -->
-        <div id="fields-PAYPAL" class="pay-fields" style="display:none">
-          <h3 class="chk-sect-title">PayPal</h3>
+        <!-- Stripe Card fields -->
+        <div id="fields-STRIPE" class="pay-fields" style="display:none">
+          <h3 class="chk-sect-title">Card Payment (Stripe)</h3>
           <div class="chk-field">
-            <label>PayPal Email <span class="req">*</span></label>
-            <input id="paypal-email" type="email" value="${user.email || ''}" placeholder="your@paypal.com">
-            <small class="chk-hint">You will be redirected to PayPal to complete payment</small>
+            <div id="stripe-card-element" style="border:1px solid #e2e8f0;padding:12px;border-radius:8px;background:#fff;min-height:42px"></div>
+            <div id="stripe-card-errors" style="color:#dc2626;font-size:12px;margin-top:6px"></div>
+            <small class="chk-hint">🔒 Your card is processed securely by Stripe. We never see your card number.</small>
           </div>
         </div>
 
@@ -287,9 +258,21 @@ export function bindEvents(state, helpers) {
       document.querySelectorAll('.pay-fields').forEach(f => f.style.display = 'none');
       const fields = document.getElementById('fields-' + _paymentMethod);
       if (fields) fields.style.display = '';
+      // Initialise Stripe Elements when Stripe tab is selected
+      if (_paymentMethod === 'STRIPE' && !window._stripe) {
+        const STRIPE_PK = 'pk_test_51TmMXjDaKj9gog2tfPZFR36HRUQwHVpsG8GhoKdmnRz3r9Rnv2cPlC7KqJrS7scBK845ggW2ESH7Gkb8iYFA69KY00yLaZLIyW';
+        if (!window.Stripe) {
+          const s = document.createElement('script');
+          s.src = 'https://js.stripe.com/v3/';
+          s.onload = () => mountStripeCard(STRIPE_PK);
+          document.head.appendChild(s);
+        } else {
+          mountStripeCard(STRIPE_PK);
+        }
+      }
       // update summary icon
-      const icons = { MTN_MOMO: '📱', BK_CARD: '💳', AIRTEL_MONEY: '📲', PAYPAL: '💸' };
-      const names = { MTN_MOMO: 'MTN MoMo', BK_CARD: 'BK Card', AIRTEL_MONEY: 'Airtel Money', PAYPAL: 'PayPal' };
+      const icons = { MTN_MOMO: '📱', AIRTEL_MONEY: '📲', STRIPE: '💳' };
+      const names = { MTN_MOMO: 'MTN MoMo', AIRTEL_MONEY: 'Airtel Money', STRIPE: 'Card (Stripe)' };
       const ico  = document.getElementById('sum-method');
       const ico2 = ico?.querySelector('.chk-method-ico');
       const nm   = document.getElementById('sum-method-name');
@@ -298,11 +281,7 @@ export function bindEvents(state, helpers) {
     });
   });
 
-  // ── Card number formatting ──
-  const cardNumEl = document.getElementById('card-number');
-  const cardExpEl = document.getElementById('card-expiry');
-  if (cardNumEl) cardFormatInput(cardNumEl);
-  if (cardExpEl) expiryFormatInput(cardExpEl);
+  // Card formatting was for BK Card (removed) — Stripe Elements handles its own formatting
 
   // ── Coupon ──
   document.getElementById('btn-apply-coupon')?.addEventListener('click', async () => {
@@ -387,8 +366,19 @@ export function bindEvents(state, helpers) {
       const payRes = await ApiService.payments.initiate(_order.id, _paymentMethod);
       const payData = payRes.data || payRes;
 
-      if (payData.paid) {
-        // Immediate confirmation (card, airtel, paypal)
+      if (_paymentMethod === 'STRIPE' && payData.clientSecret) {
+        // Stripe: confirm card payment using Stripe.js
+        if (!window._stripe || !window._stripeCardElement) {
+          throw new Error('Stripe not initialised — please reload and try again.');
+        }
+        const { error, paymentIntent } = await window._stripe.confirmCardPayment(payData.clientSecret, {
+          payment_method: { card: window._stripeCardElement }
+        });
+        if (error) throw new Error(error.message);
+        // Stripe confirmed on client side — now wait for backend webhook to mark order PAID
+        startPolling(_order.id);
+      } else if (payData.paid) {
+        // Immediate confirmation (Airtel stub)
         await handlePaymentConfirmed();
       } else {
         // Async (MTN) — start polling
@@ -467,54 +457,57 @@ export function bindEvents(state, helpers) {
   });
 
   document.getElementById('btn-continue-shopping')?.addEventListener('click', () => {
-    navigate('home');
+    navigate('shop');
   });
 }
 
 // ── validate payment fields ──────────────────────────────
 function validatePaymentFields() {
   if (_paymentMethod === 'MTN_MOMO') {
-    const phone = document.getElementById('mtn-phone')?.value?.replace(/\s/g, '').replace(/^\+/, '');
-    if (!phone || phone.length < 9) {
-      showError('step2-err', 'Please enter a valid MTN phone number.');
+    const phone = document.getElementById('mtn-phone')?.value?.replace(/\s/g, '');
+    if (!phone || !/^07[89]\d{7}$/.test(phone)) {
+      showError('step2-err', 'MTN number must be 10 digits and start with 078 or 079.');
       return false;
     }
-  } else if (_paymentMethod === 'BK_CARD') {
-    const name   = document.getElementById('card-name')?.value?.trim();
-    const number = document.getElementById('card-number')?.value?.replace(/\s/g, '');
-    const expiry = document.getElementById('card-expiry')?.value?.trim();
-    const cvv    = document.getElementById('card-cvv')?.value?.trim();
-    if (!name)                      { showError('step2-err', 'Cardholder name is required.'); return false; }
-    if (!number || number.length < 13) { showError('step2-err', 'Please enter a valid card number.'); return false; }
-    if (!expiry || expiry.length < 5)  { showError('step2-err', 'Please enter the expiry date (MM/YY).'); return false; }
-    if (!cvv   || cvv.length < 3)      { showError('step2-err', 'Please enter the CVV.'); return false; }
-    // Check expiry not in the past
-    const [mm, yy] = expiry.split('/');
-    const expDate  = new Date(2000 + Number(yy), Number(mm) - 1, 1);
-    if (expDate < new Date()) { showError('step2-err', 'Card has expired. Please use a different card.'); return false; }
   } else if (_paymentMethod === 'AIRTEL_MONEY') {
     const phone = document.getElementById('airtel-phone')?.value?.replace(/\s/g, '').replace(/^\+/, '');
     if (!phone || phone.length < 9) {
       showError('step2-err', 'Please enter a valid Airtel phone number.');
       return false;
     }
-  } else if (_paymentMethod === 'PAYPAL') {
-    const email = document.getElementById('paypal-email')?.value?.trim();
-    if (!email || !email.includes('@')) {
-      showError('step2-err', 'Please enter a valid PayPal email address.');
+  } else if (_paymentMethod === 'STRIPE') {
+    if (!window._stripeCardElement) {
+      showError('step2-err', 'Card element not loaded. Please wait a moment and try again.');
       return false;
     }
   }
   return true;
 }
 
+// ── Stripe Elements mount ─────────────────────────────────
+function mountStripeCard(publishableKey) {
+  window._stripe = window.Stripe(publishableKey);
+  const elements = window._stripe.elements();
+  window._stripeCardElement = elements.create('card', {
+    style: {
+      base: { fontSize: '16px', color: '#0F172A', fontFamily: 'inherit',
+              '::placeholder': { color: '#94A3B8' } },
+      invalid: { color: '#dc2626' }
+    }
+  });
+  window._stripeCardElement.mount('#stripe-card-element');
+  window._stripeCardElement.on('change', e => {
+    const el = document.getElementById('stripe-card-errors');
+    if (el) el.textContent = e.error ? e.error.message : '';
+  });
+}
+
 // ── processing screen ────────────────────────────────────
 function showProcessingUI(method) {
   const msgs = {
     MTN_MOMO:     ['Waiting for MTN approval…', 'Check your phone for a payment prompt and enter your PIN to confirm.'],
-    BK_CARD:      ['Processing card payment…',  'Verifying your card details. Please do not close this page.'],
     AIRTEL_MONEY: ['Contacting Airtel Money…',  'Check your phone for a payment prompt.'],
-    PAYPAL:       ['Connecting to PayPal…',      'Please complete the payment in the PayPal window.'],
+    STRIPE:       ['Processing card payment…',  'Verifying your card securely with Stripe. Please do not close this page.'],
   };
   const [title, msg] = msgs[method] || ['Processing…', 'Please wait.'];
   const t = document.getElementById('proc-title');
@@ -538,7 +531,7 @@ function startPolling(orderId) {
     const counter = document.getElementById('poll-counter');
     const pct     = Math.min((_pollCount / MAX_POLLS) * 100, 100);
     if (fill)    fill.style.width = pct + '%';
-    if (counter) counter.textContent = `Attempt ${_pollCount} of ${MAX_POLLS} — waiting for MTN confirmation…`;
+    if (counter) counter.textContent = `Attempt ${_pollCount} of ${MAX_POLLS} — waiting for payment confirmation…`;
 
     if (_pollCount >= MAX_POLLS) {
       clearInterval(_pollTimer);
@@ -578,7 +571,7 @@ function handlePaymentTimeout() {
   const title = document.getElementById('proc-title');
   const msg   = document.getElementById('proc-msg');
   if (title) title.textContent = 'Payment Timed Out';
-  if (msg)   msg.textContent   = 'We did not receive confirmation from MTN within 2 minutes. If your money was deducted, please contact support with your order number.';
+  if (msg)   msg.textContent   = 'We did not receive payment confirmation within 2 minutes. If your card was charged, please contact support with your order number.';
   const spinner = document.querySelector('.chk-spinner');
   if (spinner) { spinner.style.borderTopColor = '#EF4444'; spinner.style.animationDuration = '0s'; }
 }

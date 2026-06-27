@@ -55,11 +55,28 @@ function extractTotal(res, arr) {
 function getUser() { return ApiService.getCurrentUser() || {}; }
 function isAdmin() { const u = getUser(); return (u.roles||[]).some(r => r==='ROLE_ADMIN'); }
 function isEmployee() { const u = getUser(); return (u.roles||[]).some(r => r==='ROLE_EMPLOYEE'||r==='ROLE_ADMIN'); }
+function isSupportAgent() { const u = getUser(); return (u.roles||[]).some(r => r==='ROLE_SUPPORT_AGENT') && !isAdmin() && !isEmployee(); }
+function canEdit() { return isAdmin() || isEmployee(); }
 
 // ── Sidebar nav config ────────────────────────────────────
 function navItems() {
-  const admin = isAdmin();
-  const all = [
+  const admin   = isAdmin();
+  const support = isSupportAgent();
+
+  if (support) {
+    return [
+      { section: 'Overview' },
+      { id:'analytics', label:'Dashboard', icon:I.grid },
+      { section: 'Commerce' },
+      { id:'orders',   label:'Orders',    icon:I.cart,  badge:'orders' },
+      { id:'payments', label:'Payments',  icon:I.card },
+      { section: 'People' },
+      { id:'crm',     label:'Customers', icon:I.users },
+      { id:'support', label:'Support',   icon:I.msg,   badge:'tickets' },
+    ];
+  }
+
+  return [
     { section: 'Overview' },
     { id:'analytics', label:'Dashboard', icon:I.grid },
     { section: 'Commerce' },
@@ -94,7 +111,6 @@ function navItems() {
       { id:'reports',  label:'Reports',   icon:I.bar },
     ]),
   ];
-  return all;
 }
 
 // ── State ─────────────────────────────────────────────────
@@ -125,8 +141,8 @@ let _finDateTo        = new Date().toISOString().slice(0, 10);
 export async function render(state) {
   const u = getUser();
   const initials = `${(u.firstName||'A')[0]}${(u.lastName||'D')[0]}`.toUpperCase();
-  const roleLabel = isAdmin() ? 'Admin' : 'Employee';
-  const roleCls   = isAdmin() ? 'admin' : 'employee';
+  const roleLabel = isAdmin() ? 'Admin' : isSupportAgent() ? 'Support' : 'Employee';
+  const roleCls   = isAdmin() ? 'admin' : isSupportAgent() ? 'support' : 'employee';
 
   const items = navItems();
   let sidebarHtml = '';
@@ -658,6 +674,7 @@ function buildOrderCharts(orders, adminView) {
 TAB.orders = async () => {
   let orders = []; let total = 0;
   const adminView = isAdmin();
+  const supportView = isSupportAgent();
   try {
     const res = await ApiService.getOrders({ page:0, size:50 });
     orders = extractList(res);
@@ -670,7 +687,7 @@ TAB.orders = async () => {
   const getEmail = o => o.email || o.customerEmail || o.customer?.email || '—';
   const getPhone = o => o.phone || o.customerPhone || o.customer?.phoneNumber || '—';
 
-  /* ── Employee rows (limited) ── */
+  /* ── Employee / Support rows (limited) ── */
   const empRows = orders.length ? orders.map(o => `
     <tr>
       <td><span class="td-m">#${(o.orderNumber||o.id||'—').toString().slice(-8)}</span></td>
@@ -682,7 +699,7 @@ TAB.orders = async () => {
       <td class="td-sm">${fmt.date(o.createdAt||o.orderDate)}</td>
       <td>
         <button class="btn-d btn-d-sec btn-d-sm btn-d-ico" data-action="view-order" data-id="${o.id||o.orderId}" title="View Details">${I.eye}</button>
-        <button class="btn-d btn-d-sec btn-d-sm btn-d-ico" data-action="edit-order" data-id="${o.id||o.orderId}" title="Update Status">${I.edit}</button>
+        ${!supportView ? `<button class="btn-d btn-d-sec btn-d-sm btn-d-ico" data-action="edit-order" data-id="${o.id||o.orderId}" title="Update Status">${I.edit}</button>` : ''}
       </td>
     </tr>`).join('') :
     `<tr><td colspan="8"><div class="d-empty"><div class="d-empty-ico">📦</div><div class="d-empty-ttl">No orders yet</div></div></td></tr>`;
@@ -714,6 +731,8 @@ TAB.orders = async () => {
 
   const roleBanner = adminView
     ? `<div class="ord-role-banner ord-role-admin"><span class="ord-role-ico">👑</span><span><b>Admin View</b> — Full access: payment details, revenue data, status edits, export</span></div>`
+    : supportView
+    ? `<div class="ord-role-banner ord-role-emp"><span class="ord-role-ico">🎧</span><span><b>Support View</b> — Read-only order history. Contact your manager to change order statuses.</span></div>`
     : `<div class="ord-role-banner ord-role-emp"><span class="ord-role-ico">👤</span><span><b>Employee View</b> — Customer contact info and order status. Revenue analytics are admin-only.</span></div>`;
 
   return `
@@ -748,7 +767,8 @@ TAB.orders = async () => {
 
 // ── Payments ──────────────────────────────────────────────
 TAB.payments = async () => {
-  const adminView = isAdmin();
+  const adminView   = isAdmin();
+  const supportView = isSupportAgent();
   let txns = [], summary = {};
   try {
     const [txRes, sumRes] = await Promise.all([
@@ -851,6 +871,8 @@ TAB.payments = async () => {
 
   const roleBanner = adminView
     ? `<div class="ord-role-banner ord-role-admin"><span class="ord-role-ico">👑</span><span><b>Admin View</b> — Payment references, reconciliation controls, and revenue totals visible.</span></div>`
+    : supportView
+    ? `<div class="ord-role-banner ord-role-emp"><span class="ord-role-ico">🎧</span><span><b>Support View</b> — Read-only payment history. Reconciliation is admin/employee only.</span></div>`
     : `<div class="ord-role-banner ord-role-emp"><span class="ord-role-ico">👤</span><span><b>Employee View</b> — Payment gateway references and reconciliation tools are admin-only.</span></div>`;
 
   const thead = adminView
@@ -1658,6 +1680,7 @@ let _crmSubTab = 'customers';
 let _crmCustomerCache = [];
 
 TAB.crm = async () => {
+  const supportView = isSupportAgent();
   let customers = [], analytics = {}, total = 0;
   try {
     const [cusRes, anaRes] = await Promise.allSettled([
@@ -1718,7 +1741,7 @@ TAB.crm = async () => {
       <td class="td-sm">${fmt.date(c.createdAt||c.joinDate)}</td>
       <td style="display:flex;gap:4px">
         <button class="btn-d btn-d-sec btn-d-sm" data-action="view-customer" data-id="${c.id}">${I.eye} View</button>
-        <button class="btn-d btn-d-primary btn-d-sm" data-action="log-comm" data-id="${c.id}" data-name="${esc(c.firstName||'')} ${esc(c.lastName||'')}">+ Log</button>
+        ${!supportView ? `<button class="btn-d btn-d-primary btn-d-sm" data-action="log-comm" data-id="${c.id}" data-name="${esc(c.firstName||'')} ${esc(c.lastName||'')}">+ Log</button>` : ''}
       </td>
     </tr>`).join('') :
     `<tr><td colspan="7"><div class="d-empty"><div class="d-empty-ico">👥</div><div class="d-empty-ttl">No customers found</div></div></td></tr>`;

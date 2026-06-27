@@ -77,7 +77,7 @@ export async function render() {
 export function bindEvents(state, helpers) {
   const { navigate, refresh, renderHeader, toast } = helpers;
 
-  document.getElementById('btn-back-shopping')?.addEventListener('click', () => navigate('home'));
+  document.getElementById('btn-back-shopping')?.addEventListener('click', () => navigate('shop'));
 
   document.getElementById('btn-proceed-checkout')?.addEventListener('click', () => {
     if (!ApiService.getCurrentUser()) {

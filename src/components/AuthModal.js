@@ -4,9 +4,10 @@ import { appState, setState } from '../store.js';
 import { showToast } from './toast.js';
 
 function roleToView(roles) {
-  if (roles.some(r => r === 'ROLE_ADMIN')) return 'admin';
-  if (roles.some(r => r === 'ROLE_EMPLOYEE')) return 'employee';
-  if (roles.some(r => r === 'ROLE_SUPPORT_AGENT')) return 'support-agent';
+  const normalized = roles.map(r => (typeof r === 'string' ? r : r?.name || r?.authority || '').toUpperCase());
+  if (normalized.some(r => r.includes('ADMIN'))) return 'admin';
+  if (normalized.some(r => r.includes('SUPPORT_AGENT') || r.includes('SUPPORT'))) return 'support-agent';
+  if (normalized.some(r => r.includes('EMPLOYEE'))) return 'employee';
   return 'home';
 }
 
@@ -537,7 +538,10 @@ export function bindEvents(helpers) {
       setLoading('btn-mfa-submit', true, 'Verify & Sign In');
       try {
         await ApiService.auth.verifyMfa(appState.pendingMfaToken, code);
-        setState({ pendingMfaToken: null, authModalMode: null });
+        const mfaUser = ApiService.getCurrentUser();
+        const mfaRoles = (mfaUser?.roles || []).map(r => (r?.name || r || '').toString());
+        const mfaView = roleToView(mfaRoles);
+        setState({ pendingMfaToken: null, authModalMode: null, currentView: mfaView });
         window.dispatchEvent(new Event('luz-login'));
         renderAll();
         showToast('Identity verified. Welcome!', 'success');

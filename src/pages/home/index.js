@@ -164,10 +164,11 @@ export async function render(state) {
   // clear any stale search/category state so returning home always shows all products
   setState({ searchQuery: '', activeCategory: null });
 
-  const [bannersRes, featuredRes, productsRes] = await Promise.all([
+  const [bannersRes, featuredRes, productsRes, faqsRes] = await Promise.all([
     ApiService.banners.getActive().catch(() => ({ data: [] })),
     ApiService.products.getFeatured().catch(() => ({ data: [] })),
     ApiService.products.search({ ...currentFilters, page: 0, size: PAGE_SIZE }),
+    ApiService.support.getFAQs().catch(() => ({ data: [] })),
   ]);
 
   const banners = bannersRes.data || [];
@@ -175,6 +176,7 @@ export async function render(state) {
   const productsPage = productsRes.data || {};
   const products = Array.isArray(productsPage) ? productsPage : (productsPage.content || []);
   totalPages = productsPage.totalPages || 1;
+  const faqs = faqsRes.data || [];
 
   const heroBannerHtml = buildHeroBanner(banners, featuredProducts);
 
@@ -256,6 +258,26 @@ export async function render(state) {
           <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"></path></svg>
         </button>
         <span class="load-more-info">Page ${currentPage + 1} of ${totalPages}</span>
+      </div>
+    ` : ''}
+
+    ${faqs.length > 0 ? `
+      <div class="home-faq-section animate-fade-up">
+        <div class="home-faq-header">
+          <h2 class="home-faq-title">Frequently Asked Questions</h2>
+          <p class="home-faq-subtitle">Quick answers to common questions</p>
+        </div>
+        <div class="home-faq-list">
+          ${faqs.map((f, i) => `
+            <div class="home-faq-item" data-faq-index="${i}">
+              <button class="home-faq-question" data-action="toggle-faq" data-index="${i}">
+                <span>${f.question}</span>
+                <svg class="home-faq-chevron" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"></path></svg>
+              </button>
+              <div class="home-faq-answer" id="faq-answer-${i}">${f.answer}</div>
+            </div>
+          `).join('')}
+        </div>
       </div>
     ` : ''}
   `;
@@ -520,6 +542,27 @@ export function bindEvents(state, helpers) {
       stopSliderAuto();
       goToSlide(parseInt(dot.getAttribute('data-slide')));
       startSliderAuto();
+    });
+  });
+
+  // FAQ accordion
+  appContainer.querySelectorAll('[data-action="toggle-faq"]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const index = btn.getAttribute('data-index');
+      const answer = document.getElementById(`faq-answer-${index}`);
+      const item = btn.closest('.home-faq-item');
+      const isOpen = item.classList.contains('open');
+
+      // Close all
+      appContainer.querySelectorAll('.home-faq-item.open').forEach(el => {
+        el.classList.remove('open');
+        el.querySelector('.home-faq-answer').style.maxHeight = null;
+      });
+
+      if (!isOpen) {
+        item.classList.add('open');
+        answer.style.maxHeight = answer.scrollHeight + 'px';
+      }
     });
   });
 }
