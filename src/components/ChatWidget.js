@@ -2,7 +2,9 @@ import './ChatWidget.css';
 import { ApiService } from '../api.js';
 import { connectWS, subscribeWS, unsubscribeWS } from '../chat-ws.js';
 
-let _sessionId = null;
+let _sessionId   = null;
+let _unreadCount = 0;
+let _panelOpen   = false;
 
 export async function render() {
   let sessions = [];
@@ -25,46 +27,62 @@ export async function render() {
   }
 
   const agentLabel = active?.agent
-    ? `<span style="font-size:10px;opacity:0.9;font-weight:500;margin-top:2px;">Agent: ${active.agent.firstName || active.agent.email}</span>`
-    : `<span style="font-size:10px;opacity:0.9;font-weight:500;margin-top:2px;">We respond in minutes</span>`;
+    ? `<span class="chat-header-sub">Agent: ${active.agent.firstName || active.agent.email}</span>`
+    : `<span class="chat-header-sub">We respond in minutes</span>`;
 
   return `
     <button class="support-widget-bubble" id="support-bubble-btn" title="Live Chat">
       <svg width="26" height="26" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path>
       </svg>
+      <span class="chat-bubble-badge" id="chat-unread-badge" style="display:none">0</span>
     </button>
 
     <div class="chat-panel" id="support-chat-panel" style="display:none;">
       <div class="chat-header">
-        <div>
-          <strong>Luz Support Chat</strong>
-          ${agentLabel}
+        <div class="chat-header-left">
+          <div class="chat-header-avatar">
+            <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path></svg>
+          </div>
+          <div>
+            <strong class="chat-header-title">Luz Support</strong>
+            ${agentLabel}
+          </div>
         </div>
-        <div style="display:flex;gap:8px;align-items:center;">
-          ${_sessionId ? '<button id="btn-end-chat" title="End chat" style="background:rgba(255,255,255,.2);border:none;color:white;border-radius:6px;padding:4px 8px;font-size:11px;cursor:pointer;">End</button>' : ''}
-          <button id="close-chat-btn" style="color:white;font-size:20px;display:flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:none;border:none;cursor:pointer;">
-            <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"></path></svg>
+        <div class="chat-header-actions">
+          ${_sessionId ? '<button id="btn-end-chat" class="chat-end-btn" title="End chat">End</button>' : ''}
+          <button id="close-chat-btn" class="chat-close-btn" title="Close">
+            <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"></path></svg>
           </button>
         </div>
       </div>
 
       <div class="chat-messages" id="live-chat-messages-container">
         ${_sessionId ? messagesHtml : `
-          <div style="text-align:center;padding:32px 20px;color:var(--text-light);display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;">
-            <svg width="48" height="48" fill="none" stroke="var(--slate-300)" stroke-width="1.5" viewBox="0 0 24 24" style="margin-bottom:16px;"><path stroke-linecap="round" stroke-linejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path></svg>
-            <p style="font-size:13.5px;color:var(--slate-600);line-height:1.5;max-width:240px;">Need help with your order or account?</p>
-            <button class="btn-primary" id="btn-start-chat" style="margin-top:20px;font-size:13px;padding:10px 20px;">
-              Start Support Chat
+          <div class="chat-empty-state">
+            <div class="chat-empty-icon">
+              <svg width="40" height="40" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path></svg>
+            </div>
+            <p class="chat-empty-title">How can we help?</p>
+            <p class="chat-empty-sub">Our support team is here for you. Start a conversation and we'll respond within minutes.</p>
+            <button class="chat-start-btn" id="btn-start-chat">
+              <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"></path></svg>
+              Start Conversation
             </button>
           </div>
         `}
       </div>
 
       ${_sessionId ? `
+        <div class="chat-typing-bar" id="chat-typing-indicator" style="display:none">
+          <span class="chat-typing-dot"></span><span class="chat-typing-dot"></span><span class="chat-typing-dot"></span>
+          <span class="chat-typing-label">Agent is typing</span>
+        </div>
         <form class="chat-input-row" id="live-chat-input-form">
-          <input type="text" id="live-chat-input-element" placeholder="Type a message..." autocomplete="off" required>
-          <button class="btn-primary" style="padding:10px 16px;" type="submit">Send</button>
+          <input type="text" id="live-chat-input-element" class="chat-input" placeholder="Type a message…" autocomplete="off" required>
+          <button class="chat-send-btn" type="submit" title="Send">
+            <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg>
+          </button>
         </form>
       ` : ''}
     </div>
@@ -75,16 +93,22 @@ export function bindEvents(helpers) {
   const { renderChatWidget } = helpers;
   const bubble = document.getElementById('support-bubble-btn');
   const panel  = document.getElementById('support-chat-panel');
+  const badge  = document.getElementById('chat-unread-badge');
 
   bubble?.addEventListener('click', () => {
     if (!panel) return;
-    const open = panel.style.display !== 'none';
-    panel.style.display = open ? 'none' : 'flex';
-    if (!open) _scrollBottom();
+    _panelOpen = panel.style.display === 'none';
+    panel.style.display = _panelOpen ? 'flex' : 'none';
+    if (_panelOpen) {
+      _unreadCount = 0;
+      if (badge) badge.style.display = 'none';
+      _scrollBottom();
+    }
   });
 
   document.getElementById('close-chat-btn')?.addEventListener('click', () => {
     if (panel) panel.style.display = 'none';
+    _panelOpen = false;
   });
 
   document.getElementById('btn-end-chat')?.addEventListener('click', async () => {
@@ -102,8 +126,12 @@ export function bindEvents(helpers) {
     try {
       const res = await ApiService.chat.createSession(subject, 'Hello, I need help with: ' + subject);
       _sessionId = res.data?.id || res.data?.sessionId;
-      renderChatWidget();
-      if (panel) panel.style.display = 'flex';
+      await renderChatWidget();
+      // Auto-open the panel after session created
+      const newPanel = document.getElementById('support-chat-panel');
+      if (newPanel) newPanel.style.display = 'flex';
+      _panelOpen = true;
+      _scrollBottom();
     } catch (_) {
       alert('Could not start chat. Please try again.');
     }
@@ -117,7 +145,6 @@ export function bindEvents(helpers) {
     const msg = input.value.trim();
     if (!msg) return;
     input.value = '';
-    // Append locally immediately so the sender sees their message without waiting for WS echo
     const me = ApiService.getCurrentUser();
     _appendBubble(msg, true, me?.email);
     try {
@@ -129,9 +156,16 @@ export function bindEvents(helpers) {
     const me = ApiService.getCurrentUser();
     connectWS(() => {
       subscribeWS('/topic/live-chat/' + _sessionId, (msgData) => {
-        // Skip own messages — already appended locally on submit
         if (msgData.senderId === me?.id) return;
         _appendBubble(msgData.message, false, msgData.senderEmail);
+        // Show unread badge if panel is closed
+        if (!_panelOpen) {
+          _unreadCount++;
+          if (badge) {
+            badge.textContent = _unreadCount > 9 ? '9+' : _unreadCount;
+            badge.style.display = 'flex';
+          }
+        }
       });
       subscribeWS('/topic/live-chat/sessions', (session) => {
         if ((session.id || session.sessionId) === _sessionId) {
@@ -143,8 +177,9 @@ export function bindEvents(helpers) {
 }
 
 function _bubble(text, sent, label) {
-  const lbl = !sent && label ? '<div style="font-size:10px;opacity:0.65;margin-bottom:3px;">' + label.split('@')[0] + '</div>' : '';
-  return '<div class="chat-bubble ' + (sent ? 'sent' : 'received') + '">' + lbl + _esc(text) + '</div>';
+  const lbl = !sent && label
+    ? `<div class="chat-bubble-sender">${label.split('@')[0]}</div>` : '';
+  return `<div class="chat-bubble ${sent ? 'sent' : 'received'}">${lbl}${_esc(text)}</div>`;
 }
 
 function _appendBubble(text, sent, label) {

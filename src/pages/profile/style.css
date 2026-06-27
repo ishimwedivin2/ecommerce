@@ -132,6 +132,25 @@
 }
 .ord-track-btn:hover { border-color: var(--primary, #FF6B00); color: var(--primary, #FF6B00); }
 
+.ord-view-btn {
+  font-size: 12px; padding: 5px 12px; border-radius: 8px;
+  border: 1.5px solid var(--primary, #FF6B00);
+  background: #FFF7F0; color: var(--primary, #FF6B00);
+  cursor: pointer; font-weight: 600; transition: all 0.2s;
+}
+.ord-view-btn:hover { background: var(--primary, #FF6B00); color: white; }
+
+.ord-collapsed { padding: 10px 18px 14px; }
+.ord-thumbs { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+.ord-thumb { display: flex; align-items: center; gap: 8px; }
+.ord-thumb-img {
+  width: 40px; height: 40px; border-radius: 8px;
+  object-fit: cover; background: #F1F5F9; border: 1px solid var(--border, #E2E8F0);
+}
+.ord-thumb-name { font-size: 13px; color: #334155; font-weight: 500; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ord-thumb-more { font-size: 12px; color: #94A3B8; padding: 4px 8px; background: #F1F5F9; border-radius: 6px; }
+.ord-summary-total { display: flex; justify-content: space-between; align-items: center; border-top: 1px solid var(--border, #E2E8F0); padding-top: 10px; }
+
 /* Items list */
 .ord-items-list { padding: 14px 18px; display: flex; flex-direction: column; gap: 10px; }
 .ord-item { display: flex; gap: 10px; align-items: center; }

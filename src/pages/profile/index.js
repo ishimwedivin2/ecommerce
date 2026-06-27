@@ -125,22 +125,42 @@ export async function render() {
 </div>`;
 }
 
-function buildOrderCard(o) {
-  const meta     = STATUS_META[o.status] || STATUS_META.CREATED;
-  const items    = o.orderItems || [];
-  const pipeIdx  = PIPELINE.indexOf(o.status);
-  const cancelled = ['CANCELLED', 'RETURN_REQUESTED', 'RETURNED', 'REFUNDED'].includes(o.status);
+const BACKEND_URL = 'http://localhost:8080';
 
-  const itemsHtml = items.slice(0, 3).map(item => `
-    <div class="ord-item">
-      <img class="ord-item-img" src="${item.product?.imageUrl || item.imageUrl || ''}" alt="">
-      <div class="ord-item-info">
-        <div class="ord-item-name">${item.product?.name || item.productName || '—'}</div>
-        <div class="ord-item-meta">Qty ${item.quantity} × ${fmtMoney(item.unitPrice || 0)}</div>
-      </div>
-      <div class="ord-item-sub">${fmtMoney(item.subTotal || 0)}</div>
+function resolveImg(url) {
+  if (!url) return '';
+  return url.startsWith('/uploads/') ? `${BACKEND_URL}${url}` : url;
+}
+
+function buildOrderCard(o) {
+  const items     = o.orderItems || [];
+  const pipeIdx   = PIPELINE.indexOf(o.status);
+  const cancelled = ['CANCELLED', 'RETURN_REQUESTED', 'RETURNED', 'REFUNDED'].includes(o.status);
+  const canCancel = ['CREATED', 'PENDING', 'PAID'].includes(o.status);
+  const canReturn = o.status === 'DELIVERED';
+
+  // Collapsed summary — just first 2 product thumbnails + names
+  const thumbsHtml = items.slice(0, 2).map(item => `
+    <div class="ord-thumb">
+      <img class="ord-thumb-img" src="${resolveImg(item.imageUrl)}"
+        alt="${item.productName || ''}"
+        onerror="this.style.display='none'">
+      <span class="ord-thumb-name">${item.productName || '—'}</span>
     </div>`).join('');
-  const moreItems = items.length > 3 ? `<div class="ord-more">+${items.length - 3} more item(s)</div>` : '';
+  const moreCount = items.length > 2 ? `<span class="ord-thumb-more">+${items.length - 2} more</span>` : '';
+
+  // Expanded items list
+  const itemsHtml = items.map(item => `
+    <div class="ord-item">
+      <img class="ord-item-img" src="${resolveImg(item.imageUrl)}"
+        alt="${item.productName || ''}"
+        onerror="this.style.display='none'">
+      <div class="ord-item-info">
+        <div class="ord-item-name">${item.productName || '—'}</div>
+        <div class="ord-item-meta">Qty ${item.quantity} × ${fmtMoney(Number(item.unitPrice || 0) * 1.18)}</div>
+      </div>
+      <div class="ord-item-sub">${fmtMoney(Number(item.subTotal || 0) * 1.18)}</div>
+    </div>`).join('');
 
   const pipelineHtml = !cancelled ? `
     <div class="ord-pipeline">
@@ -153,13 +173,12 @@ function buildOrderCard(o) {
           <div class="ord-pipe-lbl">${stepMeta.label || step}</div>
         </div>`;
       }).join('<div class="ord-pipe-line"></div>')}
-    </div>` : '';
-
-  const canCancel = ['CREATED', 'PENDING', 'PAID'].includes(o.status);
-  const canReturn = o.status === 'DELIVERED';
+    </div>` : `<div class="prof-badge" style="color:#DC2626;background:#FEF2F2;display:inline-block;margin:8px 0">${STATUS_META[o.status]?.icon || ''} ${STATUS_META[o.status]?.label || o.status}</div>`;
 
   return `
   <div class="ord-card" id="ord-${o.id}">
+
+    <!-- Collapsed header — always visible -->
     <div class="ord-card-header">
       <div class="ord-card-meta">
         <div class="ord-num">${o.orderNumber || '#' + o.id.slice(0, 8)}</div>
@@ -167,30 +186,43 @@ function buildOrderCard(o) {
       </div>
       <div style="display:flex;align-items:center;gap:8px">
         ${statusBadge(o.status)}
-        <button class="ord-track-btn" data-action="toggle-tracking" data-id="${o.id}">📍 Track</button>
+        <button class="ord-view-btn" data-action="toggle-order" data-id="${o.id}">View Order ▾</button>
       </div>
     </div>
 
-    <div class="ord-items-list">${itemsHtml}${moreItems}</div>
-
-    ${pipelineHtml}
-
-    <div id="tracking-${o.id}" class="ord-tracking-panel" style="display:none">
-      <div class="ord-tracking-loading">Loading tracking info…</div>
-    </div>
-
-    <div class="ord-card-footer">
-      <div class="ord-payment">
+    <!-- Collapsed summary -->
+    <div class="ord-collapsed" id="ord-collapsed-${o.id}">
+      <div class="ord-thumbs">${thumbsHtml}${moreCount}</div>
+      <div class="ord-summary-total">
         <span class="ord-pay-method">${(o.paymentMethod || '—').replace(/_/g, ' ')}</span>
         <span class="ord-total">${fmtMoney(o.totalAmount)}</span>
       </div>
-      <div class="ord-actions">
-        <button class="ord-btn" data-action="view-receipt" data-id="${o.id}" data-num="${o.orderNumber || ''}">🧾 Receipt</button>
-        <button class="ord-btn" data-action="download-invoice" data-id="${o.id}" data-num="${o.orderNumber || ''}">📄 PDF</button>
-        ${canReturn ? `<button class="ord-btn ord-btn-warn" data-action="request-return" data-id="${o.id}">↩ Return</button>` : ''}
-        ${canCancel ? `<button class="ord-btn ord-btn-danger" data-action="cancel-order" data-id="${o.id}">✗ Cancel</button>` : ''}
+    </div>
+
+    <!-- Expanded details — hidden by default -->
+    <div class="ord-expanded" id="ord-expanded-${o.id}" style="display:none">
+      <div class="ord-items-list">${itemsHtml}</div>
+      ${pipelineHtml}
+
+      <div id="tracking-${o.id}" class="ord-tracking-panel" style="display:none">
+        <div class="ord-tracking-loading">Loading tracking info…</div>
+      </div>
+
+      <div class="ord-card-footer">
+        <div class="ord-payment">
+          <span class="ord-pay-method">${(o.paymentMethod || '—').replace(/_/g, ' ')}</span>
+          <span class="ord-total">${fmtMoney(o.totalAmount)}</span>
+        </div>
+        <div class="ord-actions">
+          <button class="ord-btn" data-action="toggle-tracking" data-id="${o.id}">📍 Track</button>
+          <button class="ord-btn" data-action="view-receipt" data-id="${o.id}" data-num="${o.orderNumber || ''}">🧾 Receipt</button>
+          <button class="ord-btn" data-action="download-invoice" data-id="${o.id}" data-num="${o.orderNumber || ''}">📄 PDF</button>
+          ${canReturn ? `<button class="ord-btn ord-btn-warn" data-action="request-return" data-id="${o.id}">↩ Return</button>` : ''}
+          ${canCancel ? `<button class="ord-btn ord-btn-danger" data-action="cancel-order" data-id="${o.id}">✗ Cancel</button>` : ''}
+        </div>
       </div>
     </div>
+
   </div>`;
 }
 
@@ -279,6 +311,16 @@ export function bindEvents(state, helpers) {
     const action = btn.dataset.action;
     const oid    = btn.dataset.id;
     const num    = btn.dataset.num || oid;
+
+    if (action === 'toggle-order') {
+      const collapsed = document.getElementById(`ord-collapsed-${oid}`);
+      const expanded  = document.getElementById(`ord-expanded-${oid}`);
+      if (!expanded) return;
+      const isOpen = expanded.style.display !== 'none';
+      expanded.style.display  = isOpen ? 'none' : '';
+      collapsed.style.display = isOpen ? '' : 'none';
+      btn.textContent = isOpen ? 'View Order ▾' : 'Close ▴';
+    }
 
     if (action === 'toggle-tracking') {
       const panel = document.getElementById(`tracking-${oid}`);

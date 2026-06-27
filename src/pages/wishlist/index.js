@@ -38,10 +38,16 @@ function renderCard(p, removable = false) {
         <div class="product-price-row"><span class="price-current">RWF ${Math.round(price).toLocaleString('en-US')}</span></div>
       </div>
       <div class="product-card-actions">
-        <button class="btn-card-add" data-action="add-to-cart" data-id="${p.id}">
-          <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M12 4.5v15m7.5-7.5h-15"></path></svg>
-          Add to Cart
-        </button>
+        ${(() => {
+          const qty = p.inventoryItem?.quantity ?? p.stock ?? null;
+          const outOfStock = qty !== null && qty <= 0;
+          return outOfStock
+            ? `<button class="btn-card-add" disabled style="opacity:.5;cursor:not-allowed;">Out of Stock</button>`
+            : `<button class="btn-card-add" data-action="add-to-cart" data-id="${p.id}">
+                <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M12 4.5v15m7.5-7.5h-15"></path></svg>
+                Add to Cart
+               </button>`;
+        })()}
       </div>
     </div>
   `;

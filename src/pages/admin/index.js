@@ -2341,11 +2341,11 @@ TAB.finance = async () => {
 // ── Reports ───────────────────────────────────────────────
 TAB.reports = async () => {
   const reportTypes = [
-    { id:'sales',   title:'Sales Report',            desc:'Revenue, orders, AOV by date range',         icon:'📊', formats:['Excel'] },
-    { id:'finance', title:'Financial Mgmt Report',   desc:'Full P&L, expenses, cash position export',   icon:'💰', formats:['CSV'] },
-    { id:'finance', title:'Tax Records Export',       desc:'Tax collected, rates and filing status',     icon:'🧾', formats:['taxes'] },
-    { id:'inventory',   title:'Inventory Report',    desc:'Stock levels — coming soon',                 icon:'📦', formats:[] },
-    { id:'orders',      title:'Orders Report',       desc:'Full order history — coming soon',           icon:'🛒', formats:[] },
+    { id:'sales',         title:'Sales Report',          desc:'Revenue, order details & line items by date range',  icon:'📊', formats:['Excel'],  dateRange: true  },
+    { id:'finance-mgmt',  title:'Financial Mgmt Report', desc:'Full P&L, expenses and cash position export',        icon:'💰', formats:['CSV'],    dateRange: true  },
+    { id:'finance-tax',   title:'Tax Records Export',    desc:'Tax collected, rates and filing status',             icon:'🧾', formats:['CSV'],    dateRange: true  },
+    { id:'inventory',     title:'Inventory Report',      desc:'Current stock levels, thresholds and status',        icon:'📦', formats:['Excel'],  dateRange: false },
+    { id:'orders',        title:'Orders Report',         desc:'Full order history with customer and payment info',  icon:'🛒', formats:['Excel'],  dateRange: true  },
   ];
 
   return `
@@ -2366,8 +2366,9 @@ TAB.reports = async () => {
       <div style="font-size:28px">${r.icon}</div>
       <div class="dash-chart-hd">${r.title}</div>
       <div class="dash-chart-sub" style="margin-bottom:4px">${r.desc}</div>
-      <div style="display:flex;gap:6px;flex-wrap:wrap">
-        ${r.formats.length ? r.formats.map(f => `<button class="btn-d btn-d-sec btn-d-sm" data-action="download-report" data-type="${r.id}" data-format="${f}">${I.download} ${f}</button>`).join('') : `<span style="font-size:12px;color:#94A3B8">Coming soon</span>`}
+      ${r.dateRange ? '<div style="font-size:11px;color:#94A3B8">Uses the date range above</div>' : '<div style="font-size:11px;color:#94A3B8">Exports current snapshot</div>'}
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:auto">
+        ${r.formats.map(f => `<button class="btn-d btn-d-sec btn-d-sm" data-action="download-report" data-type="${r.id}" data-format="${f}">${I.download} ${f}</button>`).join('')}
       </div>
     </div>`).join('')}
   </div>`;
@@ -2668,15 +2669,21 @@ TAB.system = async () => {
   } catch(_){}
 
   const lastBackup = backups[0];
+  const backupStatusBdg = s => {
+    if (s === 'COMPLETED')   return `<span class="bdg bdg-green">Completed</span>`;
+    if (s === 'FAILED')      return `<span class="bdg bdg-red">Failed</span>`;
+    if (s === 'IN_PROGRESS') return `<span class="bdg bdg-yellow">In Progress</span>`;
+    return `<span class="bdg">${s||'Unknown'}</span>`;
+  };
   const backupRows = backups.slice(0,5).map(b => `
     <div class="d-widget-row" style="align-items:flex-start">
       <div style="font-size:12px">
         <div style="font-weight:600">${fmt.date(b.createdAt)}</div>
-        <div style="color:#94A3B8">${b.status||'COMPLETED'}</div>
+        <div style="margin-top:3px">${backupStatusBdg(b.status)}</div>
       </div>
-      <div style="display:flex;gap:4px;margin-left:auto">
+      <div style="display:flex;gap:4px;margin-left:auto;align-items:center">
         <button class="btn-d btn-d-sec btn-d-sm btn-d-ico" data-action="view-backup" data-id="${b.id}" title="View detail">${I.eye}</button>
-        <button class="btn-d btn-d-sec btn-d-sm" data-action="restore-backup" data-id="${b.id}">Restore</button>
+        ${b.status === 'COMPLETED' ? `<button class="btn-d btn-d-sec btn-d-sm" data-action="restore-backup" data-id="${b.id}">Restore</button>` : ''}
       </div>
     </div>`).join('') || '<div style="color:#94A3B8;font-size:12px;padding:8px 0">No backups yet</div>';
 
@@ -2695,8 +2702,8 @@ TAB.system = async () => {
     <div class="d-widget">
       <div class="d-widget-ttl">System Health</div>
       <div class="d-widget-row"><span>API Server</span><span class="bdg ${ApiService.isOnline()?'bdg-green':'bdg-red'}">${ApiService.isOnline()?'Online':'Offline'}</span></div>
-      <div class="d-widget-row"><span>Auth Service</span><span class="bdg bdg-green">Active</span></div>
-      <div class="d-widget-row"><span>Last Backup</span><span style="font-size:12px">${lastBackup ? fmt.ago(lastBackup.createdAt) : 'Never'}</span></div>
+      <div class="d-widget-row"><span>Auth Service</span><span class="bdg ${localStorage.getItem('luz_jwt') ? 'bdg-green' : 'bdg-red'}">${localStorage.getItem('luz_jwt') ? 'Active' : 'No Session'}</span></div>
+      <div class="d-widget-row"><span>Last Backup</span><span style="font-size:12px">${lastBackup ? fmt.ago(lastBackup.createdAt) + (lastBackup.status !== 'COMPLETED' ? ` <span class="bdg bdg-red" style="font-size:10px">${lastBackup.status}</span>` : '') : 'Never'}</span></div>
       <div class="d-widget-row"><span>Configurations</span><span>${configs.length} keys</span></div>
     </div>
     <div class="d-widget">
@@ -2712,11 +2719,15 @@ TAB.system = async () => {
       <div class="d-widget-ttl">Configuration Keys</div>
       <div id="config-list" style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px">${configRows}</div>
       <div style="font-size:11px;font-weight:700;color:#64748B;margin-bottom:6px">EDIT CONFIGURATION</div>
+      <input type="hidden" id="sys-cfg-editing-key">
       <div class="f-field"><label class="f-lbl">Key</label><input class="f-inp" id="sys-cfg-key" placeholder="e.g. STORE_NAME"></div>
       <div class="f-field"><label class="f-lbl">Value</label><input class="f-inp" id="sys-cfg-val" placeholder="Value…"></div>
       <div class="f-field"><label class="f-lbl">Category</label><input class="f-inp" id="sys-cfg-cat" placeholder="e.g. general"></div>
       <div class="f-field"><label class="f-lbl">Description</label><input class="f-inp" id="sys-cfg-desc" placeholder="Optional description…"></div>
-      <button class="btn-d btn-d-primary" style="margin-top:8px" id="btn-save-config">Save Configuration</button>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button class="btn-d btn-d-primary" id="btn-save-config" style="flex:1">Save Configuration</button>
+        <button class="btn-d btn-d-sec" id="btn-cancel-config" style="display:none">Cancel Edit</button>
+      </div>
       <div id="sys-cfg-msg" style="margin-top:8px;font-size:12px;display:none"></div>
     </div>
   </div>
@@ -3002,11 +3013,29 @@ function drawerBody(type, data) {
     </div>`;
   }
 
-  if (type === 'user') return `
-    <div class="f-row"><div class="f-field"><label class="f-lbl">First Name</label><input class="f-inp" id="d-usr-fn" value="${data?.firstName||''}"></div><div class="f-field"><label class="f-lbl">Last Name</label><input class="f-inp" id="d-usr-ln" value="${data?.lastName||''}"></div></div>
-    <div class="f-field"><label class="f-lbl">Email *</label><input class="f-inp" type="email" id="d-usr-email" value="${data?.email||''}"></div>
-    ${!data ? `<div class="f-field"><label class="f-lbl">Password *</label><input class="f-inp" type="password" id="d-usr-pw"></div>` : ''}
-    <div class="f-field"><label class="f-lbl">Role</label><select class="f-sel" id="d-usr-role"><option value="ROLE_CUSTOMER">Customer</option><option value="ROLE_EMPLOYEE">Employee</option><option value="ROLE_ADMIN">Admin</option></select></div>`;
+  if (type === 'user') {
+    const currentRole = (Array.isArray(data?.roles) ? (data.roles[0]?.name || data.roles[0]) : null) || 'ROLE_CUSTOMER';
+    const roleOptions = [
+      { value: 'ROLE_CUSTOMER',      label: 'Customer' },
+      { value: 'ROLE_SUPPORT_AGENT', label: 'Support Agent' },
+      { value: 'ROLE_EMPLOYEE',      label: 'Employee' },
+      { value: 'ROLE_ADMIN',         label: 'Admin' },
+    ].map(r => `<option value="${r.value}" ${currentRole === r.value ? 'selected' : ''}>${r.label}</option>`).join('');
+    return `
+    <div class="f-row">
+      <div class="f-field"><label class="f-lbl">First Name *</label><input class="f-inp" id="d-usr-fn" value="${data?.firstName||''}" placeholder="First name"></div>
+      <div class="f-field"><label class="f-lbl">Last Name *</label><input class="f-inp" id="d-usr-ln" value="${data?.lastName||''}" placeholder="Last name"></div>
+    </div>
+    <div class="f-field"><label class="f-lbl">Email *</label><input class="f-inp" type="email" id="d-usr-email" value="${data?.email||''}" placeholder="user@example.com" ${data ? 'disabled style="opacity:.6;cursor:not-allowed;"' : ''}></div>
+    ${!data ? `<div class="f-field"><label class="f-lbl">Password *</label><input class="f-inp" type="password" id="d-usr-pw" placeholder="Min 8 characters"></div>` : ''}
+    <div class="f-field"><label class="f-lbl">Role *</label><select class="f-sel" id="d-usr-role">${roleOptions}</select></div>
+    <div class="f-row">
+      <div class="f-field"><label class="f-lbl">Phone</label><input class="f-inp" id="d-usr-phone" value="${data?.phoneNumber||''}" placeholder="+60..."></div>
+      <div class="f-field"><label class="f-lbl">Address</label><input class="f-inp" id="d-usr-addr" value="${data?.address||''}" placeholder="Street, City"></div>
+    </div>
+    ${data ? `<div class="d-alert d-alert-info" style="margin-top:4px;font-size:12px;">Email cannot be changed. Update role by selecting a new one and saving.</div>` : ''}
+  `;
+  }
 
   if (type === 'adjust') return `
     <div class="d-alert d-alert-info">Adjusting stock for: <b>${data?.name||'Product'}</b></div>
@@ -3325,9 +3354,10 @@ async function saveDrawer(type, data) {
       const featured   = document.getElementById('d-prod-featured')?.checked;
 
       const payload = {
-        name, sku, description: desc, price, comparePrice: compare, stock,
+        name, sku, description: desc, price, stock,
         imageUrl: document.getElementById('d-prod-img-url')?.value,
-        status, featured, categoryId
+        status, featured,
+        category: categoryId ? { id: categoryId } : null
       };
 
       if (data) {
@@ -3436,11 +3466,11 @@ async function saveDrawer(type, data) {
       const email    = document.getElementById('d-usr-email')?.value?.trim();
       const pw       = document.getElementById('d-usr-pw')?.value;
       const roleName = document.getElementById('d-usr-role')?.value;
+      const phone    = document.getElementById('d-usr-phone')?.value?.trim() || null;
+      const address  = document.getElementById('d-usr-addr')?.value?.trim() || null;
       if (data?.id) {
-        // Update profile fields
-        await ApiService.updateUser(data.id, { firstName: fn, lastName: ln });
-        // Update role if changed
-        if (roleName) await ApiService.admin.replaceRoles(data.id, [roleName]);
+        await ApiService.updateUser(data.id, { firstName: fn, lastName: ln, phoneNumber: phone, address });
+        if (roleName) await ApiService.replaceRoles(data.id, [roleName]);
       } else {
         if (!fn || !ln || !email || !pw) throw new Error('First name, last name, email and password are required');
         await ApiService.createUser({ firstName: fn, lastName: ln, email, password: pw, roleName: roleName || 'ROLE_CUSTOMER' });
@@ -3746,7 +3776,7 @@ function bindTab(tab) {
       try { await ApiService.unblockUser(id); showToast('User unblocked'); loadTab('users'); }
       catch(e) { showToast(e.message, 'error'); }
     }
-    else if (action === 'download-report') { downloadReport(rtype, format); }
+    else if (action === 'download-report') { downloadReport(rtype, format, el); }
     else if (action === 'view-order')    { viewOrderDetail(id); }
     else if (action === 'reconcile-txn') {
       const btn = el;
@@ -3792,7 +3822,7 @@ function bindTab(tab) {
           ${b.completedAt ? `<div class="f-field"><label class="f-lbl">Completed</label><div class="f-val">${fmt.ago(b.completedAt)}</div></div>` : ''}`;
         document.getElementById('d-drawer-footer').innerHTML = `
           <button class="btn-d btn-d-sec" id="d-btn-cancel">Close</button>
-          <button class="btn-d btn-d-danger" data-action="restore-backup" data-id="${b.id}">Restore This Backup</button>`;
+          ${b.status === 'COMPLETED' ? `<button class="btn-d btn-d-danger" data-action="restore-backup" data-id="${b.id}">Restore This Backup</button>` : ''}`;
         document.getElementById('d-btn-cancel')?.addEventListener('click', closeDrawer);
         document.getElementById('d-overlay').classList.add('open');
       } catch(e) { showToast(e.message || 'Failed to load backup', 'error'); }
@@ -3806,29 +3836,30 @@ function bindTab(tab) {
       } catch(err) { showToast(err.message||'Restore failed', 'error'); el.disabled = false; el.textContent = 'Restore'; }
     }
     else if (action === 'edit-config') {
+      const resolvedKey = key || '';
+      const setConfigForm = (configKey, configValue, configCategory, configDesc, isSensitive) => {
+        const keyEl       = document.getElementById('sys-cfg-key');
+        const valEl       = document.getElementById('sys-cfg-val');
+        const catEl       = document.getElementById('sys-cfg-cat');
+        const dscEl       = document.getElementById('sys-cfg-desc');
+        const editingEl   = document.getElementById('sys-cfg-editing-key');
+        const cancelBtn   = document.getElementById('btn-cancel-config');
+        if (keyEl)     { keyEl.value = configKey; keyEl.disabled = true; keyEl.style.opacity = '.6'; keyEl.style.cursor = 'not-allowed'; }
+        if (valEl)     valEl.value = isSensitive ? '' : configValue;
+        if (catEl)     catEl.value = configCategory || '';
+        if (dscEl)     dscEl.value = configDesc || '';
+        if (editingEl) editingEl.value = configKey;
+        if (cancelBtn) cancelBtn.style.display = '';
+        if (isSensitive) showToast('Sensitive value — re-enter to update', 'info');
+        document.getElementById('sys-cfg-key')?.scrollIntoView({ behavior:'smooth', block:'nearest' });
+      };
       try {
-        const res = await ApiService.getSystemConfiguration(key);
+        const res = await ApiService.getSystemConfiguration(resolvedKey);
         const c = res?.data || res;
-        const keyEl = document.getElementById('sys-cfg-key');
-        const valEl = document.getElementById('sys-cfg-val');
-        const catEl = document.getElementById('sys-cfg-cat');
-        const dscEl = document.getElementById('sys-cfg-desc');
-        if (keyEl) keyEl.value = c.configKey || c.key || key || '';
-        if (valEl) valEl.value = c.sensitive ? '' : (c.configValue || c.value || value || '');
-        if (catEl) catEl.value = c.category || category || '';
-        if (dscEl) dscEl.value = c.description || desc || '';
-        if (c.sensitive) showToast('Sensitive value — re-enter to update', 'info');
+        setConfigForm(c.configKey || c.key || resolvedKey, c.configValue || c.value || value, c.category || category, c.description || desc, c.sensitive);
       } catch(_) {
-        const keyEl = document.getElementById('sys-cfg-key');
-        const valEl = document.getElementById('sys-cfg-val');
-        const catEl = document.getElementById('sys-cfg-cat');
-        const dscEl = document.getElementById('sys-cfg-desc');
-        if (keyEl) keyEl.value = key || '';
-        if (valEl) valEl.value = value || '';
-        if (catEl) catEl.value = category || '';
-        if (dscEl) dscEl.value = desc || '';
+        setConfigForm(resolvedKey, value, category, desc, false);
       }
-      document.getElementById('sys-cfg-key')?.scrollIntoView({ behavior:'smooth', block:'nearest' });
     }
   });
 
@@ -5143,27 +5174,43 @@ function bindSystemTab() {
     try {
       const res = await ApiService.triggerBackup();
       const bkp = res.data || res || {};
-      if(msgEl){ msgEl.style.color='#065F46'; msgEl.textContent=`Backup created at ${new Date().toLocaleTimeString()}`; }
+      if(msgEl){ msgEl.style.color='#1E40AF'; msgEl.textContent=`Backup started — running in background. Refresh in a moment to see the result.`; }
       const hist = document.getElementById('backup-history');
       if(hist) hist.insertAdjacentHTML('afterbegin', `
         <div class="d-widget-row">
-          <div style="font-size:12px"><div style="font-weight:600">Just now</div><div style="color:#94A3B8">${bkp.status||'COMPLETED'}</div></div>
-          <button class="btn-d btn-d-sec btn-d-sm" data-action="restore-backup" data-id="${bkp.id||''}" style="margin-left:auto">Restore</button>
+          <div style="font-size:12px">
+            <div style="font-weight:600">Just now</div>
+            <div style="margin-top:3px"><span class="bdg bdg-yellow">In Progress</span></div>
+          </div>
+          <button class="btn-d btn-d-sec btn-d-sm btn-d-ico" style="margin-left:auto" onclick="loadTab('system')" title="Refresh">${I.refresh||'↻'}</button>
         </div>`);
     } catch(e) {
       if(msgEl){ msgEl.style.color='#991B1B'; msgEl.textContent=e.message||'Backup failed'; }
     } finally { btn.disabled=false; if(txt) txt.textContent='Trigger Backup Now'; }
   });
 
+  const resetConfigForm = () => {
+    const keyEl     = document.getElementById('sys-cfg-key');
+    const cancelBtn = document.getElementById('btn-cancel-config');
+    if (keyEl) { keyEl.value = ''; keyEl.disabled = false; keyEl.style.opacity = ''; keyEl.style.cursor = ''; }
+    ['sys-cfg-val','sys-cfg-cat','sys-cfg-desc'].forEach(id => { const el = document.getElementById(id); if(el) el.value = ''; });
+    const editEl = document.getElementById('sys-cfg-editing-key'); if(editEl) editEl.value = '';
+    if(cancelBtn) cancelBtn.style.display = 'none';
+    const msgEl = document.getElementById('sys-cfg-msg'); if(msgEl) msgEl.style.display = 'none';
+  };
+
+  document.getElementById('btn-cancel-config')?.addEventListener('click', resetConfigForm);
+
   document.getElementById('btn-save-config')?.addEventListener('click', async () => {
     const btn = document.getElementById('btn-save-config');
     const msgEl = document.getElementById('sys-cfg-msg');
     const showMsg = (txt, ok=true) => { if(msgEl){ msgEl.textContent=txt; msgEl.style.color=ok?'#065F46':'#991B1B'; msgEl.style.display=''; } };
 
-    const key   = document.getElementById('sys-cfg-key')?.value?.trim();
-    const value = document.getElementById('sys-cfg-val')?.value?.trim();
-    const cat   = document.getElementById('sys-cfg-cat')?.value?.trim()||null;
-    const desc  = document.getElementById('sys-cfg-desc')?.value?.trim()||null;
+    const editingKey = document.getElementById('sys-cfg-editing-key')?.value?.trim();
+    const key        = editingKey || document.getElementById('sys-cfg-key')?.value?.trim();
+    const value      = document.getElementById('sys-cfg-val')?.value?.trim();
+    const cat        = document.getElementById('sys-cfg-cat')?.value?.trim()||null;
+    const desc       = document.getElementById('sys-cfg-desc')?.value?.trim()||null;
 
     if (!key)   { showMsg('Key is required', false); return; }
     if (!value) { showMsg('Value is required', false); return; }
@@ -5172,11 +5219,8 @@ function bindSystemTab() {
     try {
       await ApiService.saveSystemConfiguration(key, { configValue: value, category: cat, description: desc, sensitive: false });
       showMsg(`Configuration "${key}" saved`);
-      document.getElementById('sys-cfg-key').value  = '';
-      document.getElementById('sys-cfg-val').value  = '';
-      document.getElementById('sys-cfg-cat').value  = '';
-      document.getElementById('sys-cfg-desc').value = '';
-      setTimeout(() => loadTab('system'), 1500);
+      resetConfigForm();
+      setTimeout(() => loadTab('system'), 1200);
     } catch(e) { showMsg(e.message||'Save failed', false); }
     finally { btn.disabled=false; btn.textContent='Save Configuration'; }
   });
@@ -5856,24 +5900,39 @@ function showPOSReceipt(receipt) {
 }
 
 // ── Reports ───────────────────────────────────────────────
-async function downloadReport(type, format) {
-  const from = document.getElementById('report-from')?.value || _finDateFrom;
-  const to   = document.getElementById('report-to')?.value   || _finDateTo;
+let _reportDownloading = false;
+async function downloadReport(type, format, btn) {
+  if (_reportDownloading) return;
+  _reportDownloading = true;
+  if (btn) { btn.disabled = true; btn.dataset._origText = btn.textContent; btn.textContent = 'Preparing…'; }
+
+  const today = new Date().toISOString().slice(0, 10);
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+  const from = document.getElementById('report-from')?.value || thirtyDaysAgo;
+  const to   = document.getElementById('report-to')?.value   || today;
+
   showToast(`Preparing ${type} report…`);
   try {
     if (type === 'sales') {
       await ApiService.downloadSalesReport({ startDate: from, endDate: to });
-    } else if (type === 'finance' && format === 'CSV') {
+    } else if (type === 'finance-mgmt') {
       await ApiService.exportFinancialManagement({ startDate: from, endDate: to });
-    } else if (type === 'finance' && format === 'taxes') {
+    } else if (type === 'finance-tax') {
       await ApiService.exportTaxRecords({ startDate: from, endDate: to });
+    } else if (type === 'inventory') {
+      await ApiService.downloadInventoryReport();
+    } else if (type === 'orders') {
+      await ApiService.downloadOrdersReport({ startDate: from, endDate: to });
     } else {
-      showToast(`${type} ${format} export not yet available`, 'error');
+      showToast(`${type} export not available`, 'error');
       return;
     }
     showToast('Download started', 'success');
   } catch(e) {
     showToast(e.message || 'Download failed', 'error');
+  } finally {
+    _reportDownloading = false;
+    if (btn) { btn.disabled = false; btn.textContent = btn.dataset._origText || 'Download'; }
   }
 }
 

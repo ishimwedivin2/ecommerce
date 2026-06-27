@@ -479,12 +479,6 @@ export const ApiService = {
     async getAuditLogsLegacy() {
       return await request('/api/admin/audit');
     },
-    async getBackups() {
-      return await request('/api/admin/backups');
-    },
-    async triggerBackup() {
-      return await request('/api/admin/backup', { method: 'POST' });
-    }
   },
 
   // 9. ANALYTICS & INVENTORY
@@ -1181,6 +1175,14 @@ export const ApiService = {
     const end   = endDate   || new Date().toISOString().slice(0, 10);
     const start = startDate || new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
     return await this._downloadBlob(`/api/reports/sales?startDate=${start}&endDate=${end}`, `sales-report-${start}-${end}.xlsx`);
+  },
+  async downloadInventoryReport() {
+    return await this._downloadBlob('/api/reports/inventory', `inventory-report-${new Date().toISOString().slice(0,10)}.xlsx`);
+  },
+  async downloadOrdersReport({ startDate, endDate } = {}) {
+    const end   = endDate   || new Date().toISOString().slice(0, 10);
+    const start = startDate || new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+    return await this._downloadBlob(`/api/reports/orders?startDate=${start}&endDate=${end}`, `orders-report-${start}-${end}.xlsx`);
   },
   async downloadInvoice(orderId) {
     return await this._downloadBlob(`/api/reports/invoices/${orderId}`, `invoice-${orderId}.pdf`);

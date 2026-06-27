@@ -1,4 +1,5 @@
 import '../admin/style.css';
+import './style.css';
 import { ApiService } from '../../api.js';
 import { setState } from '../../store.js';
 import { connectWS, subscribeWS, unsubscribeWS } from '../../chat-ws.js';
@@ -15,12 +16,14 @@ async function api(path, opts = {}) {
 let _activeTab = 'tickets';
 let _ticketCache = [];
 let _chatCache = [];
+let _customerCache = [];
 
 // ── Icons ──────────────────────────────────────────────────
 const ICONS = {
-  tickets:  `<svg class="dash-nav-icon" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>`,
-  chat:     `<svg class="dash-nav-icon" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>`,
-  profile:  `<svg class="dash-nav-icon" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>`,
+  tickets:   `<svg class="dash-nav-icon" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>`,
+  chat:      `<svg class="dash-nav-icon" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>`,
+  customers: `<svg class="dash-nav-icon" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>`,
+  profile:   `<svg class="dash-nav-icon" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>`,
 };
 
 function statusBadge(status) {
@@ -89,40 +92,52 @@ function buildTicketRows(tickets) {
 }
 
 function buildChatTab(sessions) {
-  if (!sessions.length) return `<div class="dash-empty">No live chat sessions.</div>`;
   const me = ApiService.getCurrentUser();
+  if (!sessions.length) return `
+    <div class="dash-section-header"><h3>Live Chat Sessions</h3></div>
+    <div class="sa-chat-empty">
+      <svg width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
+      <p>No live chat sessions yet</p>
+    </div>`;
+
   return `
     <div class="dash-section-header">
-      <h3>Live Chat Sessions</h3>
+      <h3>Live Chat Sessions <span class="sa-session-count">${sessions.length}</span></h3>
     </div>
-    <div class="dash-table-wrap">
-      <table class="dash-table">
-        <thead><tr>
-          <th>Session</th><th>Customer</th><th>Subject</th><th>Status</th><th>Started</th><th>Actions</th>
-        </tr></thead>
-        <tbody>
-          ${sessions.map(s => {
-            const isAssignedToMe = s.agent?.id === me?.id;
-            return `
-            <tr>
-              <td style="font-size:11px;color:#94a3b8;">#${(s.id||'').toString().slice(0,8)}</td>
-              <td>${s.customer?.firstName || s.customerName || '—'} ${s.customer?.lastName || ''}</td>
-              <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${s.subject || '—'}</td>
-              <td>${statusBadge(s.status || 'OPEN')}</td>
-              <td style="font-size:12px;color:#64748b;">${fmtDate(s.createdAt)}</td>
-              <td style="display:flex;gap:4px;flex-wrap:wrap;">
-                <button class="dash-action-btn" data-action="sa-view-chat" data-id="${s.id}">View Chat</button>
-                ${s.status !== 'CLOSED' && !isAssignedToMe
-                  ? `<button class="dash-action-btn" data-action="sa-assign-chat" data-id="${s.id}">Assign to Me</button>`
-                  : ''}
-                ${s.status !== 'CLOSED'
-                  ? `<button class="dash-action-btn danger" data-action="sa-close-chat" data-id="${s.id}">Close</button>`
-                  : ''}
-              </td>
-            </tr>
-          `}).join('')}
-        </tbody>
-      </table>
+    <div class="sa-chat-list">
+      ${sessions.map(s => {
+        const isAssignedToMe = s.agent?.id === me?.id;
+        const isOpen = s.status !== 'CLOSED';
+        const customerName = [s.customer?.firstName || s.customerName || '', s.customer?.lastName || ''].join(' ').trim() || 'Customer';
+        const initials = customerName.split(' ').map(w => w[0]).join('').slice(0,2).toUpperCase();
+        const statusColor = s.status === 'ASSIGNED' ? '#10b981' : s.status === 'CLOSED' ? '#6b7280' : '#3b82f6';
+        return `
+        <div class="sa-chat-card ${s.hasUnread ? 'sa-chat-card--unread' : ''}" id="sa-chat-card-${s.id}">
+          <div class="sa-chat-card-left">
+            <div class="sa-chat-avatar">${initials}</div>
+            ${isOpen ? '<span class="sa-chat-online-dot"></span>' : ''}
+          </div>
+          <div class="sa-chat-card-body">
+            <div class="sa-chat-card-top">
+              <span class="sa-chat-customer">${customerName}</span>
+              <span class="sa-chat-time">${fmtDate(s.createdAt)}</span>
+            </div>
+            <div class="sa-chat-subject">${s.subject || 'No subject'}</div>
+            <div class="sa-chat-card-bottom">
+              <span class="sa-chat-status-badge" style="background:${statusColor}22;color:${statusColor}">${s.status || 'OPEN'}</span>
+              ${s.agent ? `<span class="sa-chat-agent-tag">Agent: ${s.agent.firstName || s.agent.email || '—'}</span>` : '<span class="sa-chat-agent-tag sa-chat-agent-tag--none">Unassigned</span>'}
+            </div>
+          </div>
+          <div class="sa-chat-card-actions">
+            <button class="sa-chat-btn sa-chat-btn--primary" data-action="sa-view-chat" data-id="${s.id}">
+              <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
+              Open
+            </button>
+            ${isOpen && !isAssignedToMe ? `<button class="sa-chat-btn" data-action="sa-assign-chat" data-id="${s.id}">Assign</button>` : ''}
+            ${isOpen ? `<button class="sa-chat-btn sa-chat-btn--danger" data-action="sa-close-chat" data-id="${s.id}">Close</button>` : ''}
+          </div>
+        </div>
+      `}).join('')}
     </div>
   `;
 }
@@ -151,6 +166,8 @@ function buildProfileTab() {
 
 // ── Ticket detail modal ────────────────────────────────────
 async function openTicketModal(ticketId) {
+  const me = ApiService.getCurrentUser();
+
   const [ticketRes, msgsRes] = await Promise.all([
     api(`/api/support/tickets/${ticketId}`).catch(() => ({})),
     api(`/api/support/tickets/${ticketId}/messages`).catch(() => ({})),
@@ -158,112 +175,242 @@ async function openTicketModal(ticketId) {
 
   const ticket = ticketRes?.data || _ticketCache.find(t => t.id == ticketId) || {};
   const messages = Array.isArray(msgsRes.data) ? msgsRes.data : [];
+  const isClosed = ticket.status === 'CLOSED' || ticket.status === 'RESOLVED';
 
-  const overlay = document.createElement('div');
-  overlay.id = 'sa-ticket-modal';
-  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center;';
-  overlay.innerHTML = `
-    <div style="background:white;border-radius:14px;width:560px;max-height:80vh;display:flex;flex-direction:column;overflow:hidden;">
-      <div style="padding:18px 20px;border-bottom:1px solid #e2e8f0;display:flex;justify-content:space-between;align-items:center;">
-        <h3 style="margin:0;font-size:15px;">${ticket.title || ticket.subject || 'Ticket'} ${statusBadge(ticket.status)}</h3>
-        <button id="sa-modal-close" style="background:none;border:none;cursor:pointer;font-size:20px;color:#94a3b8;">×</button>
-      </div>
-      <div id="sa-msg-list" style="flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:10px;">
-        ${messages.length ? messages.map(m => {
-          const isCustomer = m.senderId === (ticket.customerId || ticket.customer?.id);
-          const senderName = isCustomer
-            ? (m.senderFirstName || 'Customer')
-            : (m.senderFirstName || 'Agent');
-          return `
-          <div style="max-width:80%;${isCustomer?'align-self:flex-start;':'align-self:flex-end;'}">
-            <div style="font-size:10px;color:#94a3b8;margin-bottom:3px;${isCustomer?'':'text-align:right'}">${senderName}</div>
-            <div style="background:${isCustomer?'#f1f5f9':'#FF6B00'};color:${isCustomer?'#1e293b':'white'};padding:10px 14px;border-radius:12px;font-size:13px;">${m.message}</div>
-            <div style="font-size:11px;color:#94a3b8;margin-top:3px;text-align:${isCustomer?'left':'right'}">${fmtDate(m.createdAt)}</div>
-          </div>
-        `}).join('') : '<div style="color:#94a3b8;text-align:center;">No messages yet</div>'}
-      </div>
-      ${ticket.status !== 'CLOSED' && ticket.status !== 'RESOLVED' ? `
-        <div style="padding:14px 16px;border-top:1px solid #e2e8f0;display:flex;gap:8px;">
-          <input id="sa-reply-input" style="flex:1;padding:9px 12px;border:1px solid #e2e8f0;border-radius:8px;font-size:13px;" placeholder="Type reply…">
-          <button id="sa-reply-send" class="dash-action-btn" data-ticket-id="${ticketId}">Send</button>
-        </div>
-      ` : ''}
-    </div>
-  `;
-  document.body.appendChild(overlay);
-  document.getElementById('sa-modal-close').onclick = () => overlay.remove();
-  overlay.onclick = e => { if (e.target === overlay) overlay.remove(); };
+  const customerName = [ticket.customerFirstName || '', ticket.customerEmail || 'Customer'].filter(Boolean)[0];
+  const initials = customerName.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase() || 'C';
+  const statusColor = { OPEN: '#3b82f6', IN_PROGRESS: '#8b5cf6', RESOLVED: '#10b981', CLOSED: '#6b7280' }[ticket.status] || '#6b7280';
 
-  const replyBtn = document.getElementById('sa-reply-send');
-  const replyInput = document.getElementById('sa-reply-input');
-
-  async function sendReply() {
-    const msg = replyInput?.value.trim();
-    if (!msg) return;
-    replyBtn.disabled = true;
-    replyBtn.textContent = 'Sending…';
-    await api(`/api/support/tickets/${ticketId}/messages`, {
-      method: 'POST',
-      body: JSON.stringify({ message: msg })
-    }).catch(console.error);
-    overlay.remove();
-    openTicketModal(ticketId);
+  function buildBubble(m) {
+    const isCustomer = m.senderId === ticket.customerId;
+    const label = isCustomer ? (m.senderFirstName || 'Customer') : (m.senderFirstName || 'You');
+    const time = fmtDate(m.createdAt);
+    return `
+      <div class="sa-msg-bubble ${isCustomer ? 'customer-msg' : 'agent-msg'}">
+        <div class="sa-msg-sender">${_esc(label)}</div>
+        ${_esc(m.message)}
+        <div class="sa-msg-time">${time}</div>
+      </div>`;
   }
 
-  replyBtn?.addEventListener('click', sendReply);
-  replyInput?.addEventListener('keydown', e => { if (e.key === 'Enter') sendReply(); });
+  const msgsHtml = messages.length
+    ? messages.map(buildBubble).join('')
+    : `<div class="sa-chat-no-messages">
+        <svg width="36" height="36" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+        <span>No messages yet</span>
+       </div>`;
+
+  const overlay = document.createElement('div');
+  overlay.className = 'sa-chat-modal-backdrop';
+  overlay.innerHTML = `
+    <div class="sa-ticket-modal-wide">
+      <div class="sa-chat-modal-header">
+        <div class="sa-modal-avatar">${initials}</div>
+        <div class="sa-modal-header-info">
+          <p class="sa-modal-customer-name">${_esc(customerName)}</p>
+          <p class="sa-modal-subject">${_esc(ticket.title || 'Support Ticket')}</p>
+        </div>
+        <div class="sa-modal-header-actions">
+          <span class="sa-modal-status-badge" style="color:${statusColor}">${ticket.status || 'OPEN'}</span>
+          ${ticket.priority ? `<span class="sa-modal-status-badge" style="color:${ticket.priority==='HIGH'||ticket.priority==='CRITICAL'?'#ef4444':'#f59e0b'}">${ticket.priority}</span>` : ''}
+          <button class="sa-modal-close-btn" id="sa-ticket-modal-close" title="Close">
+            <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+          </button>
+        </div>
+      </div>
+      <div class="sa-ticket-modal-body">
+        <div class="sa-ticket-modal-main">
+          <div class="sa-chat-modal-messages" id="sa-ticket-msg-list">${msgsHtml}</div>
+          ${!isClosed ? `
+            <form class="sa-chat-modal-input-row" id="sa-ticket-reply-form">
+              <input class="sa-chat-modal-input" id="sa-ticket-reply-input" placeholder="Type a reply…" autocomplete="off" required>
+              <button type="submit" class="sa-chat-modal-send-btn" title="Send">
+                <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/></svg>
+              </button>
+            </form>
+          ` : `<div style="padding:12px 16px;text-align:center;font-size:12px;color:#94a3b8;border-top:1px solid #e2e8f0;background:white;">This ticket is ${ticket.status}</div>`}
+        </div>
+        <div class="sa-ticket-modal-context">
+          <div class="sa-cp-section-title">Customer Context</div>
+          <div id="sa-ticket-ctx-orders" class="sa-ticket-ctx-loading">
+            <div class="sa-cp-info-row"><span>Name</span><strong>${_esc(customerName)}</strong></div>
+            <div class="sa-cp-info-row"><span>Email</span><strong>${_esc(ticket.customerEmail || '—')}</strong></div>
+            <div style="margin-top:12px;font-size:11px;font-weight:600;color:#64748b;letter-spacing:.5px;">ORDERS</div>
+            <div id="sa-ticket-orders-list" style="margin-top:6px;color:#94a3b8;font-size:12px;">Loading…</div>
+          </div>
+          <div style="margin-top:16px;">
+            <div class="sa-cp-section-title">Order Tracking</div>
+            <div id="sa-ticket-tracking" style="color:#94a3b8;font-size:12px;padding:8px 0;">Select an order above</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(overlay);
+
+  const msgList = document.getElementById('sa-ticket-msg-list');
+  function scrollBottom() { if (msgList) msgList.scrollTop = msgList.scrollHeight; }
+  scrollBottom();
+
+  // Load customer orders into context panel
+  if (ticket.customerId) {
+    api(`/api/orders/customer/${ticket.customerId}`).then(res => {
+      const orders = Array.isArray(res.data) ? res.data : [];
+      const el = document.getElementById('sa-ticket-orders-list');
+      if (!el) return;
+      if (!orders.length) { el.textContent = 'No orders found'; return; }
+      el.innerHTML = orders.map(o => {
+        const statusColor = { PENDING:'#f59e0b', PROCESSING:'#3b82f6', SHIPPED:'#8b5cf6', DELIVERED:'#10b981', CANCELLED:'#ef4444' }[o.status] || '#6b7280';
+        return `
+          <div class="sa-ctx-order-row">
+            <div>
+              <div style="font-size:12px;font-weight:700;">#${(o.orderNumber||o.id||'').toString().slice(0,8)}</div>
+              <div style="font-size:11px;color:#94a3b8;">${fmtDate(o.createdAt)}</div>
+            </div>
+            <span class="sa-chat-status-badge" style="background:${statusColor}22;color:${statusColor};font-size:10px;">${o.status}</span>
+            <button class="sa-chat-btn" style="padding:3px 8px;font-size:11px;" data-action="sa-ctx-track" data-id="${o.id}">Track</button>
+          </div>`;
+      }).join('');
+      overlay.querySelectorAll('[data-action="sa-ctx-track"]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const trackEl = document.getElementById('sa-ticket-tracking');
+          if (trackEl) trackEl.innerHTML = '<span style="color:#94a3b8;font-size:12px;">Loading…</span>';
+          const [trackRes, shipRes] = await Promise.all([
+            api(`/api/orders/${btn.dataset.id}/tracking`).catch(() => ({})),
+            api(`/api/shipments/order/${btn.dataset.id}`).catch(() => ({})),
+          ]);
+          const t = trackRes.data || {};
+          const s = shipRes.data || {};
+          if (trackEl) trackEl.innerHTML = `
+            <div class="sa-cp-tracking-card" style="margin-top:0;">
+              <div class="sa-cp-info-row"><span>Status</span><strong>${t.orderStatus||s.status||'—'}</strong></div>
+              <div class="sa-cp-info-row"><span>Tracking #</span><strong>${_esc(s.trackingNumber||t.trackingNumber||'—')}</strong></div>
+              <div class="sa-cp-info-row"><span>Carrier</span><strong>${_esc(s.carrier||'—')}</strong></div>
+              <div class="sa-cp-info-row"><span>Est. Delivery</span><strong>${fmtDate(s.estimatedDeliveryDate||t.estimatedDelivery)}</strong></div>
+            </div>`;
+        });
+      });
+    }).catch(() => {
+      const el = document.getElementById('sa-ticket-orders-list');
+      if (el) el.textContent = 'Could not load orders';
+    });
+  }
+
+  // Fix 2: subscribe WebSocket so agent sees customer messages live
+  connectWS(() => {
+    subscribeWS('/topic/tickets/' + ticketId, (msgData) => {
+      if (msgData.senderId === me?.id) return;
+      msgList?.insertAdjacentHTML('beforeend', `
+        <div class="sa-msg-bubble customer-msg">
+          <div class="sa-msg-sender">${_esc(msgData.senderFirstName || 'Customer')}</div>
+          ${_esc(msgData.message)}
+          <div class="sa-msg-time">${fmtDate(msgData.createdAt)}</div>
+        </div>`);
+      scrollBottom();
+    });
+  });
+
+  function closeModal() {
+    unsubscribeWS('/topic/tickets/' + ticketId);
+    overlay.remove();
+  }
+
+  document.getElementById('sa-ticket-modal-close').onclick = closeModal;
+  overlay.onclick = e => { if (e.target === overlay) closeModal(); };
+
+  if (!isClosed) {
+    const replyInput = document.getElementById('sa-ticket-reply-input');
+    const replyForm  = document.getElementById('sa-ticket-reply-form');
+
+    replyForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const msg = replyInput.value.trim();
+      if (!msg) return;
+      // Fix 1: optimistic append — no modal close/reopen
+      msgList?.insertAdjacentHTML('beforeend', `
+        <div class="sa-msg-bubble agent-msg">
+          <div class="sa-msg-sender">You</div>
+          ${_esc(msg)}
+          <div class="sa-msg-time">just now</div>
+        </div>`);
+      scrollBottom();
+      replyInput.value = '';
+      await api(`/api/support/tickets/${ticketId}/messages`, {
+        method: 'POST',
+        body: JSON.stringify({ message: msg })
+      }).catch(console.error);
+    });
+
+    replyInput.focus();
+  }
 }
 
 // ── Chat session modal ─────────────────────────────────────
+function _esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
 async function openChatModal(sessionId) {
   const me = ApiService.getCurrentUser();
 
   const msgsRes = await api(`/api/support/live-chat/sessions/${sessionId}/messages`).catch(() => ({}));
   const messages = Array.isArray(msgsRes.data) ? msgsRes.data : [];
 
-  // Find session in cache for subject / status
   const session = _chatCache.find(s => s.id === sessionId) || {};
   const isClosed = session.status === 'CLOSED';
+  const customerName = [session.customer?.firstName || '', session.customer?.lastName || ''].join(' ').trim() || 'Customer';
+  const initials = customerName.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
+  const statusColor = session.status === 'ASSIGNED' ? '#10b981' : session.status === 'CLOSED' ? '#6b7280' : '#3b82f6';
 
-  function buildMsgHtml(msgs) {
-    if (!msgs.length) return '<div style="color:#94a3b8;text-align:center;padding:24px;">No messages yet</div>';
+  function buildMsgBubbles(msgs) {
+    if (!msgs.length) return `
+      <div class="sa-chat-no-messages">
+        <svg width="36" height="36" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
+        <span>No messages yet</span>
+      </div>`;
     return msgs.map(m => {
       const isMe = m.senderId === me?.id;
       const label = isMe ? 'You' : (m.senderEmail ? m.senderEmail.split('@')[0] : 'Customer');
+      const time = fmtDate(m.sentAt || m.createdAt);
       return `
-        <div style="max-width:80%;${isMe ? 'align-self:flex-end;' : 'align-self:flex-start;'}">
-          <div style="font-size:10px;color:#94a3b8;margin-bottom:3px;${isMe ? 'text-align:right;' : ''}">${label}</div>
-          <div style="background:${isMe ? '#FF6B00' : '#f1f5f9'};color:${isMe ? 'white' : '#1e293b'};padding:10px 14px;border-radius:12px;font-size:13px;">${String(m.message).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div>
-          <div style="font-size:11px;color:#94a3b8;margin-top:3px;text-align:${isMe ? 'right' : 'left'};">${fmtDate(m.sentAt || m.createdAt)}</div>
-        </div>
-      `;
+        <div class="sa-msg-bubble ${isMe ? 'agent-msg' : 'customer-msg'}">
+          <div class="sa-msg-sender">${label}</div>
+          ${_esc(m.message)}
+          <div class="sa-msg-time">${time}</div>
+        </div>`;
     }).join('');
   }
 
   const overlay = document.createElement('div');
-  overlay.id = 'sa-chat-modal';
-  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center;';
+  overlay.id = 'sa-chat-modal-backdrop';
+  overlay.className = 'sa-chat-modal-backdrop';
   overlay.innerHTML = `
-    <div style="background:white;border-radius:14px;width:580px;max-height:82vh;display:flex;flex-direction:column;overflow:hidden;">
-      <div style="padding:16px 20px;border-bottom:1px solid #e2e8f0;display:flex;justify-content:space-between;align-items:center;">
-        <div>
-          <div style="font-weight:700;font-size:15px;">${session.subject || 'Live Chat'}</div>
-          <div style="font-size:12px;color:#64748b;margin-top:2px;">
-            Customer: ${session.customer?.firstName || '—'} ${session.customer?.lastName || ''}
-            &nbsp;·&nbsp; ${statusBadge(session.status || 'OPEN')}
-          </div>
+    <div class="sa-chat-modal" id="sa-chat-modal-box">
+      <div class="sa-chat-modal-header">
+        <div class="sa-modal-avatar">${initials}</div>
+        <div class="sa-modal-header-info">
+          <p class="sa-modal-customer-name">${_esc(customerName)}</p>
+          <p class="sa-modal-subject">${_esc(session.subject || 'Live Chat')}</p>
         </div>
-        <button id="sa-chat-modal-close" style="background:none;border:none;cursor:pointer;font-size:22px;color:#94a3b8;line-height:1;">×</button>
-      </div>
-      <div id="sa-chat-msg-list" style="flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:10px;">
-        ${buildMsgHtml(messages)}
-      </div>
-      ${!isClosed ? `
-        <div style="padding:14px 16px;border-top:1px solid #e2e8f0;display:flex;gap:8px;">
-          <input id="sa-chat-reply-input" style="flex:1;padding:9px 12px;border:1px solid #e2e8f0;border-radius:8px;font-size:13px;" placeholder="Type a reply…" autocomplete="off">
-          <button id="sa-chat-reply-send" class="dash-action-btn" style="padding:9px 18px;">Send</button>
+        <div class="sa-modal-header-actions">
+          <span class="sa-modal-status-badge" style="color:${statusColor}">${session.status || 'OPEN'}</span>
+          <button class="sa-modal-close-btn" id="sa-chat-modal-close" title="Close">
+            <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+          </button>
         </div>
-      ` : '<div style="padding:12px 16px;text-align:center;font-size:12px;color:#94a3b8;border-top:1px solid #e2e8f0;">This session is closed</div>'}
+      </div>
+      <div class="sa-chat-modal-body">
+        <div class="sa-chat-modal-messages" id="sa-chat-msg-list">
+          ${buildMsgBubbles(messages)}
+        </div>
+        ${!isClosed ? `
+          <form class="sa-chat-modal-input-row" id="sa-chat-reply-form">
+            <input class="sa-chat-modal-input" id="sa-chat-reply-input" placeholder="Type a reply…" autocomplete="off" required>
+            <button type="submit" class="sa-chat-modal-send-btn" id="sa-chat-reply-send" title="Send">
+              <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/></svg>
+            </button>
+          </form>
+        ` : `<div style="padding:12px 16px;text-align:center;font-size:12px;color:#94a3b8;border-top:1px solid #e2e8f0;background:white;">This session is closed</div>`}
+      </div>
     </div>
   `;
 
@@ -273,20 +420,17 @@ async function openChatModal(sessionId) {
   function scrollBottom() { if (msgList) msgList.scrollTop = msgList.scrollHeight; }
   scrollBottom();
 
-  // Real-time incoming messages
   connectWS(() => {
     subscribeWS('/topic/live-chat/' + sessionId, (msgData) => {
-      // Skip own messages — REST response already handles optimistic local append
       if (msgData.senderId === me?.id) return;
-      const el = document.createElement('div');
       const label = msgData.senderEmail ? msgData.senderEmail.split('@')[0] : 'Customer';
-      el.style.cssText = 'max-width:80%;align-self:flex-start;';
-      el.innerHTML = `
-        <div style="font-size:10px;color:#94a3b8;margin-bottom:3px;">${label}</div>
-        <div style="background:#f1f5f9;color:#1e293b;padding:10px 14px;border-radius:12px;font-size:13px;">${String(msgData.message).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div>
-        <div style="font-size:11px;color:#94a3b8;margin-top:3px;">${fmtDate(msgData.sentAt)}</div>
-      `;
-      msgList?.appendChild(el);
+      const time = fmtDate(msgData.sentAt);
+      msgList?.insertAdjacentHTML('beforeend', `
+        <div class="sa-msg-bubble customer-msg">
+          <div class="sa-msg-sender">${label}</div>
+          ${_esc(msgData.message)}
+          <div class="sa-msg-time">${time}</div>
+        </div>`);
       scrollBottom();
     });
   });
@@ -301,35 +445,312 @@ async function openChatModal(sessionId) {
 
   if (!isClosed) {
     const replyInput = document.getElementById('sa-chat-reply-input');
-    const replyBtn = document.getElementById('sa-chat-reply-send');
+    const replyBtn   = document.getElementById('sa-chat-reply-send');
+    const replyForm  = document.getElementById('sa-chat-reply-form');
 
     async function sendReply() {
       const msg = replyInput?.value.trim();
       if (!msg) return;
       replyBtn.disabled = true;
-      replyBtn.textContent = 'Sending…';
-      // Optimistic local append
-      const el = document.createElement('div');
-      el.style.cssText = 'max-width:80%;align-self:flex-end;';
-      el.innerHTML = `
-        <div style="font-size:10px;color:#94a3b8;margin-bottom:3px;text-align:right;">You</div>
-        <div style="background:#FF6B00;color:white;padding:10px 14px;border-radius:12px;font-size:13px;">${String(msg).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div>
-      `;
-      msgList?.appendChild(el);
+      msgList?.insertAdjacentHTML('beforeend', `
+        <div class="sa-msg-bubble agent-msg">
+          <div class="sa-msg-sender">You</div>
+          ${_esc(msg)}
+        </div>`);
       scrollBottom();
       replyInput.value = '';
       replyBtn.disabled = false;
-      replyBtn.textContent = 'Send';
       await api(`/api/support/live-chat/sessions/${sessionId}/messages`, {
         method: 'POST',
         body: JSON.stringify({ message: msg })
       }).catch(console.error);
     }
 
-    replyBtn.addEventListener('click', sendReply);
-    replyInput.addEventListener('keydown', e => { if (e.key === 'Enter') sendReply(); });
+    replyForm.addEventListener('submit', e => { e.preventDefault(); sendReply(); });
     replyInput.focus();
   }
+}
+
+// ── Customers Tab ──────────────────────────────────────────
+function buildCustomersTab(customers) {
+  return `
+    <div class="dash-section-header">
+      <h3>Customers <span class="sa-session-count">${customers.length}</span></h3>
+      <input id="sa-customer-search" class="dash-search-input" placeholder="Search by name or email…" style="width:260px;">
+    </div>
+    <div class="sa-customer-grid" id="sa-customer-grid">
+      ${buildCustomerCards(customers)}
+    </div>
+  `;
+}
+
+function buildCustomerCards(customers) {
+  if (!customers.length) return `<div class="sa-chat-empty"><p>No customers found.</p></div>`;
+  return customers.map(c => {
+    const name = [c.firstName || '', c.lastName || ''].join(' ').trim() || 'Customer';
+    const initials = name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
+    return `
+      <div class="sa-customer-card" data-action="sa-view-customer" data-id="${c.id}">
+        <div class="sa-customer-avatar">${initials}</div>
+        <div class="sa-customer-info">
+          <div class="sa-customer-name">${_esc(name)}</div>
+          <div class="sa-customer-email">${_esc(c.email || '—')}</div>
+          <div class="sa-customer-phone">${_esc(c.phoneNumber || '—')}</div>
+        </div>
+        <button class="sa-chat-btn sa-chat-btn--primary" data-action="sa-view-customer" data-id="${c.id}">
+          View Profile
+        </button>
+      </div>`;
+  }).join('');
+}
+
+function bindCustomerTabEvents() {
+  document.getElementById('sa-customer-search')?.addEventListener('input', e => {
+    const q = e.target.value.toLowerCase();
+    const filtered = _customerCache.filter(c =>
+      (c.firstName || '').toLowerCase().includes(q) ||
+      (c.lastName || '').toLowerCase().includes(q) ||
+      (c.email || '').toLowerCase().includes(q)
+    );
+    document.getElementById('sa-customer-grid').innerHTML = buildCustomerCards(filtered);
+    bindCustomerCardClicks();
+  });
+  bindCustomerCardClicks();
+}
+
+function bindCustomerCardClicks() {
+  document.querySelectorAll('[data-action="sa-view-customer"]').forEach(el => {
+    el.addEventListener('click', () => openCustomerPanel(el.dataset.id));
+  });
+}
+
+async function openCustomerPanel(customerId) {
+  const overlay = document.createElement('div');
+  overlay.className = 'sa-chat-modal-backdrop';
+  overlay.innerHTML = `
+    <div class="sa-customer-modal">
+      <div class="sa-customer-modal-header">
+        <div class="sa-modal-avatar" id="sa-cp-avatar">…</div>
+        <div class="sa-modal-header-info">
+          <p class="sa-modal-customer-name" id="sa-cp-name">Loading…</p>
+          <p class="sa-modal-subject" id="sa-cp-email"></p>
+        </div>
+        <div class="sa-modal-header-actions">
+          <button class="sa-modal-close-btn" id="sa-cp-close">
+            <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+          </button>
+        </div>
+      </div>
+      <div class="sa-customer-modal-body">
+        <div class="sa-customer-modal-left">
+          <div class="sa-cp-section">
+            <div class="sa-cp-section-title">Contact Info</div>
+            <div id="sa-cp-contact">Loading…</div>
+          </div>
+          <div class="sa-cp-section">
+            <div class="sa-cp-section-title">Order History</div>
+            <div id="sa-cp-orders">Loading…</div>
+          </div>
+          <div class="sa-cp-section">
+            <div class="sa-cp-section-title">Returns & Refunds</div>
+            <div id="sa-cp-returns">Loading…</div>
+          </div>
+        </div>
+        <div class="sa-customer-modal-right">
+          <div class="sa-cp-section-title">Quick Actions</div>
+          <div class="sa-cp-actions" id="sa-cp-quick-actions">
+            <button class="sa-chat-btn sa-chat-btn--primary" id="sa-cp-create-return" style="width:100%;justify-content:center;display:none;">
+              + Create Return Request
+            </button>
+          </div>
+          <div class="sa-cp-section-title" style="margin-top:20px;">Tracking</div>
+          <div id="sa-cp-tracking" class="sa-cp-tracking-area">
+            <p style="color:#94a3b8;font-size:12px;">Select an order to view tracking</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  document.getElementById('sa-cp-close').onclick = () => overlay.remove();
+  overlay.onclick = e => { if (e.target === overlay) overlay.remove(); };
+
+  // Load all data in parallel
+  const [summaryRes, ordersRes, returnsRes] = await Promise.all([
+    api(`/api/crm/customers/${customerId}/summary`).catch(() => ({})),
+    api(`/api/orders/customer/${customerId}`).catch(() => ({})),
+    api(`/api/returns`).catch(() => ({})),
+  ]);
+
+  const summary = summaryRes.data || {};
+  const customer = summary.customer || _customerCache.find(c => c.id === customerId) || {};
+  const orders = Array.isArray(ordersRes.data) ? ordersRes.data : [];
+  const allReturns = Array.isArray(returnsRes.data) ? returnsRes.data : [];
+  const customerReturns = allReturns.filter(r => r.order?.customer?.id === customerId || r.customerId === customerId);
+
+  const name = [customer.firstName || '', customer.lastName || ''].join(' ').trim() || 'Customer';
+  const initials = name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
+
+  document.getElementById('sa-cp-avatar').textContent = initials;
+  document.getElementById('sa-cp-name').textContent = name;
+  document.getElementById('sa-cp-email').textContent = customer.email || '—';
+
+  document.getElementById('sa-cp-contact').innerHTML = `
+    <div class="sa-cp-info-row"><span>Email</span><strong>${_esc(customer.email || '—')}</strong></div>
+    <div class="sa-cp-info-row"><span>Phone</span><strong>${_esc(customer.phoneNumber || '—')}</strong></div>
+    <div class="sa-cp-info-row"><span>Joined</span><strong>${fmtDate(customer.createdAt)}</strong></div>
+    <div class="sa-cp-info-row"><span>Orders</span><strong>${orders.length}</strong></div>
+  `;
+
+  // Orders list
+  if (!orders.length) {
+    document.getElementById('sa-cp-orders').innerHTML = `<p style="color:#94a3b8;font-size:12px;">No orders found</p>`;
+  } else {
+    document.getElementById('sa-cp-orders').innerHTML = orders.map(o => {
+      const total = o.totalAmount ? `RM ${(o.totalAmount * 1.18).toFixed(2)}` : '—';
+      const statusColor = { PENDING:'#f59e0b', PROCESSING:'#3b82f6', SHIPPED:'#8b5cf6', DELIVERED:'#10b981', CANCELLED:'#ef4444' }[o.status] || '#6b7280';
+      return `
+        <div class="sa-cp-order-row" data-order-id="${o.id}">
+          <div class="sa-cp-order-left">
+            <div class="sa-cp-order-num">#${(o.orderNumber || o.id || '').toString().slice(0,8)}</div>
+            <div class="sa-cp-order-date">${fmtDate(o.createdAt)}</div>
+          </div>
+          <div>
+            <span class="sa-chat-status-badge" style="background:${statusColor}22;color:${statusColor}">${o.status || '—'}</span>
+          </div>
+          <div class="sa-cp-order-total">${total}</div>
+          <button class="sa-chat-btn" data-action="sa-track-order" data-id="${o.id}" title="View tracking">
+            <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/><path stroke-linecap="round" stroke-linejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+            Track
+          </button>
+        </div>`;
+    }).join('');
+
+    // Show Create Return button — populate order selector
+    const createBtn = document.getElementById('sa-cp-create-return');
+    createBtn.style.display = 'flex';
+    createBtn.dataset.customerId = customerId;
+    createBtn.addEventListener('click', () => openCreateReturnModal(orders, customerId, overlay));
+
+    // Track order clicks
+    overlay.querySelectorAll('[data-action="sa-track-order"]').forEach(btn => {
+      btn.addEventListener('click', () => loadOrderTracking(btn.dataset.id));
+    });
+  }
+
+  // Returns list
+  if (!customerReturns.length) {
+    document.getElementById('sa-cp-returns').innerHTML = `<p style="color:#94a3b8;font-size:12px;">No returns found</p>`;
+  } else {
+    document.getElementById('sa-cp-returns').innerHTML = customerReturns.map(r => {
+      const statusColor = { PENDING:'#f59e0b', APPROVED:'#10b981', REJECTED:'#ef4444', COMPLETED:'#6b7280' }[r.status] || '#6b7280';
+      return `
+        <div class="sa-cp-return-row">
+          <div>
+            <div style="font-size:12px;font-weight:600;color:#1e293b;">Order #${(r.orderId || r.order?.id || '').toString().slice(0,8)}</div>
+            <div style="font-size:11px;color:#64748b;">${_esc(r.reason || '—')}</div>
+          </div>
+          <span class="sa-chat-status-badge" style="background:${statusColor}22;color:${statusColor}">${r.status}</span>
+        </div>`;
+    }).join('');
+  }
+}
+
+async function loadOrderTracking(orderId) {
+  const trackingEl = document.getElementById('sa-cp-tracking');
+  if (!trackingEl) return;
+  trackingEl.innerHTML = `<p style="color:#94a3b8;font-size:12px;">Loading…</p>`;
+  try {
+    const [trackRes, shipRes] = await Promise.all([
+      api(`/api/orders/${orderId}/tracking`).catch(() => ({})),
+      api(`/api/shipments/order/${orderId}`).catch(() => ({})),
+    ]);
+    const tracking = trackRes.data || {};
+    const shipment = shipRes.data || {};
+    trackingEl.innerHTML = `
+      <div class="sa-cp-tracking-card">
+        <div class="sa-cp-info-row"><span>Order Status</span><strong>${tracking.orderStatus || '—'}</strong></div>
+        <div class="sa-cp-info-row"><span>Tracking #</span><strong>${_esc(shipment.trackingNumber || tracking.trackingNumber || '—')}</strong></div>
+        <div class="sa-cp-info-row"><span>Carrier</span><strong>${_esc(shipment.carrier || '—')}</strong></div>
+        <div class="sa-cp-info-row"><span>Shipment Status</span><strong>${shipment.status || '—'}</strong></div>
+        <div class="sa-cp-info-row"><span>Estimated Delivery</span><strong>${fmtDate(shipment.estimatedDeliveryDate || tracking.estimatedDelivery)}</strong></div>
+        ${tracking.events?.length ? `
+          <div style="margin-top:10px;">
+            <div style="font-size:11px;font-weight:600;color:#64748b;margin-bottom:6px;">TIMELINE</div>
+            ${tracking.events.map(ev => `
+              <div class="sa-cp-timeline-item">
+                <div class="sa-cp-timeline-dot"></div>
+                <div>
+                  <div style="font-size:12px;font-weight:600;">${_esc(ev.status || ev.description || '')}</div>
+                  <div style="font-size:11px;color:#94a3b8;">${fmtDate(ev.timestamp || ev.date)}</div>
+                </div>
+              </div>`).join('')}
+          </div>` : ''}
+      </div>`;
+  } catch (_) {
+    trackingEl.innerHTML = `<p style="color:#ef4444;font-size:12px;">Could not load tracking</p>`;
+  }
+}
+
+function openCreateReturnModal(orders, customerId, parentOverlay) {
+  const modal = document.createElement('div');
+  modal.className = 'sa-chat-modal-backdrop';
+  modal.style.zIndex = '1100';
+  modal.innerHTML = `
+    <div class="sa-chat-modal" style="height:auto;max-height:420px;">
+      <div class="sa-chat-modal-header">
+        <div class="sa-modal-header-info">
+          <p class="sa-modal-customer-name">Create Return Request</p>
+          <p class="sa-modal-subject">On behalf of customer</p>
+        </div>
+        <div class="sa-modal-header-actions">
+          <button class="sa-modal-close-btn" id="sa-crm-close">
+            <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+          </button>
+        </div>
+      </div>
+      <div style="padding:20px;display:flex;flex-direction:column;gap:14px;">
+        <div class="sa-cp-form-group">
+          <label class="sa-cp-label">Select Order</label>
+          <select class="sa-cp-select" id="sa-crm-order-select">
+            <option value="">— choose order —</option>
+            ${orders.filter(o => o.status !== 'CANCELLED').map(o =>
+              `<option value="${o.id}">#${(o.orderNumber || o.id).toString().slice(0,8)} — ${o.status} — RM ${o.totalAmount ? (o.totalAmount*1.18).toFixed(2) : '—'}</option>`
+            ).join('')}
+          </select>
+        </div>
+        <div class="sa-cp-form-group">
+          <label class="sa-cp-label">Reason for Return</label>
+          <textarea class="sa-cp-textarea" id="sa-crm-reason" rows="3" placeholder="Describe the return reason…"></textarea>
+        </div>
+        <button class="sa-chat-btn sa-chat-btn--primary" id="sa-crm-submit" style="width:100%;justify-content:center;">Submit Return Request</button>
+        <div id="sa-crm-msg" style="display:none;text-align:center;font-size:13px;font-weight:600;"></div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+
+  document.getElementById('sa-crm-close').onclick = () => modal.remove();
+  modal.onclick = e => { if (e.target === modal) modal.remove(); };
+
+  document.getElementById('sa-crm-submit').addEventListener('click', async () => {
+    const orderId = document.getElementById('sa-crm-order-select').value;
+    const reason = document.getElementById('sa-crm-reason').value.trim();
+    const msgEl = document.getElementById('sa-crm-msg');
+    if (!orderId) { msgEl.style.display='block'; msgEl.style.color='#ef4444'; msgEl.textContent='Please select an order.'; return; }
+    if (!reason)  { msgEl.style.display='block'; msgEl.style.color='#ef4444'; msgEl.textContent='Please enter a reason.'; return; }
+    const btn = document.getElementById('sa-crm-submit');
+    btn.disabled = true; btn.textContent = 'Submitting…';
+    try {
+      await api('/api/returns', { method:'POST', body: JSON.stringify({ orderId, reason }) });
+      msgEl.style.display='block'; msgEl.style.color='#10b981'; msgEl.textContent='✓ Return request created successfully!';
+      setTimeout(() => modal.remove(), 1500);
+    } catch (err) {
+      btn.disabled = false; btn.textContent = 'Submit Return Request';
+      msgEl.style.display='block'; msgEl.style.color='#ef4444'; msgEl.textContent = err.message || 'Failed to create return.';
+    }
+  });
 }
 
 // ── render ─────────────────────────────────────────────────
@@ -352,6 +773,7 @@ export async function render(state) {
           <div class="dash-sidebar-label">Menu</div>
           <button class="dash-nav-item active" data-sa-tab="tickets">${ICONS.tickets}<span class="dash-nav-label">Tickets</span></button>
           <button class="dash-nav-item" data-sa-tab="chat">${ICONS.chat}<span class="dash-nav-label">Live Chat</span></button>
+          <button class="dash-nav-item" data-sa-tab="customers">${ICONS.customers}<span class="dash-nav-label">Customers</span></button>
           <button class="dash-nav-item" data-sa-tab="profile">${ICONS.profile}<span class="dash-nav-label">My Profile</span></button>
         </div>
         <div style="margin-top:auto;padding:12px 14px;">
@@ -410,6 +832,11 @@ async function loadTab(tab) {
           bindChatTabEvents();
         });
       });
+    } else if (tab === 'customers') {
+      const res = await api('/api/crm/customers');
+      _customerCache = (res.data || []);
+      body.innerHTML = buildCustomersTab(_customerCache);
+      bindCustomerTabEvents();
     } else if (tab === 'profile') {
       body.innerHTML = buildProfileTab();
     }
@@ -419,22 +846,23 @@ async function loadTab(tab) {
 }
 
 function bindTicketTabEvents() {
-  document.getElementById('sa-ticket-search')?.addEventListener('input', e => {
-    const q = e.target.value.toLowerCase();
-    const filtered = _ticketCache.filter(t =>
-      (t.subject||'').toLowerCase().includes(q) ||
-      (t.customerName||'').toLowerCase().includes(q)
-    );
+  function applyFilters() {
+    const q = (document.getElementById('sa-ticket-search')?.value || '').toLowerCase();
+    const s = document.getElementById('sa-ticket-status')?.value || '';
+    const filtered = _ticketCache.filter(t => {
+      const matchSearch = !q ||
+        (t.title || t.subject || '').toLowerCase().includes(q) ||
+        (t.customerFirstName || t.customerName || t.customer?.firstName || '').toLowerCase().includes(q) ||
+        (t.customerEmail || t.customer?.email || '').toLowerCase().includes(q);
+      const matchStatus = !s || t.status === s;
+      return matchSearch && matchStatus;
+    });
     document.getElementById('sa-tickets-tbody').innerHTML = buildTicketRows(filtered);
     bindTicketRowActions();
-  });
+  }
 
-  document.getElementById('sa-ticket-status')?.addEventListener('change', e => {
-    const s = e.target.value;
-    const filtered = s ? _ticketCache.filter(t => t.status === s) : _ticketCache;
-    document.getElementById('sa-tickets-tbody').innerHTML = buildTicketRows(filtered);
-    bindTicketRowActions();
-  });
+  document.getElementById('sa-ticket-search')?.addEventListener('input', applyFilters);
+  document.getElementById('sa-ticket-status')?.addEventListener('change', applyFilters);
 
   bindTicketRowActions();
 }

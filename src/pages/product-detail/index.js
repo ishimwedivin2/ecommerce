@@ -44,9 +44,13 @@ export async function render(state) {
             <input type="text" class="quantity-value" id="qty-input" value="1">
             <button class="quantity-btn" id="qty-plus">+</button>
           </div>
-          <button class="btn-primary" id="btn-detail-add" data-id="${p.id}" style="flex:1;justify-content:center;height:42px;">
-            Add to Cart
-          </button>
+          ${(() => {
+            const qty = p.inventoryItem?.quantity ?? p.stock ?? null;
+            const outOfStock = qty !== null && qty <= 0;
+            return outOfStock
+              ? `<button class="btn-primary" disabled style="flex:1;justify-content:center;height:42px;opacity:.5;cursor:not-allowed;">Out of Stock</button>`
+              : `<button class="btn-primary" id="btn-detail-add" data-id="${p.id}" style="flex:1;justify-content:center;height:42px;">Add to Cart</button>`;
+          })()}
           <button class="wishlist-toggle" id="btn-detail-wishlist" data-id="${p.id}" style="position:static;box-shadow:none;border:1px solid var(--border);">
             <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"></path></svg>
           </button>

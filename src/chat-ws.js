@@ -13,7 +13,7 @@ const _pendingSubs = [];   // { destination, callback } queued before connection
 const _activeSubs = {};    // destination -> StompSubscription
 
 function getToken() {
-  return localStorage.getItem('luz_token') || '';
+  return localStorage.getItem('luz_jwt') || '';
 }
 
 export function connectWS(onConnected) {
