@@ -47,7 +47,7 @@ export async function renderHeader() {
 export async function renderCategoryNav() {
   const container = document.getElementById('app-category-nav-container');
   if (!container) return;
-  if (appState.currentView === 'home') {
+  if (appState.currentView === 'home' || appState.currentView === 'shop') {
     container.style.display = 'block';
     try {
       container.innerHTML = await CategoryNav.render();

@@ -75,7 +75,7 @@ function sidePanel(benefits, headline, sub) {
   return `
     <div class="auth-side">
       <div class="auth-side-logo">
-        <div class="auth-side-logo-icon">L</div>
+        <img src="/logo.jpg" alt="Luz Technology" class="auth-side-logo-img">
         <div class="auth-side-logo-text">Luz Technology<span>Integrated Commerce</span></div>
       </div>
       <div class="auth-side-headline">${headline}</div>

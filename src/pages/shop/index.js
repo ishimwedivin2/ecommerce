@@ -283,6 +283,7 @@ export function bindEvents(state, helpers) {
   document.querySelectorAll('input[name="sp-cat"]').forEach(radio => {
     radio.addEventListener('change', () => {
       _filters.categoryId = radio.value || undefined;
+      _filters.name = undefined;
       // highlight active
       document.querySelectorAll('.sp-cat-item').forEach(l => l.classList.remove('active'));
       radio.parentElement.classList.add('active');

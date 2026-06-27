@@ -98,7 +98,7 @@ export async function render() {
     </div>
     <div class="header-main">
       <div class="logo-container" data-navigate="home">
-        <div class="logo-icon">L</div>
+        <img src="/logo.jpg" alt="Luz Technology" class="logo-img">
         Luz Technology<span>.</span>
       </div>
 
@@ -323,19 +323,19 @@ export function bindEvents(helpers) {
   // Search
   const searchInput = document.getElementById('global-search-input');
   const searchBtn = document.getElementById('global-search-btn');
+  const doSearch = () => {
+    const query = searchInput?.value.trim();
+    if (!query) return;
+    setState({ searchQuery: query });
+    navigate('shop');
+    if (searchInput) searchInput.value = '';
+  };
+
   if (searchInput) {
-    searchInput.value = appState.searchQuery || '';
+    searchInput.value = '';
     searchInput.addEventListener('keypress', (e) => {
-      if (e.key === 'Enter' && searchInput.value.trim()) {
-        setState({ searchQuery: searchInput.value.trim() });
-        navigate('shop');
-      }
+      if (e.key === 'Enter') doSearch();
     });
   }
-  searchBtn?.addEventListener('click', () => {
-    if (searchInput && searchInput.value.trim()) {
-      setState({ searchQuery: searchInput.value.trim() });
-      navigate('shop');
-    }
-  });
+  searchBtn?.addEventListener('click', doSearch);
 }

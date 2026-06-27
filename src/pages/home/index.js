@@ -35,8 +35,10 @@ function renderStars(rating) {
 }
 
 function renderSlide(banner, product) {
-  const price = product ? `<div class="hero-price">RWF ${Math.round(parseFloat(product.price)||0).toLocaleString('en-US')}</div>` : '';
-  const badge = banner.tagLabel ? `<span class="hero-tag">${banner.tagLabel}</span>` : '';
+  const rawPrice = product ? Math.round((parseFloat(product.price)||0) * 1.18) : 0;
+  const price = product ? `<div class="hero-price">RWF ${rawPrice.toLocaleString('en-US')}<span>incl. tax</span></div>` : '';
+  const tag = banner.tagLabel || (product ? 'Featured Product' : 'New Arrival');
+  const badge = `<span class="hero-tag">${tag}</span>`;
   const rawImg = product ? getPrimaryImage(product) : (banner.imageUrl || '');
   const img = rawImg.startsWith('/uploads/') ? `${BACKEND_URL}${rawImg}` : rawImg;
   const productId = product?.id || banner.productId || '';
@@ -70,6 +72,7 @@ function renderSlide(banner, product) {
         </div>
       </div>
       <div class="hero-image-container">
+        <div class="hero-image-glow"></div>
         ${discountBadge}
         <img src="${img}" alt="${banner.title}" class="hero-img"
           onerror="this.src='https://images.unsplash.com/photo-1542751371-adc38448a05e?w=400&q=80'">
