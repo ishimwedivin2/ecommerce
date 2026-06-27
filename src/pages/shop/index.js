@@ -49,7 +49,7 @@ function renderCard(p) {
       <div class="sp-card-body">
         ${p.categoryName ? `<span class="sp-card-cat">${p.categoryName}</span>` : ''}
         <h3 class="sp-card-name" data-action="shop-detail" data-id="${p.id}">${p.name}</h3>
-        <div class="sp-card-rating">${renderStars(p.averageRating)} <span>(${p.reviewsCount || 0})</span></div>
+        <div class="sp-card-rating">${renderStars(p.averageRating || 0)} ${p.reviewsCount > 0 ? `<span>(${p.reviewsCount})</span>` : ''}</div>
         <div class="sp-card-price-row">
           ${vatDiscounted
             ? `<span class="sp-price-orig">RWF ${vatPrice.toLocaleString('en-US')}</span><span class="sp-price-now">RWF ${vatDiscounted.toLocaleString('en-US')}</span>`
