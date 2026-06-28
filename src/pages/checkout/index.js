@@ -69,6 +69,9 @@ export async function render() {
   _order  = null;
   _receipt = null;
   if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; }
+  // Reset Stripe so it re-mounts to the fresh DOM element on next render
+  window._stripe = null;
+  window._stripeCardElement = null;
 
   const user = ApiService.getCurrentUser() || {};
   const items = _cart.items || [];
@@ -259,7 +262,7 @@ export function bindEvents(state, helpers) {
       const fields = document.getElementById('fields-' + _paymentMethod);
       if (fields) fields.style.display = '';
       // Initialise Stripe Elements when Stripe tab is selected
-      if (_paymentMethod === 'STRIPE' && !window._stripe) {
+      if (_paymentMethod === 'STRIPE') {
         const STRIPE_PK = 'pk_test_51TmMXjDaKj9gog2tfPZFR36HRUQwHVpsG8GhoKdmnRz3r9Rnv2cPlC7KqJrS7scBK845ggW2ESH7Gkb8iYFA69KY00yLaZLIyW';
         if (!window.Stripe) {
           const s = document.createElement('script');
@@ -412,8 +415,9 @@ export function bindEvents(state, helpers) {
   document.getElementById('btn-print-receipt')?.addEventListener('click', () => {
     if (!_receipt) { toast('Receipt not yet loaded — try again in a moment', 'error'); return; }
     const r = _receipt;
+    const _taxRate = Number(r.taxRate || 0);
     const itemsHtml = (r.items || []).map(i =>
-      `<div class="pi"><span>${i.productName||'Product'} ×${i.quantity}</span><span>${fmtMoney(Number(i.subTotal) * 1.18)}</span></div>`
+      `<div class="pi"><span>${i.productName||'Product'} ×${i.quantity}</span><span>${fmtMoney(Number(i.subTotal) * (1 + _taxRate))}</span></div>`
     ).join('');
     const win = window.open('', '_blank', 'width=520,height=760');
     win.document.write(`<!DOCTYPE html><html><head>
@@ -447,9 +451,10 @@ export function bindEvents(state, helpers) {
         <div><span>Date</span><span>${r.issuedAt ? new Date(r.issuedAt).toLocaleString('en-GB',{dateStyle:'medium',timeStyle:'short'}) : '—'}</span></div>
       </div>
       <div class="items">${itemsHtml}</div>
+      <div class="tot-r"><span>Subtotal</span><span>${fmtMoney(Number(r.subTotalAmount||0) * (1 + _taxRate))}</span></div>
       ${Number(r.discountAmount) > 0 ? `<div class="tot-r" style="color:#10b981;"><span>${r.couponCode ? 'Discount (' + r.couponCode + ')' : 'Discount'}</span><span>-${fmtMoney(r.discountAmount)}</span></div>` : ''}
       <div class="grand"><span>Total Paid</span><span>${fmtMoney(r.totalAmount)}</span></div>
-      <div class="tot-r" style="margin-top:4px;"><span>Includes VAT (${Number((r.taxRate||0)*100).toFixed(0)}%)</span><span>${fmtMoney(r.taxAmount)}</span></div>
+      <div class="tot-r" style="margin-top:4px;font-size:11px;color:#94a3b8;"><span>Tax (${Number((_taxRate)*100).toFixed(0)}%) included</span><span>${fmtMoney(r.taxAmount)}</span></div>
       <div class="footer">Thank you for shopping at Luz Technology!</div>
     </body></html>`);
     win.document.close();
@@ -487,7 +492,11 @@ function validatePaymentFields() {
 
 // ── Stripe Elements mount ─────────────────────────────────
 function mountStripeCard(publishableKey) {
-  window._stripe = window.Stripe(publishableKey);
+  if (window._stripeCardElement) {
+    try { window._stripeCardElement.unmount(); } catch (_) {}
+    window._stripeCardElement = null;
+  }
+  if (!window._stripe) window._stripe = window.Stripe(publishableKey);
   const elements = window._stripe.elements();
   window._stripeCardElement = elements.create('card', {
     style: {
@@ -588,13 +597,20 @@ function renderReceiptBlock() {
   }
 
   const r = _receipt;
-  const itemsHtml = (r.items || []).map(item => `
+  const taxRate = Number(r.taxRate || 0);
+  const itemsHtml = (r.items || []).map(item => {
+    const unitWithTax  = Number(item.unitPrice || 0) * (1 + taxRate);
+    const totalWithTax = Number(item.subTotal  || 0) * (1 + taxRate);
+    return `
     <tr>
       <td>${item.productName || '—'}</td>
       <td style="text-align:center">${item.quantity}</td>
-      <td style="text-align:right">${fmtMoney(item.unitPrice)}</td>
-      <td style="text-align:right">${fmtMoney(item.subTotal)}</td>
-    </tr>`).join('');
+      <td style="text-align:right">${fmtMoney(unitWithTax)}</td>
+      <td style="text-align:right">${fmtMoney(totalWithTax)}</td>
+    </tr>`;
+  }).join('');
+
+  const subWithTax = Number(r.subTotalAmount || 0) * (1 + taxRate);
 
   el.innerHTML = `
   <div class="rcpt-box">
@@ -611,18 +627,18 @@ function renderReceiptBlock() {
       <div class="rcpt-row"><span>Date</span><span>${fmtDate(r.issuedAt)}</span></div>
     </div>
     <table class="rcpt-table">
-      <thead><tr><th>Item</th><th style="text-align:center">Qty</th><th style="text-align:right">Unit</th><th style="text-align:right">Subtotal</th></tr></thead>
+      <thead><tr><th>Item</th><th style="text-align:center">Qty</th><th style="text-align:right">Unit</th><th style="text-align:right">Total</th></tr></thead>
       <tbody>${itemsHtml}</tbody>
     </table>
     <div class="rcpt-totals">
-      <div class="rcpt-total-row"><span>Subtotal</span><span>${fmtMoney(r.subTotalAmount)}</span></div>
+      <div class="rcpt-total-row"><span>Subtotal</span><span>${fmtMoney(subWithTax)}</span></div>
       ${Number(r.discountAmount) > 0 ? `
       <div class="rcpt-total-row" style="color:#10B981;">
         <span>${r.couponCode ? 'Discount (' + r.couponCode + ')' : 'Discount'}</span>
         <span>-${fmtMoney(r.discountAmount)}</span>
       </div>` : ''}
-      <div class="rcpt-total-row"><span>Tax (${Number((r.taxRate || 0) * 100).toFixed(0)}%)</span><span>${fmtMoney(r.taxAmount)}</span></div>
       <div class="rcpt-total-row grand"><span>Total Paid</span><span>${fmtMoney(r.totalAmount)}</span></div>
+      <div class="rcpt-total-row" style="font-size:12px;color:#94a3b8;"><span>Tax (${Number(taxRate * 100).toFixed(0)}%) included</span><span>${fmtMoney(r.taxAmount)}</span></div>
     </div>
     <div class="rcpt-footer">Thank you for shopping at Luz Technology!</div>
   </div>`;
