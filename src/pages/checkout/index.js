@@ -1,6 +1,7 @@
 import './style.css';
 import { ApiService } from '../../api.js';
 import { setState } from '../../store.js';
+import { getCells, getDistricts, getProvinces, getSectors, getVillages } from '../../rwanda-locations.js';
 
 const BACKEND = 'http://localhost:8080';
 
@@ -24,11 +25,14 @@ let _order         = null;   // created after checkout call
 let _receipt       = null;   // fetched after payment confirmed
 let _pollTimer     = null;
 let _pollCount     = 0;
+let _savedAddresses = [];
 const MAX_POLLS    = 40;     // 40 × 3 s = 2 min timeout
 
 // ── helpers ──────────────────────────────────────────────
 const fmtMoney = v => 'RWF ' + Number(v || 0).toLocaleString(undefined, { minimumFractionDigits: 0 });
 const fmtDate  = v => v ? new Date(v).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' }) : '—';
+const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+const escVal = v => esc(v).replace(/`/g, '&#96;');
 
 function setStep(n) {
   _step = n;
@@ -62,8 +66,12 @@ function expiryFormatInput(el) {
 
 // ── render ───────────────────────────────────────────────
 export async function render() {
-  const cartRes = await ApiService.cart.get();
+  const [cartRes, addressRes] = await Promise.all([
+    ApiService.cart.get(),
+    ApiService.addresses.get().catch(() => ({ data: [] }))
+  ]);
   _cart = cartRes.data;
+  _savedAddresses = addressRes.data || [];
   _step = 1;
   _appliedCoupon = null;
   _order  = null;
@@ -76,6 +84,9 @@ export async function render() {
   const user = ApiService.getCurrentUser() || {};
   const items = _cart.items || [];
   const subtotal = Number(_cart.totalAmount || 0);
+  const provincesHtml = getProvinces().map(p => `<option value="${escVal(p)}">${esc(p)}</option>`).join('');
+  const savedAddressOptions = _savedAddresses.map(a => `
+    <option value="${escVal(a.id)}">${esc(a.label || a.formattedAddress || `${a.village}, ${a.district}`)}</option>`).join('');
 
   const itemsHtml = items.map(item => `
     <div class="chk-item">
@@ -114,14 +125,72 @@ export async function render() {
           <input id="chk-name" type="text" value="${user.firstName ? user.firstName + ' ' + (user.lastName || '') : ''}" placeholder="John Doe">
         </div>
         <div class="chk-field">
-          <label>Shipping Address <span class="req">*</span></label>
-          <input id="chk-address" type="text" value="Kigali, Rwanda" placeholder="Street, City, Country">
-        </div>
-        <div class="chk-field">
-          <label>Billing Address <span class="opt">(optional)</span></label>
-          <input id="chk-billing" type="text" placeholder="Leave blank to use shipping address">
+          <label>Delivery Phone <span class="req">*</span></label>
+          <input id="chk-delivery-phone" type="tel" inputmode="numeric" maxlength="10" pattern="\\d{10}" value="${escVal(user.phoneNumber || '')}" placeholder="e.g. 0788123456" required>
+          <small class="chk-hint">Enter exactly 10 digits for delivery updates.</small>
         </div>
 
+        ${_savedAddresses.length ? `
+        <div class="chk-address-mode">
+          <button class="chk-address-mode-btn active" type="button" data-address-mode="saved">Use saved address</button>
+          <button class="chk-address-mode-btn" type="button" data-address-mode="new">Add new address</button>
+        </div>
+        <div id="saved-address-panel">
+          <div class="chk-field">
+            <label>Saved Address <span class="req">*</span></label>
+            <select id="chk-saved-address">
+              ${savedAddressOptions}
+            </select>
+          </div>
+          <div id="saved-address-preview" class="chk-address-preview"></div>
+        </div>` : `
+        <div class="chk-address-mode" style="display:none">
+          <button class="chk-address-mode-btn active" type="button" data-address-mode="new">Add new address</button>
+        </div>`}
+
+        <div id="new-address-panel" style="${_savedAddresses.length ? 'display:none' : ''}">
+          <div class="chk-field">
+            <label>Province <span class="req">*</span></label>
+            <select id="chk-province">
+              <option value="">Select province</option>
+              ${provincesHtml}
+            </select>
+          </div>
+          <div class="chk-address-grid">
+            <div class="chk-field">
+              <label>District <span class="req">*</span></label>
+              <select id="chk-district" disabled><option value="">Select district</option></select>
+            </div>
+            <div class="chk-field">
+              <label>Sector <span class="req">*</span></label>
+              <select id="chk-sector" disabled><option value="">Select sector</option></select>
+            </div>
+            <div class="chk-field">
+              <label>Cell <span class="req">*</span></label>
+              <select id="chk-cell" disabled><option value="">Select cell</option></select>
+            </div>
+            <div class="chk-field">
+              <label>Village <span class="req">*</span></label>
+              <select id="chk-village" disabled><option value="">Select village</option></select>
+            </div>
+          </div>
+          <div class="chk-field">
+            <label>Address Label <span class="opt">(optional)</span></label>
+            <input id="chk-address-label" type="text" placeholder="Home, Office, Kicukiro branch">
+          </div>
+          <label class="chk-check-row">
+            <input id="chk-save-address" type="checkbox" ${_savedAddresses.length ? '' : 'checked'}>
+            <span>Save this address for next time</span>
+          </label>
+          <label class="chk-check-row">
+            <input id="chk-default-address" type="checkbox" ${_savedAddresses.length ? '' : 'checked'}>
+            <span>Make it my default address</span>
+          </label>
+        </div>
+        <div class="chk-field">
+          <label>Delivery Instructions / Landmark <span class="opt">(optional)</span></label>
+          <textarea id="chk-delivery-instructions" placeholder="e.g. Sonatube near RRA, Kicukiro behind bus parking"></textarea>
+        </div>
         <h3 class="chk-sect-title" style="margin-top:20px">Discount Code</h3>
         <div class="coupon-row">
           <input id="chk-coupon" type="text" placeholder="e.g. LUZ24">
@@ -244,12 +313,155 @@ export async function render() {
 </div>`;
 }
 
+function populateSelect(id, values, placeholder) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.innerHTML = `<option value="">${placeholder}</option>` + values.map(v => `<option value="${escVal(v)}">${esc(v)}</option>`).join('');
+  el.disabled = values.length === 0;
+}
+
+function selectedAddressMode() {
+  const active = document.querySelector('.chk-address-mode-btn.active');
+  return active?.dataset.addressMode || (_savedAddresses.length ? 'saved' : 'new');
+}
+
+function getSavedAddress() {
+  const id = document.getElementById('chk-saved-address')?.value;
+  return _savedAddresses.find(a => a.id === id) || null;
+}
+
+function formatAddressText(address) {
+  return [address.village, address.cell, address.sector, address.district, address.province].filter(Boolean).join(', ');
+}
+
+function renderSavedAddressPreview() {
+  const preview = document.getElementById('saved-address-preview');
+  if (!preview) return;
+  const address = getSavedAddress();
+  if (!address) {
+    preview.innerHTML = '';
+    return;
+  }
+  preview.innerHTML = `
+    <strong>${esc(address.label || 'Saved address')}</strong>
+    <span>${esc(address.formattedAddress || formatAddressText(address))}</span>
+    ${address.deliveryPhoneNumber ? `<span>Phone: ${esc(address.deliveryPhoneNumber)}</span>` : ''}
+    ${address.defaultAddress ? `<em>Default address</em>` : ''}`;
+  const phone = document.getElementById('chk-delivery-phone');
+  const notes = document.getElementById('chk-delivery-instructions');
+  if (phone && address.deliveryPhoneNumber) phone.value = address.deliveryPhoneNumber;
+  if (notes) notes.value = address.deliveryInstructions || '';
+}
+
+function initAddressControls() {
+  renderSavedAddressPreview();
+  document.getElementById('chk-saved-address')?.addEventListener('change', renderSavedAddressPreview);
+
+  document.querySelectorAll('.chk-address-mode-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.chk-address-mode-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      const savedPanel = document.getElementById('saved-address-panel');
+      const newPanel = document.getElementById('new-address-panel');
+      if (savedPanel) savedPanel.style.display = btn.dataset.addressMode === 'saved' ? '' : 'none';
+      if (newPanel) newPanel.style.display = btn.dataset.addressMode === 'new' ? '' : 'none';
+      if (btn.dataset.addressMode === 'saved') renderSavedAddressPreview();
+    });
+  });
+
+  document.getElementById('chk-province')?.addEventListener('change', e => {
+    populateSelect('chk-district', getDistricts(e.target.value), 'Select district');
+    populateSelect('chk-sector', [], 'Select sector');
+    populateSelect('chk-cell', [], 'Select cell');
+    populateSelect('chk-village', [], 'Select village');
+  });
+  document.getElementById('chk-district')?.addEventListener('change', e => {
+    const p = document.getElementById('chk-province')?.value;
+    populateSelect('chk-sector', getSectors(p, e.target.value), 'Select sector');
+    populateSelect('chk-cell', [], 'Select cell');
+    populateSelect('chk-village', [], 'Select village');
+  });
+  document.getElementById('chk-sector')?.addEventListener('change', e => {
+    const p = document.getElementById('chk-province')?.value;
+    const d = document.getElementById('chk-district')?.value;
+    populateSelect('chk-cell', getCells(p, d, e.target.value), 'Select cell');
+    populateSelect('chk-village', [], 'Select village');
+  });
+  document.getElementById('chk-cell')?.addEventListener('change', e => {
+    const p = document.getElementById('chk-province')?.value;
+    const d = document.getElementById('chk-district')?.value;
+    const s = document.getElementById('chk-sector')?.value;
+    populateSelect('chk-village', getVillages(p, d, s, e.target.value), 'Select village');
+  });
+}
+
+function getNewAddressDetails() {
+  return {
+    province: document.getElementById('chk-province')?.value?.trim() || '',
+    district: document.getElementById('chk-district')?.value?.trim() || '',
+    sector: document.getElementById('chk-sector')?.value?.trim() || '',
+    cell: document.getElementById('chk-cell')?.value?.trim() || '',
+    village: document.getElementById('chk-village')?.value?.trim() || '',
+    label: document.getElementById('chk-address-label')?.value?.trim() || '',
+    deliveryInstructions: document.getElementById('chk-delivery-instructions')?.value?.trim() || '',
+    deliveryPhoneNumber: document.getElementById('chk-delivery-phone')?.value?.trim() || '',
+    defaultAddress: !!document.getElementById('chk-default-address')?.checked
+  };
+}
+
+function buildCheckoutPayload() {
+  const couponCode = _appliedCoupon?.code || null;
+  const deliveryInstructions = document.getElementById('chk-delivery-instructions')?.value?.trim() || '';
+  const deliveryPhoneNumber = document.getElementById('chk-delivery-phone')?.value?.replace(/\D/g, '') || '';
+
+  if (!/^\d{10}$/.test(deliveryPhoneNumber)) {
+    throw new Error('Delivery phone is required and must be exactly 10 digits.');
+  }
+
+  if (selectedAddressMode() === 'saved') {
+    const saved = getSavedAddress();
+    if (!saved) throw new Error('Please choose a saved address or add a new one.');
+    const addressText = saved.formattedAddress || formatAddressText(saved);
+    return {
+      shippingAddressId: saved.id,
+      shippingAddress: addressText,
+      billingAddress: addressText,
+      paymentMethod: _paymentMethod,
+      couponCode,
+      deliveryInstructions,
+      deliveryPhoneNumber
+    };
+  }
+
+  const details = getNewAddressDetails();
+  const required = ['province', 'district', 'sector', 'cell', 'village'];
+  if (required.some(k => !details[k])) {
+    throw new Error('Please select province, district, sector, cell and village.');
+  }
+  const addressText = formatAddressText(details);
+  return {
+    shippingAddress: addressText,
+    shippingAddressDetails: details,
+    saveShippingAddress: !!document.getElementById('chk-save-address')?.checked,
+    billingAddress: addressText,
+    paymentMethod: _paymentMethod,
+    couponCode,
+    deliveryInstructions,
+    deliveryPhoneNumber
+  };
+}
+
 // ── bind events ──────────────────────────────────────────
 export function bindEvents(state, helpers) {
   const { navigate, toast } = helpers;
 
   // ── Step indicators ──
   setStep(1);
+  initAddressControls();
+
+  document.getElementById('chk-delivery-phone')?.addEventListener('input', e => {
+    e.target.value = e.target.value.replace(/\D/g, '').slice(0, 10);
+  });
 
   // ── Payment method selection ──
   document.querySelectorAll('.payment-method-card').forEach(card => {
@@ -330,10 +542,15 @@ export function bindEvents(state, helpers) {
   // ── Step 1 → 2 ──
   document.getElementById('btn-step1-next')?.addEventListener('click', () => {
     const name    = document.getElementById('chk-name')?.value?.trim();
-    const address = document.getElementById('chk-address')?.value?.trim();
     showError('step1-err', '');
-    if (!name || !address) {
-      showError('step1-err', 'Please enter your full name and shipping address.');
+    if (!name) {
+      showError('step1-err', 'Please enter your full name.');
+      return;
+    }
+    try {
+      buildCheckoutPayload();
+    } catch (err) {
+      showError('step1-err', err.message || 'Please complete your shipping address.');
       return;
     }
     setStep(2);
@@ -347,9 +564,13 @@ export function bindEvents(state, helpers) {
     showError('step2-err', '');
     if (!validatePaymentFields()) return;
 
-    const address  = document.getElementById('chk-address').value.trim();
-    const billing  = document.getElementById('chk-billing').value.trim() || address;
-    const couponCode = _appliedCoupon?.code || null;
+    let checkoutPayload;
+    try {
+      checkoutPayload = buildCheckoutPayload();
+    } catch (err) {
+      showError('step2-err', err.message || 'Please complete your shipping address.');
+      return;
+    }
 
     const btn = document.getElementById('btn-step2-pay');
     btn.disabled = true;
@@ -357,7 +578,7 @@ export function bindEvents(state, helpers) {
 
     try {
       // 1. Create order from cart
-      const orderRes = await ApiService.cart.checkout(address, billing, _paymentMethod, couponCode);
+      const orderRes = await ApiService.cart.checkout(checkoutPayload);
       _order = orderRes.data;
       setState({ appliedCoupon: null });
 

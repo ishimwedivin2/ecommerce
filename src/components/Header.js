@@ -7,26 +7,31 @@ export async function render() {
   const user = ApiService.getCurrentUser();
 
   let cartCount = 0;
-  try {
-    const cartRes = await ApiService.cart.get();
-    cartCount = cartRes.data.totalItems || 0;
-  } catch (e) {}
-
   let wishlistCount = 0;
-  try {
-    const wishRes = await ApiService.wishlist.get();
-    wishlistCount = wishRes.data.length || 0;
-  } catch (e) {}
-
   let notifCount = 0;
+
   if (user) {
     try {
-      const notifRes = await ApiService.notifications.getUnreadCount();
-      notifCount = notifRes.data || 0;
-      // Add low-stock count to badge for staff
       const roles = (user?.roles||[]).map(r=>(r?.name||r||'').toString());
-      if (roles.some(r=>r==='ROLE_ADMIN'||r==='ROLE_EMPLOYEE')) {
-        const ls = await ApiService.inventory.getLowStock().catch(()=>null);
+      const isStaff = roles.some(r=>r==='ROLE_ADMIN'||r==='ROLE_EMPLOYEE');
+      const [cartRes, wishRes, notifRes, lowStockRes] = await Promise.allSettled([
+        ApiService.cart.get(),
+        ApiService.wishlist.get(),
+        ApiService.notifications.getUnreadCount(),
+        isStaff ? ApiService.inventory.getLowStock() : Promise.resolve(null),
+      ]);
+
+      if (cartRes.status === 'fulfilled') {
+        cartCount = cartRes.value?.data?.totalItems || 0;
+      }
+      if (wishRes.status === 'fulfilled') {
+        wishlistCount = wishRes.value?.data?.length || 0;
+      }
+      if (notifRes.status === 'fulfilled') {
+        notifCount = notifRes.value?.data || 0;
+      }
+      if (lowStockRes.status === 'fulfilled' && lowStockRes.value) {
+        const ls = lowStockRes.value;
         const lsItems = ls ? (Array.isArray(ls)?ls:(ls?.data||ls?.content||[])) : [];
         notifCount += lsItems.length;
       }
@@ -148,13 +153,17 @@ export async function render() {
 }
 
 export function bindEvents(helpers) {
-  const { navigate, renderAuthModal, renderHeader, renderView } = helpers;
+  const { navigate, renderAuthModal, renderHeader, renderView, openCartDrawer } = helpers;
 
   // Navigation links
   document.querySelectorAll('[data-navigate]').forEach(elem => {
     elem.addEventListener('click', (e) => {
       e.stopPropagation();
       const dest = elem.getAttribute('data-navigate');
+      if (dest === 'cart') {
+        openCartDrawer?.();
+        return;
+      }
       navigate(dest, dest === 'home' ? { activeCategory: null, searchQuery: '' } : {});
     });
   });

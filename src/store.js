@@ -11,7 +11,8 @@ export const appState = {
   pendingMfaToken: null,
   pendingResetToken: null,
   appliedCoupon: null,
-  isNotifPanelOpen: false
+  isNotifPanelOpen: false,
+  isCartDrawerOpen: false
 };
 
 export function setState(partial) {

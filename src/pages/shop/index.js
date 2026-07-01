@@ -260,7 +260,10 @@ function bindCardActions() {
       try {
         await ApiService.cart.addItem(el.dataset.id, 1);
         import('../../components/toast.js').then(m => m.showToast('Added to cart!', 'success'));
-        import('../../router.js').then(m => m.renderHeader());
+        import('../../router.js').then(async m => {
+          await m.renderHeader();
+          await m.openCartDrawer();
+        });
       } catch (err) {
         import('../../components/toast.js').then(m => m.showToast(err.message || 'Failed to add to cart', 'error'));
       }

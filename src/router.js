@@ -6,6 +6,7 @@ import * as Header from './components/Header.js';
 import * as CategoryNav from './components/CategoryNav.js';
 import * as AuthModal from './components/AuthModal.js';
 import * as ChatWidget from './components/ChatWidget.js';
+import * as CartDrawer from './components/CartDrawer.js';
 import * as HomePage from './pages/home/index.js';
 import * as ProductDetailPage from './pages/product-detail/index.js';
 import * as CartPage from './pages/cart/index.js';
@@ -22,6 +23,11 @@ import * as ShopPage from './pages/shop/index.js';
 // Helpers passed to every page/component
 export const helpers = {
   navigate(view, extra = {}) {
+    if (view === 'cart') {
+      setState({ isCartDrawerOpen: true, ...extra });
+      renderCartDrawer();
+      return;
+    }
     setState({ currentView: view, authModalMode: null, isUserDropdownOpen: false, ...extra });
     renderAll();
   },
@@ -30,6 +36,8 @@ export const helpers = {
   renderView,
   renderAuthModal,
   renderChatWidget,
+  renderCartDrawer,
+  openCartDrawer,
   renderAll,
   toast: showToast,
 };
@@ -42,6 +50,8 @@ export async function renderHeader() {
   if (!container) return;
   container.innerHTML = await Header.render();
   Header.bindEvents(helpers);
+  bindHeaderHeightEvents(container);
+  updateAdminHeaderHeight();
 }
 
 export async function renderCategoryNav() {
@@ -164,11 +174,23 @@ export async function renderAuthModal() {
   }
 }
 
-export async function renderChatWidget() {
+export async function renderChatWidget(options = {}) {
   const container = document.getElementById('support-chat-widget-mount');
   if (!container) return;
-  container.innerHTML = await ChatWidget.render();
+  container.innerHTML = await ChatWidget.render(options);
   ChatWidget.bindEvents(helpers);
+}
+
+export async function renderCartDrawer() {
+  const container = document.getElementById('cart-drawer-mount');
+  if (!container) return;
+  container.innerHTML = await CartDrawer.render();
+  CartDrawer.bindEvents(helpers);
+}
+
+export async function openCartDrawer() {
+  setState({ isCartDrawerOpen: true });
+  await renderCartDrawer();
 }
 
 export async function renderAll() {
@@ -177,12 +199,39 @@ export async function renderAll() {
   // Toggle admin-mode class — hides footer and chat widget on staff dashboards
   document.body.classList.toggle('admin-mode', isAdmin);
   await renderHeader().catch(console.error);
-  await renderCategoryNav().catch(console.error);
-  await renderView().catch(console.error);
-  await renderAuthModal().catch(console.error);
+  updateAdminHeaderHeight();
+
+  const tasks = [
+    renderCategoryNav().catch(console.error),
+    renderView().catch(console.error),
+    renderAuthModal().catch(console.error),
+    renderCartDrawer().catch(console.error),
+  ];
   if (!isAdmin) {
-    await renderChatWidget().catch(console.error);
+    tasks.push(renderChatWidget().catch(console.error));
+  } else {
+    const chatMount = document.getElementById('support-chat-widget-mount');
+    if (chatMount) chatMount.innerHTML = '';
   }
+  await Promise.all(tasks);
+  updateAdminHeaderHeight();
+}
+
+function updateAdminHeaderHeight() {
+  const headerEl = document.getElementById('app-header-container');
+  if (!headerEl) return;
+
+  const height = headerEl.getBoundingClientRect().height;
+  if (height > 0) {
+    document.documentElement.style.setProperty('--admin-header-h', `${Math.ceil(height)}px`);
+  }
+}
+
+function bindHeaderHeightEvents(container) {
+  const closeBtn = container.querySelector('.promo-banner-close');
+  closeBtn?.addEventListener('click', () => {
+    requestAnimationFrame(updateAdminHeaderHeight);
+  });
 }
 
 export function init() {
@@ -216,6 +265,8 @@ export function init() {
       renderView();
     }
   });
+
+  window.addEventListener('resize', updateAdminHeaderHeight);
 
   renderAll();
 }

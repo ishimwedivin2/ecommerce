@@ -1551,7 +1551,7 @@ input:focus, select:focus, textarea:focus {
 /* Toast System */
 .toast-container {
   position: fixed;
-  top: 28px;
+  top: calc(var(--admin-header-h, 96px) + 16px);
   right: 28px;
   display: flex;
   flex-direction: column;

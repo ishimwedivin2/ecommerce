@@ -2,6 +2,8 @@ import './style.css';
 import { ApiService } from '../../api.js';
 import { appState } from '../../store.js';
 import { connectWS, subscribeWS, unsubscribeWS } from '../../chat-ws.js';
+import { Chart, registerables } from 'chart.js';
+Chart.register(...registerables);
 
 // ── Icons ─────────────────────────────────────────────────
 const I = {
@@ -362,137 +364,463 @@ async function loadAnalyticsData(startDate, endDate) {
   const sd = startDate || new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
   const ed = endDate   || new Date().toISOString().slice(0, 10);
   let stats = {};
+  let prevStats = {};
   let revenueByMonth = [];
+  let salesTrend = [];
   let ordersByStatus = [];
   let topProducts = [];
-  let customerCount = 0;
+  let customerAnalytics = {};
   let invAnalytics = {};
+  let supportAnalytics = {};
   let totalRevenue = null;
+
+  const periodDays = Math.round((new Date(ed) - new Date(sd)) / 86400000) || 30;
+  const prevEnd    = new Date(new Date(sd) - 86400000).toISOString().slice(0, 10);
+  const prevStart  = new Date(new Date(sd) - (periodDays + 1) * 86400000).toISOString().slice(0, 10);
+
   try {
-    const [kpiRes, rm, totalRevRes] = await Promise.allSettled([
+    const [kpiRes, rm, totalRevRes, prevKpiRes, custRes, invRes, suppRes] = await Promise.allSettled([
       ApiService.analytics.getKPIs({ startDate: sd, endDate: ed }),
       ApiService.getRevenueByMonth({ startDate: sd, endDate: ed }),
       ApiService.getTotalRevenue({ startDate: sd, endDate: ed }),
+      ApiService.analytics.getKPIs({ startDate: prevStart, endDate: prevEnd }),
+      ApiService.analytics.getCustomers(),
+      ApiService.analytics.getInventory(),
+      ApiService.analytics.getSupport(),
     ]);
+
     if (kpiRes.status === 'fulfilled' && kpiRes.value) {
       stats = kpiRes.value.data || kpiRes.value || {};
-      // Extract nested data from KPI dashboard response
       if (stats.orderStatusBreakdown && typeof stats.orderStatusBreakdown === 'object') {
         ordersByStatus = Object.entries(stats.orderStatusBreakdown).map(([label, value]) => ({ label, value: Number(value)||0 }));
       }
       if (Array.isArray(stats.topSellingProducts)) topProducts = stats.topSellingProducts;
-      if (stats.customerAnalytics)  customerCount = stats.customerAnalytics.totalCustomers || stats.activeCustomers || 0;
-      if (stats.inventoryAnalytics) invAnalytics  = stats.inventoryAnalytics;
-      if (Array.isArray(stats.salesTrend)) {
-        revenueByMonth = stats.salesTrend.map(d => ({ month: (d.period||d.date||'').slice(5), revenue: Number(d.revenue||d.totalRevenue)||0 }));
+      if (stats.inventoryAnalytics) invAnalytics = stats.inventoryAnalytics;
+      if (Array.isArray(stats.salesTrend) && stats.salesTrend.length) {
+        salesTrend = stats.salesTrend.map(d => ({
+          date: (d.period||d.date||'').slice(5),
+          revenue: Number(d.revenue||d.totalRevenue)||0,
+          orders: Number(d.orders||d.totalOrders)||0,
+        }));
+        revenueByMonth = salesTrend.map(d => ({ month: d.date, revenue: d.revenue }));
       }
     }
     if (rm.status === 'fulfilled' && rm.value) {
       const raw = rm.value.data || rm.value;
-      if (Array.isArray(raw) && raw.length) revenueByMonth = raw.map(d => ({ month: (d.month||'').slice(5), revenue: Number(d.revenue)||0 }));
+      if (Array.isArray(raw) && raw.length) {
+        revenueByMonth = raw.map(d => ({ month: (d.month||'').slice(5), revenue: Number(d.revenue)||0 }));
+        if (!salesTrend.length) salesTrend = revenueByMonth.map(d => ({ date: d.month, revenue: d.revenue, orders: 0 }));
+      }
     }
     if (totalRevRes.status === 'fulfilled' && totalRevRes.value != null) {
       const rv = totalRevRes.value?.data ?? totalRevRes.value;
       if (rv != null) totalRevenue = Number(rv);
     }
+    if (prevKpiRes.status === 'fulfilled' && prevKpiRes.value) {
+      prevStats = prevKpiRes.value.data || prevKpiRes.value || {};
+    }
+    if (custRes.status === 'fulfilled' && custRes.value) {
+      customerAnalytics = custRes.value.data || custRes.value || {};
+    }
+    if (invRes.status === 'fulfilled' && invRes.value) {
+      const id = invRes.value.data || invRes.value || {};
+      if (Object.keys(id).length) invAnalytics = id;
+    }
+    if (suppRes.status === 'fulfilled' && suppRes.value) {
+      supportAnalytics = suppRes.value.data || suppRes.value || {};
+    }
   } catch(_){}
+
+  function delta(current, previous) {
+    const c = Number(current) || 0;
+    const p = Number(previous) || 0;
+    if (!p) return '';
+    const pct = Math.round(((c - p) / p) * 100);
+    if (pct === 0) return `<span style="font-size:10px;color:#94A3B8">— vs prev</span>`;
+    const up = pct > 0;
+    return `<span style="font-size:10px;font-weight:700;color:${up?'#10B981':'#EF4444'}">${up?'▲':'▼'} ${Math.abs(pct)}% vs prev</span>`;
+  }
 
   const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   const barData = revenueByMonth.length ? revenueByMonth : months.slice(0,7).map(m => ({ month: m, revenue: 0 }));
-  const maxRev = Math.max(...barData.map(d => d.revenue||0), 1);
+  const trendData = salesTrend.length ? salesTrend : barData.map(d => ({ ...d, orders: 0 }));
 
-  const donutColors = ['#FF6B00','#3B82F6','#10B981','#8B5CF6','#F59E0B','#EF4444'];
+  const donutColors = ['#10B981','#3B82F6','#F59E0B','#EF4444','#8B5CF6','#FF6B00','#06B6D4','#EC4899'];
   const catData = ordersByStatus.length ? ordersByStatus : [
     {label:'DELIVERED',value:0},{label:'PROCESSING',value:0},{label:'PENDING',value:0},{label:'CANCELLED',value:0}
   ];
-  const totalCat = catData.reduce((a,b)=>a+(b.value||0),0)||1;
-  let donutPaths = ''; let legendHtml = ''; let off = 0;
-  const r = 50, cx = 60, cy = 60, circ = 2*Math.PI*r;
-  catData.forEach((d,i) => {
-    const pct = (d.value||0)/totalCat;
-    const len = pct * circ;
-    donutPaths += `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${donutColors[i%6]}" stroke-width="20" stroke-dasharray="${len} ${circ-len}" stroke-dashoffset="${-off+circ/4}" transform="rotate(-90,${cx},${cy})"/>`;
-    legendHtml += `<div class="dash-legend-item"><div class="dash-legend-dot" style="background:${donutColors[i%6]}"></div>${d.label.replace(/_/g,' ')} <b style="margin-left:auto;font-weight:700">${d.value||0}</b></div>`;
-    off += len;
-  });
 
-  const barsHtml = barData.map(d => {
-    const pct = Math.round(((d.revenue||0)/maxRev)*100);
-    return `<div class="dash-bar-col"><div class="dash-bar" style="height:${Math.max(pct,3)}%" title="${fmt.money(d.revenue)}"></div><div class="dash-bar-lbl">${d.month||''}</div></div>`;
-  }).join('');
+  const refundRate  = Number(stats.refundRate || 0).toFixed(1);
+  const lowStockCount = invAnalytics.lowStockItems ?? '—';
+  const stockHealth   = Number(invAnalytics.stockHealthPercent || 0).toFixed(0);
+  const stockColor    = stockHealth >= 80 ? '#10B981' : stockHealth >= 50 ? '#F59E0B' : '#EF4444';
 
   const topProdsHtml = topProducts.length
-    ? topProducts.map(p => `
-        <div class="d-widget-row">
-          <span>${p.productName||'—'}</span>
-          <div style="display:flex;gap:8px;align-items:center">
-            <span style="font-size:11px;color:#94A3B8">${p.unitsSold||0} units</span>
-            <span style="font-weight:700">${fmt.money(p.revenue||0)}</span>
+    ? topProducts.map((p, i) => {
+        const maxRev = Math.max(...topProducts.map(x => Number(x.revenue)||0), 1);
+        const pct = Math.round((Number(p.revenue)||0) / maxRev * 100);
+        return `
+        <div style="margin-bottom:10px">
+          <div style="display:flex;justify-content:space-between;margin-bottom:3px;font-size:12px">
+            <span style="font-weight:600;color:#0F172A">${esc(p.productName||'—')}</span>
+            <div style="display:flex;gap:8px;align-items:center">
+              <span style="color:#94A3B8">${p.unitsSold||0} units</span>
+              <span style="font-weight:700;color:#FF6B00">${fmt.money(p.revenue||0)}</span>
+            </div>
+          </div>
+          <div style="background:#F1F5F9;border-radius:4px;height:5px;overflow:hidden">
+            <div style="width:${pct}%;height:100%;background:linear-gradient(90deg,#FF6B00,#FF8C42);border-radius:4px;transition:width .6s ease"></div>
+          </div>
+        </div>`;
+      }).join('')
+    : `<div style="color:#94A3B8;font-size:12px;padding:8px 0">No sales data for this period</div>`;
+
+  const segBreakdown = customerAnalytics.segmentBreakdown || {};
+  const segEntries = Object.entries(segBreakdown);
+  const segColors = ['#FF6B00','#3B82F6','#10B981','#8B5CF6','#F59E0B','#EF4444'];
+  const maxSeg = Math.max(...segEntries.map(([,v]) => Number(v)||0), 1);
+  const segHtml = segEntries.length
+    ? segEntries.map(([label, count], i) => `
+        <div style="margin-bottom:10px">
+          <div style="display:flex;justify-content:space-between;font-size:11.5px;margin-bottom:3px">
+            <span style="font-weight:600;color:#334155">${esc(label)}</span>
+            <span style="color:#64748B">${fmt.num(count)}</span>
+          </div>
+          <div style="background:#F1F5F9;border-radius:4px;height:6px;overflow:hidden">
+            <div style="width:${Math.round(Number(count)/maxSeg*100)}%;height:100%;background:${segColors[i%segColors.length]};border-radius:4px;transition:width .6s ease"></div>
           </div>
         </div>`).join('')
-    : `<div class="d-widget-row" style="color:var(--text-muted)">No sales data for this period</div>`;
+    : `<div style="color:#94A3B8;font-size:12px">No segment data available</div>`;
 
-  const refundRate = Number(stats.refundRate || 0).toFixed(1);
-  const lowStockCount = invAnalytics.lowStockItems ?? '—';
+  const suppStatus = supportAnalytics.statusBreakdown || {};
+  const suppPriority = supportAnalytics.priorityBreakdown || {};
+  const suppTotal = Number(supportAnalytics.totalTickets || 0);
+  const suppStatusHtml = Object.entries(suppStatus).map(([label, count]) => {
+    const pct = suppTotal ? Math.round(Number(count)/suppTotal*100) : 0;
+    const col = label==='OPEN'?'#EF4444':label==='RESOLVED'?'#10B981':label==='IN_PROGRESS'?'#F59E0B':'#94A3B8';
+    return `
+    <div style="margin-bottom:8px">
+      <div style="display:flex;justify-content:space-between;font-size:11.5px;margin-bottom:3px">
+        <span style="font-weight:600;color:#334155">${label.replace(/_/g,' ')}</span>
+        <span style="color:#64748B">${count} (${pct}%)</span>
+      </div>
+      <div style="background:#F1F5F9;border-radius:4px;height:5px"><div style="width:${pct}%;height:100%;background:${col};border-radius:4px"></div></div>
+    </div>`;
+  }).join('') || `<div style="color:#94A3B8;font-size:12px">No ticket data</div>`;
+
+  const lowStockRows = Array.isArray(invAnalytics.lowStock) && invAnalytics.lowStock.length
+    ? invAnalytics.lowStock.slice(0,5).map(it => `
+        <div class="d-widget-row">
+          <span style="font-weight:600;font-size:12px">${esc(it.productName||it.sku||'—')}</span>
+          <span class="bdg bdg-red">${it.quantity} left</span>
+        </div>`).join('')
+    : `<div class="d-widget-row" style="color:#94A3B8">All stock levels healthy</div>`;
 
   const container = document.getElementById('analytics-content');
   if (!container) return;
+
   const revDisplay = totalRevenue != null ? fmt.money(totalRevenue) : fmt.money(stats.totalRevenue||0);
   container.innerHTML = `
-  ${totalRevenue != null ? `
-  <div style="background:linear-gradient(135deg,#1e3a5f,#2563eb);border-radius:16px;padding:20px 28px;margin-bottom:18px;display:flex;align-items:center;justify-content:space-between;box-shadow:0 4px 20px rgba(37,99,235,0.3)">
+  <!-- ── Hero banner ── -->
+  <div style="background:linear-gradient(135deg,#0f2744,#1d4ed8,#FF6B00);border-radius:16px;padding:22px 28px;margin-bottom:20px;display:flex;align-items:center;justify-content:space-between;box-shadow:0 4px 24px rgba(29,78,216,0.35)">
     <div>
-      <div style="color:rgba(255,255,255,.7);font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px">Total Revenue (Period)</div>
-      <div style="font-size:36px;font-weight:900;color:white;letter-spacing:-.02em">${revDisplay}</div>
-      <div style="color:rgba(255,255,255,.6);font-size:12px;margin-top:4px">${sd} → ${ed}</div>
+      <div style="color:rgba(255,255,255,.65);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;margin-bottom:6px">Total Revenue — ${sd} to ${ed}</div>
+      <div style="font-size:38px;font-weight:900;color:white;letter-spacing:-.03em;line-height:1">${revDisplay}</div>
+      <div style="display:flex;gap:20px;margin-top:10px">
+        <div style="color:rgba(255,255,255,.8);font-size:12px">${fmt.num(stats.totalOrders||0)} orders</div>
+        <div style="color:rgba(255,255,255,.8);font-size:12px">AOV ${fmt.money(stats.averageOrderValue||0)}</div>
+        <div style="color:rgba(255,255,255,.8);font-size:12px">${fmt.num(customerAnalytics.totalCustomers||stats.activeCustomers||0)} customers</div>
+      </div>
     </div>
-    <div style="font-size:52px;opacity:.4">💰</div>
-  </div>` : ''}
-  <div class="dash-stats">
-    <div class="dash-stat"><div class="dash-stat-ico ico-green">${I.dollar}</div><div class="dash-stat-lbl">Revenue (KPI)</div><div class="dash-stat-val">${fmt.money(stats.totalRevenue||0)}</div><div class="dash-stat-trend flat">Selected period</div></div>
-    <div class="dash-stat"><div class="dash-stat-ico ico-blue">${I.cart}</div><div class="dash-stat-lbl">Total Orders</div><div class="dash-stat-val">${fmt.num(stats.totalOrders||0)}</div><div class="dash-stat-trend flat">${fmt.num(stats.paidOrActiveOrders||0)} paid/active</div></div>
-    <div class="dash-stat"><div class="dash-stat-ico ico-purple">${I.users}</div><div class="dash-stat-lbl">Total Customers</div><div class="dash-stat-val">${fmt.num(customerCount||stats.activeCustomers||0)}</div><div class="dash-stat-trend flat">${fmt.num(stats.activeCustomers||0)} active this period</div></div>
-    <div class="dash-stat"><div class="dash-stat-ico ico-orange">${I.dollar}</div><div class="dash-stat-lbl">Avg Order Value</div><div class="dash-stat-val">${fmt.money(stats.averageOrderValue||0)}</div><div class="dash-stat-trend flat">Per paid order</div></div>
-    <div class="dash-stat"><div class="dash-stat-ico ico-red">${I.rotate}</div><div class="dash-stat-lbl">Refund Rate</div><div class="dash-stat-val">${refundRate}%</div><div class="dash-stat-trend flat">of total orders</div></div>
-    <div class="dash-stat"><div class="dash-stat-ico ico-yellow">${I.box}</div><div class="dash-stat-lbl">Low Stock Items</div><div class="dash-stat-val">${lowStockCount}</div><div class="dash-stat-trend flat">Need restock</div></div>
-  </div>
-
-  <div class="dash-charts-row">
-    <div class="dash-chart-card">
-      <div class="dash-chart-hd">Revenue Overview</div>
-      <div class="dash-chart-sub">Monthly revenue for the selected period</div>
-      <div class="dash-bars">${barsHtml}</div>
-    </div>
-    <div class="dash-chart-card">
-      <div class="dash-chart-hd">Orders by Status</div>
-      <div class="dash-chart-sub">Distribution for selected period</div>
-      <div class="dash-donut-wrap">
-        <svg width="120" height="120" viewBox="0 0 120 120">${donutPaths}</svg>
-        <div class="dash-donut-legend">${legendHtml}</div>
+    <div style="text-align:right">
+      <div style="font-size:11px;color:rgba(255,255,255,.6);margin-bottom:4px">vs previous period</div>
+      <div style="font-size:22px;font-weight:800;color:${Number(stats.totalRevenue||0)>=Number(prevStats.totalRevenue||0)?'#6EE7B7':'#FCA5A5'}">
+        ${Number(prevStats.totalRevenue||0) ? ((Number(stats.totalRevenue||0)-Number(prevStats.totalRevenue||0))/Number(prevStats.totalRevenue||0)*100).toFixed(1)+'%' : '—'}
       </div>
     </div>
   </div>
 
-  <div class="d-widgets">
-    <div class="d-widget">
+  <!-- ── KPI Cards ── -->
+  <div class="dash-stats" style="margin-bottom:20px">
+    <div class="dash-stat"><div class="dash-stat-ico ico-green">${I.dollar}</div><div class="dash-stat-lbl">Revenue</div><div class="dash-stat-val">${fmt.money(stats.totalRevenue||0)}</div><div class="dash-stat-trend flat">${delta(stats.totalRevenue, prevStats.totalRevenue)||'Period total'}</div></div>
+    <div class="dash-stat"><div class="dash-stat-ico ico-blue">${I.cart}</div><div class="dash-stat-lbl">Orders</div><div class="dash-stat-val">${fmt.num(stats.totalOrders||0)}</div><div class="dash-stat-trend flat">${delta(stats.totalOrders, prevStats.totalOrders)||`${fmt.num(stats.paidOrActiveOrders||0)} active`}</div></div>
+    <div class="dash-stat"><div class="dash-stat-ico ico-purple">${I.users}</div><div class="dash-stat-lbl">Customers</div><div class="dash-stat-val">${fmt.num(customerAnalytics.totalCustomers||stats.activeCustomers||0)}</div><div class="dash-stat-trend flat">${delta(customerAnalytics.totalCustomers, prevStats.activeCustomers)||'All time'}</div></div>
+    <div class="dash-stat"><div class="dash-stat-ico ico-orange">${I.dollar}</div><div class="dash-stat-lbl">Avg Order Value</div><div class="dash-stat-val">${fmt.money(stats.averageOrderValue||0)}</div><div class="dash-stat-trend flat">${delta(stats.averageOrderValue, prevStats.averageOrderValue)||'Per paid order'}</div></div>
+    <div class="dash-stat"><div class="dash-stat-ico ico-red">${I.rotate}</div><div class="dash-stat-lbl">Refund Rate</div><div class="dash-stat-val">${refundRate}%</div><div class="dash-stat-trend flat">${delta(stats.refundRate, prevStats.refundRate)||'Of total orders'}</div></div>
+    <div class="dash-stat"><div class="dash-stat-ico ico-yellow">${I.box}</div><div class="dash-stat-lbl">Low Stock</div><div class="dash-stat-val">${lowStockCount}</div><div class="dash-stat-trend flat">Need restock</div></div>
+  </div>
+
+  <!-- ── Row 1: Sales Trend (wide) + Orders Donut ── -->
+  <div class="dash-charts-row" style="margin-bottom:16px">
+    <div class="dash-chart-card">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px">
+        <div>
+          <div class="dash-chart-hd">Sales Trend</div>
+          <div class="dash-chart-sub">Daily revenue &amp; order volume — selected period</div>
+        </div>
+        <div style="display:flex;gap:12px;font-size:11px;color:#64748B">
+          <span style="display:flex;align-items:center;gap:4px"><span style="width:12px;height:3px;background:#FF6B00;display:inline-block;border-radius:2px"></span>Revenue</span>
+          <span style="display:flex;align-items:center;gap:4px"><span style="width:12px;height:3px;background:#3B82F6;display:inline-block;border-radius:2px"></span>Orders</span>
+        </div>
+      </div>
+      <div style="position:relative;height:220px"><canvas id="an-trend-chart"></canvas></div>
+    </div>
+    <div class="dash-chart-card">
+      <div class="dash-chart-hd">Orders by Status</div>
+      <div class="dash-chart-sub">Distribution for period</div>
+      <div style="position:relative;height:220px"><canvas id="an-status-chart"></canvas></div>
+    </div>
+  </div>
+
+  <!-- ── Row 2: Revenue bar + Customer Segments ── -->
+  <div class="dash-charts-row" style="margin-bottom:16px;grid-template-columns:1fr 1fr">
+    <div class="dash-chart-card">
+      <div class="dash-chart-hd">Revenue by Month</div>
+      <div class="dash-chart-sub">Aggregated monthly revenue</div>
+      <div style="position:relative;height:200px"><canvas id="an-revenue-chart"></canvas></div>
+    </div>
+    <div class="dash-chart-card">
+      <div class="dash-chart-hd">Customer Segments</div>
+      <div class="dash-chart-sub">${fmt.num(customerAnalytics.totalCustomers||0)} customers · ${fmt.money(customerAnalytics.averageLifetimeValue||0)} avg LTV</div>
+      <div style="margin-top:14px">${segHtml}</div>
+    </div>
+  </div>
+
+  <!-- ── Row 3: Top Products + Inventory Health + Support + Actions ── -->
+  <div class="d-widgets" style="margin-bottom:16px">
+    <div class="d-widget" style="flex:1.4">
       <div class="d-widget-ttl">${I.box} Top Products</div>
       ${topProdsHtml}
     </div>
+
     <div class="d-widget">
-      <div class="d-widget-ttl">${I.cart} Pending Actions</div>
+      <div class="d-widget-ttl">${I.pkg} Inventory Health</div>
+      <div style="text-align:center;margin-bottom:12px">
+        <div style="font-size:32px;font-weight:900;color:${stockColor}">${stockHealth}%</div>
+        <div style="font-size:11px;color:#64748B">stock health</div>
+        <div style="background:#F1F5F9;border-radius:8px;height:8px;margin-top:8px;overflow:hidden">
+          <div style="width:${stockHealth}%;height:100%;background:${stockColor};border-radius:8px;transition:width .8s ease"></div>
+        </div>
+      </div>
+      <div class="d-widget-row"><span>Total SKUs</span><span style="font-weight:700">${fmt.num(invAnalytics.totalItems||0)}</span></div>
+      <div class="d-widget-row"><span>Total Units</span><span style="font-weight:700">${fmt.num(invAnalytics.totalUnits||0)}</span></div>
+      <div class="d-widget-row"><span>Low Stock</span><span class="bdg bdg-yellow">${invAnalytics.lowStockItems||0}</span></div>
+      <div class="d-widget-row"><span>Out of Stock</span><span class="bdg bdg-red">${invAnalytics.outOfStockItems||0}</span></div>
+    </div>
+
+    <div class="d-widget">
+      <div class="d-widget-ttl">${I.msg} Support Tickets</div>
+      <div style="margin-bottom:10px">
+        <div style="font-size:26px;font-weight:900;color:#0F172A">${fmt.num(suppTotal)}</div>
+        <div style="font-size:11px;color:#64748B">total tickets</div>
+      </div>
+      ${suppStatusHtml}
+    </div>
+
+    <div class="d-widget">
+      <div class="d-widget-ttl">${I.cart} Actions Needed</div>
       <div class="d-widget-row"><span>Pending Orders</span><span class="bdg bdg-yellow">${badges.orders||0}</span></div>
       <div class="d-widget-row"><span>Return Requests</span><span class="bdg bdg-purple">${badges.returns||0}</span></div>
       <div class="d-widget-row"><span>Open Tickets</span><span class="bdg bdg-blue">${badges.tickets||0}</span></div>
       <div class="d-widget-row"><span>Low Stock Items</span><span class="bdg bdg-red">${lowStockCount}</span></div>
+      <div style="margin-top:12px;display:flex;flex-direction:column;gap:6px">
+        <button class="btn-d btn-d-sec btn-d-sm" onclick="document.querySelector('[data-tab=orders]').click()" style="justify-content:space-between">${I.cart} Orders ${I.chevR}</button>
+        <button class="btn-d btn-d-sec btn-d-sm" onclick="document.querySelector('[data-tab=inventory]').click()" style="justify-content:space-between">${I.box} Inventory ${I.chevR}</button>
+        <button class="btn-d btn-d-sec btn-d-sm" onclick="document.querySelector('[data-tab=support]').click()" style="justify-content:space-between">${I.msg} Support ${I.chevR}</button>
+      </div>
     </div>
-    <div class="d-widget">
-      <div class="d-widget-ttl">${I.bell} Quick Links</div>
-      <div class="d-widget-row" style="cursor:pointer" onclick="document.querySelector('[data-tab=orders]').click()"><span style="color:#FF6B00">View pending orders</span><span>${I.chevR}</span></div>
-      <div class="d-widget-row" style="cursor:pointer" onclick="document.querySelector('[data-tab=returns]').click()"><span style="color:#FF6B00">Review returns</span><span>${I.chevR}</span></div>
-      <div class="d-widget-row" style="cursor:pointer" onclick="document.querySelector('[data-tab=support]').click()"><span style="color:#FF6B00">Support tickets</span><span>${I.chevR}</span></div>
-      <div class="d-widget-row" style="cursor:pointer" onclick="document.querySelector('[data-tab=inventory]').click()"><span style="color:#FF6B00">Check inventory</span><span>${I.chevR}</span></div>
+  </div>
+
+  <!-- ── Row 4: Critical Low Stock + Export Reports ── -->
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
+    <div class="dash-chart-card">
+      <div class="dash-chart-hd" style="margin-bottom:10px">Critical Low Stock</div>
+      ${lowStockRows}
+    </div>
+    <div class="dash-chart-card">
+      <div class="dash-chart-hd" style="margin-bottom:4px">Export Reports</div>
+      <div class="dash-chart-sub" style="margin-bottom:14px">Download data for the selected date range</div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <button class="btn-d btn-d-sec" id="exp-sales" style="justify-content:space-between">
+          <span style="display:flex;align-items:center;gap:6px">${I.bar} Sales Report (Excel)</span>
+          <span style="color:#64748B;font-size:11px">${sd} → ${ed}</span>
+        </button>
+        <button class="btn-d btn-d-sec" id="exp-orders" style="justify-content:space-between">
+          <span style="display:flex;align-items:center;gap:6px">${I.cart} Orders Report (Excel)</span>
+          <span style="color:#64748B;font-size:11px">${sd} → ${ed}</span>
+        </button>
+        <button class="btn-d btn-d-sec" id="exp-inventory" style="justify-content:space-between">
+          <span style="display:flex;align-items:center;gap:6px">${I.box} Inventory Snapshot (Excel)</span>
+          <span style="color:#64748B;font-size:11px">Current stock</span>
+        </button>
+      </div>
     </div>
   </div>`;
+
+  // ── Chart.js init ──
+  _initTrendChart(trendData);
+  _initStatusChart(catData, donutColors);
+  _initRevenueChart(barData);
+
+  // ── Export button bindings ──
+  document.getElementById('exp-sales')?.addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    btn.disabled = true; btn.textContent = 'Downloading…';
+    try { await ApiService.downloadSalesReport({ startDate: sd, endDate: ed }); } catch(_){}
+    btn.disabled = false; btn.innerHTML = `${I.bar} Sales Report (Excel) <span style="color:#64748B;font-size:11px">${sd} → ${ed}</span>`;
+  });
+  document.getElementById('exp-orders')?.addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    btn.disabled = true; btn.textContent = 'Downloading…';
+    try { await ApiService.downloadOrdersReport({ startDate: sd, endDate: ed }); } catch(_){}
+    btn.disabled = false; btn.innerHTML = `${I.cart} Orders Report (Excel) <span style="color:#64748B;font-size:11px">${sd} → ${ed}</span>`;
+  });
+  document.getElementById('exp-inventory')?.addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    btn.disabled = true; btn.textContent = 'Downloading…';
+    try { await ApiService.downloadInventoryReport(); } catch(_){}
+    btn.disabled = false; btn.innerHTML = `${I.box} Inventory Snapshot (Excel) <span style="color:#64748B;font-size:11px">Current stock</span>`;
+  });
+}
+
+// ── Chart instances (destroyed before re-render) ──────────
+let _revenueChartInst = null;
+let _statusChartInst  = null;
+let _trendChartInst   = null;
+
+function _initTrendChart(trendData) {
+  const canvas = document.getElementById('an-trend-chart');
+  if (!canvas) return;
+  if (_trendChartInst) { _trendChartInst.destroy(); _trendChartInst = null; }
+  _trendChartInst = new Chart(canvas, {
+    type: 'line',
+    data: {
+      labels: trendData.map(d => d.date || ''),
+      datasets: [
+        {
+          label: 'Revenue (RWF)',
+          data: trendData.map(d => d.revenue || 0),
+          borderColor: '#FF6B00',
+          backgroundColor: 'rgba(255,107,0,0.08)',
+          borderWidth: 2.5,
+          pointRadius: trendData.length > 30 ? 0 : 3,
+          pointHoverRadius: 5,
+          pointBackgroundColor: '#FF6B00',
+          fill: true,
+          tension: 0.4,
+          yAxisID: 'yRev',
+        },
+        {
+          label: 'Orders',
+          data: trendData.map(d => d.orders || 0),
+          borderColor: '#3B82F6',
+          backgroundColor: 'rgba(59,130,246,0.06)',
+          borderWidth: 2,
+          pointRadius: trendData.length > 30 ? 0 : 3,
+          pointHoverRadius: 5,
+          pointBackgroundColor: '#3B82F6',
+          fill: true,
+          tension: 0.4,
+          yAxisID: 'yOrd',
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: ctx => ctx.dataset.yAxisID === 'yRev'
+              ? ' Revenue: RWF ' + Math.round(ctx.parsed.y).toLocaleString('en-US')
+              : ' Orders: ' + ctx.parsed.y
+          }
+        }
+      },
+      scales: {
+        x: { grid: { display: false }, ticks: { color: '#94A3B8', font: { size: 10 }, maxTicksLimit: 10 } },
+        yRev: {
+          position: 'left',
+          grid: { color: 'rgba(148,163,184,0.1)' },
+          ticks: { color: '#FF6B00', font: { size: 10 }, callback: v => v >= 1000000 ? (v/1000000).toFixed(1)+'M' : v >= 1000 ? (v/1000).toFixed(0)+'K' : v }
+        },
+        yOrd: {
+          position: 'right',
+          grid: { display: false },
+          ticks: { color: '#3B82F6', font: { size: 10 } }
+        }
+      }
+    }
+  });
+}
+
+function _initRevenueChart(barData) {
+  const canvas = document.getElementById('an-revenue-chart');
+  if (!canvas) return;
+  if (_revenueChartInst) { _revenueChartInst.destroy(); _revenueChartInst = null; }
+  _revenueChartInst = new Chart(canvas, {
+    type: 'bar',
+    data: {
+      labels: barData.map(d => d.month || ''),
+      datasets: [{
+        label: 'Revenue (RWF)',
+        data: barData.map(d => d.revenue || 0),
+        backgroundColor: barData.map((_, i) => `hsla(${24 + i * 15},100%,${52 - i*2}%,0.8)`),
+        borderColor: '#FF6B00',
+        borderWidth: 0,
+        borderRadius: 6,
+        borderSkipped: false,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: { label: ctx => ' RWF ' + Math.round(ctx.parsed.y).toLocaleString('en-US') } }
+      },
+      scales: {
+        x: { grid: { display: false }, ticks: { color: '#94A3B8', font: { size: 11 } } },
+        y: {
+          grid: { color: 'rgba(148,163,184,0.1)' },
+          ticks: { color: '#94A3B8', font: { size: 11 }, callback: v => v >= 1000000 ? (v/1000000).toFixed(1)+'M' : v >= 1000 ? (v/1000).toFixed(0)+'K' : v }
+        }
+      }
+    }
+  });
+}
+
+function _initStatusChart(catData, donutColors) {
+  const canvas = document.getElementById('an-status-chart');
+  if (!canvas) return;
+  if (_statusChartInst) { _statusChartInst.destroy(); _statusChartInst = null; }
+  _statusChartInst = new Chart(canvas, {
+    type: 'doughnut',
+    data: {
+      labels: catData.map(d => d.label.replace(/_/g, ' ')),
+      datasets: [{
+        data: catData.map(d => d.value || 0),
+        backgroundColor: donutColors,
+        borderColor: 'white',
+        borderWidth: 2,
+        hoverOffset: 10,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      cutout: '65%',
+      plugins: {
+        legend: {
+          position: 'right',
+          labels: { color: '#64748B', font: { size: 10 }, boxWidth: 10, padding: 8 }
+        },
+        tooltip: { callbacks: { label: ctx => ` ${ctx.label}: ${ctx.parsed} orders` } }
+      }
+    }
+  });
 }
 
 TAB.analytics = async () => {
@@ -503,7 +831,10 @@ TAB.analytics = async () => {
 
   const html = `
   <div class="dash-page-hd">
-    <div><div class="dash-page-title">Dashboard Overview</div><div class="dash-page-sub">Welcome back, ${getUser().firstName||'Admin'}. Analytics for the selected period.</div></div>
+    <div>
+      <div class="dash-page-title">Business Analytics</div>
+      <div class="dash-page-sub">Welcome back, ${getUser().firstName||'Admin'}. Live insights for your selected period.</div>
+    </div>
     <div class="dash-page-acts" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
       <div style="display:flex;gap:4px">
         <button class="btn-d btn-d-sec an-preset ${_analyticsRange.preset==='7d'?'btn-d-active':''}" data-preset="7d" data-start="${d7}" data-end="${today}">7 days</button>
@@ -519,11 +850,13 @@ TAB.analytics = async () => {
     </div>
   </div>
   <div id="analytics-content">
-    <div style="text-align:center;padding:60px;color:#94A3B8">Loading analytics…</div>
+    <div style="text-align:center;padding:80px;color:#94A3B8">
+      <div style="font-size:32px;margin-bottom:8px">📊</div>
+      <div style="font-weight:600">Loading analytics…</div>
+    </div>
   </div>`;
 
   setTimeout(async () => {
-    // Bind date range controls
     document.querySelectorAll('.an-preset').forEach(btn => {
       btn.addEventListener('click', async () => {
         _analyticsRange = { preset: btn.dataset.preset, start: btn.dataset.start, end: btn.dataset.end };
@@ -532,7 +865,7 @@ TAB.analytics = async () => {
         document.getElementById('an-start').value = btn.dataset.start;
         document.getElementById('an-end').value   = btn.dataset.end;
         const c = document.getElementById('analytics-content');
-        if (c) c.innerHTML = '<div style="text-align:center;padding:60px;color:#94A3B8">Loading…</div>';
+        if (c) c.innerHTML = '<div style="text-align:center;padding:80px;color:#94A3B8"><div style="font-size:32px;margin-bottom:8px">📊</div><div>Refreshing…</div></div>';
         await loadAnalyticsData(btn.dataset.start, btn.dataset.end);
       });
     });
@@ -543,10 +876,9 @@ TAB.analytics = async () => {
       _analyticsRange = { preset: 'custom', start, end };
       document.querySelectorAll('.an-preset').forEach(b => b.classList.remove('btn-d-active'));
       const c = document.getElementById('analytics-content');
-      if (c) c.innerHTML = '<div style="text-align:center;padding:60px;color:#94A3B8">Loading…</div>';
+      if (c) c.innerHTML = '<div style="text-align:center;padding:80px;color:#94A3B8"><div style="font-size:32px;margin-bottom:8px">📊</div><div>Refreshing…</div></div>';
       await loadAnalyticsData(start, end);
     });
-    // Initial load
     await loadAnalyticsData(_analyticsRange.start || d30, _analyticsRange.end || today);
   }, 0);
 
@@ -699,6 +1031,7 @@ TAB.orders = async () => {
       <td class="td-sm">${fmt.date(o.createdAt||o.orderDate)}</td>
       <td>
         <button class="btn-d btn-d-sec btn-d-sm btn-d-ico" data-action="view-order" data-id="${o.id||o.orderId}" title="View Details">${I.eye}</button>
+        ${!supportView ? `<button class="btn-d btn-d-sec btn-d-sm btn-d-ico" data-action="delivery-note" data-id="${o.id||o.orderId}" title="Delivery Note">${I.download}</button>` : ''}
         ${!supportView ? `<button class="btn-d btn-d-sec btn-d-sm btn-d-ico" data-action="edit-order" data-id="${o.id||o.orderId}" title="Update Status">${I.edit}</button>` : ''}
       </td>
     </tr>`).join('') :
@@ -720,6 +1053,7 @@ TAB.orders = async () => {
       <td class="td-sm">${fmt.date(o.createdAt||o.orderDate)}</td>
       <td>
         <button class="btn-d btn-d-sec btn-d-sm btn-d-ico" data-action="view-order" data-id="${o.id||o.orderId}" title="View">${I.eye}</button>
+        <button class="btn-d btn-d-sec btn-d-sm btn-d-ico" data-action="delivery-note" data-id="${o.id||o.orderId}" title="Delivery Note">${I.download}</button>
         <button class="btn-d btn-d-sec btn-d-sm btn-d-ico" data-action="edit-order" data-id="${o.id||o.orderId}" title="Update Status">${I.edit}</button>
       </td>
     </tr>`).join('') :
@@ -762,7 +1096,40 @@ TAB.orders = async () => {
       <thead>${thead}</thead>
       <tbody id="orders-tbody">${adminView ? adminRows : empRows}</tbody>
     </table>
-  </div>`;
+  </div>
+
+  ${adminView ? `
+  <!-- Communication Templates -->
+  <div class="dash-chart-card" style="margin-top:20px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+      <div>
+        <div class="dash-chart-hd" style="margin-bottom:2px">Customer Communication Templates</div>
+        <div class="dash-chart-sub">Email templates sent automatically to customers at key order events</div>
+      </div>
+      <button class="btn-d btn-d-sec" id="btn-reload-templates" style="font-size:12px">${I.refresh} Reload</button>
+    </div>
+    <div id="comm-templates-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px">
+      <div style="text-align:center;padding:32px;color:#94A3B8;grid-column:1/-1">Loading templates…</div>
+    </div>
+  </div>
+
+  <!-- Template editor modal -->
+  <div id="tmpl-editor-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;align-items:center;justify-content:center">
+    <div style="background:white;border-radius:16px;padding:28px;width:760px;max-width:96vw;max-height:90vh;display:flex;flex-direction:column;gap:14px">
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <div>
+          <div style="font-size:17px;font-weight:700" id="tmpl-modal-title">Edit Template</div>
+          <div style="font-size:12px;color:#64748B;margin-top:2px" id="tmpl-modal-desc"></div>
+        </div>
+        <button style="background:none;border:none;cursor:pointer;color:#94A3B8;font-size:20px" id="tmpl-modal-close">✕</button>
+      </div>
+      <textarea id="tmpl-editor-content" style="flex:1;min-height:360px;font-family:monospace;font-size:12px;border:1px solid #e2e8f0;border-radius:8px;padding:12px;resize:vertical;line-height:1.5"></textarea>
+      <div style="display:flex;gap:8px;justify-content:flex-end">
+        <button class="btn-d btn-d-sec" id="tmpl-modal-cancel">Cancel</button>
+        <button class="btn-d btn-d-primary" id="tmpl-modal-save">Save Template</button>
+      </div>
+    </div>
+  </div>` : ''}`;
 };
 
 // ── Payments ──────────────────────────────────────────────
@@ -1824,13 +2191,14 @@ let _supFaqCache = [];
 let _supAgentCache = [];
 
 TAB.support = async () => {
-  let tickets = [], chatSessions = [], faqs = [], agents = [];
+  let tickets = [], chatSessions = [], faqs = [], agents = [], supPerf = null;
   try {
-    const [tRes, cRes, fRes, uRes] = await Promise.allSettled([
+    const [tRes, cRes, fRes, uRes, pRes] = await Promise.allSettled([
       ApiService.getSupportTickets({ page:0, size:100 }),
       ApiService.chat.getSessions(),
       ApiService.getAllFaqs(),
       ApiService.getUsers({ page:0, size:100 }),
+      ApiService.analytics.getSupport(),
     ]);
     if (tRes.status === 'fulfilled') tickets = extractList(tRes.value);
     if (cRes.status === 'fulfilled') chatSessions = cRes.value?.data || [];
@@ -1839,6 +2207,7 @@ TAB.support = async () => {
       const all = extractList(uRes.value);
       agents = all.filter(u => ['SUPPORT_AGENT','ADMIN','EMPLOYEE'].includes(u.role));
     }
+    if (pRes.status === 'fulfilled') supPerf = pRes.value?.data || pRes.value || null;
   } catch(_){}
 
   _supFaqCache = faqs;
@@ -1917,7 +2286,12 @@ TAB.support = async () => {
 
   <!-- Sub-tab bar -->
   <div style="display:flex;gap:8px;margin-bottom:16px;border-bottom:2px solid #F1F5F9;padding-bottom:0">
-    ${[{id:'tickets',label:`🎫 Tickets (${tickets.length})`},{id:'chats',label:`💬 Live Chat (${chatSessions.filter(s=>s.status!=='CLOSED').length})`},{id:'faq',label:`📚 FAQ (${faqs.length})`}].map(st=>`
+    ${[
+      {id:'tickets',    label:`🎫 Tickets (${tickets.length})`},
+      {id:'chats',      label:`💬 Live Chat (${chatSessions.filter(s=>s.status!=='CLOSED').length})`},
+      {id:'faq',        label:`📚 FAQ (${faqs.length})`},
+      {id:'performance',label:`📊 Performance`}
+    ].map(st=>`
       <button class="sup-main-tab ${_supSubTab===st.id?'active':''}" data-sup-main="${st.id}">${st.label}</button>
     `).join('')}
   </div>
@@ -1959,6 +2333,77 @@ TAB.support = async () => {
         <tbody id="faq-tbody">${faqRows}</tbody>
       </table>
     </div>
+  </div>
+
+  <!-- Performance panel -->
+  <div id="sup-panel-performance" style="${_supSubTab==='performance'?'':'display:none'}">
+    ${(() => {
+      const sb = supPerf?.statusBreakdown  || {};
+      const pb = supPerf?.priorityBreakdown|| {};
+      const total = supPerf?.totalTickets  || tickets.length || 0;
+
+      // Compute resolved/closed from status breakdown or live ticket array
+      const resolved  = sb['RESOLVED'] || tickets.filter(t=>t.status==='RESOLVED').length;
+      const closed    = sb['CLOSED']   || tickets.filter(t=>t.status==='CLOSED').length;
+      const open      = sb['OPEN']     || tickets.filter(t=>t.status==='OPEN').length;
+      const inprog    = sb['IN_PROGRESS']|| tickets.filter(t=>t.status==='IN_PROGRESS').length;
+      const resolvedRate = total > 0 ? Math.round(((resolved + closed) / total) * 100) : 0;
+
+      const statusEntries  = Object.entries(sb).length  ? Object.entries(sb)  : [['OPEN',open],['IN_PROGRESS',inprog],['RESOLVED',resolved],['CLOSED',closed]];
+      const priorityEntries= Object.entries(pb).length  ? Object.entries(pb)  : [['LOW',0],['MEDIUM',0],['HIGH',0],['CRITICAL',0]];
+      const statusColors   = {OPEN:'#3B82F6',IN_PROGRESS:'#F59E0B',RESOLVED:'#10B981',CLOSED:'#94A3B8'};
+      const priorityColors = {LOW:'#10B981',MEDIUM:'#F59E0B',HIGH:'#EF4444',CRITICAL:'#DC2626'};
+
+      const maxStat = Math.max(...statusEntries.map(([,v])=>Number(v)||0), 1);
+      const maxPri  = Math.max(...priorityEntries.map(([,v])=>Number(v)||0), 1);
+      const bar = (val, max, color) => {
+        const pct = Math.max(Math.round((val/max)*100), 2);
+        return `<div style="display:flex;align-items:center;gap:8px">
+          <div style="flex:1;height:10px;background:#F1F5F9;border-radius:6px;overflow:hidden">
+            <div style="width:${pct}%;height:100%;background:${color};border-radius:6px"></div>
+          </div>
+          <span style="font-size:12px;font-weight:700;min-width:24px;text-align:right">${val}</span>
+        </div>`;
+      };
+
+      return `
+      <div class="dash-stats" style="margin-bottom:20px">
+        <div class="dash-stat"><div class="dash-stat-ico ico-blue">${I.msg}</div><div class="dash-stat-lbl">Total Tickets</div><div class="dash-stat-val">${total}</div></div>
+        <div class="dash-stat"><div class="dash-stat-ico ico-green">${I.check}</div><div class="dash-stat-lbl">Resolution Rate</div><div class="dash-stat-val">${resolvedRate}%</div><div class="dash-stat-trend flat">Resolved + Closed</div></div>
+        <div class="dash-stat"><div class="dash-stat-ico ico-yellow">${I.bell}</div><div class="dash-stat-lbl">Open Tickets</div><div class="dash-stat-val">${open}</div></div>
+        <div class="dash-stat"><div class="dash-stat-ico ico-purple">${I.users}</div><div class="dash-stat-lbl">Support Agents</div><div class="dash-stat-val">${agents.filter(a=>a.role==='SUPPORT_AGENT'||a.roles?.includes('ROLE_SUPPORT_AGENT')).length}</div></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+        <div class="dash-chart-card">
+          <div class="dash-chart-hd" style="margin-bottom:4px">Tickets by Status</div>
+          <div class="dash-chart-sub" style="margin-bottom:16px">Distribution across all ticket statuses</div>
+          <div style="display:flex;flex-direction:column;gap:10px">
+            ${statusEntries.map(([label, val]) => `
+              <div>
+                <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+                  <span style="font-size:12px;font-weight:600;color:${statusColors[label]||'#64748B'}">${label.replace(/_/g,' ')}</span>
+                  <span style="font-size:11px;color:#94A3B8">${total>0?Math.round((Number(val)/total)*100):0}%</span>
+                </div>
+                ${bar(Number(val)||0, maxStat, statusColors[label]||'#94A3B8')}
+              </div>`).join('')}
+          </div>
+        </div>
+        <div class="dash-chart-card">
+          <div class="dash-chart-hd" style="margin-bottom:4px">Tickets by Priority</div>
+          <div class="dash-chart-sub" style="margin-bottom:16px">Workload distribution by urgency level</div>
+          <div style="display:flex;flex-direction:column;gap:10px">
+            ${priorityEntries.map(([label, val]) => `
+              <div>
+                <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+                  <span style="font-size:12px;font-weight:600;color:${priorityColors[label]||'#64748B'}">${label}</span>
+                  <span style="font-size:11px;color:#94A3B8">${total>0?Math.round((Number(val)/total)*100):0}%</span>
+                </div>
+                ${bar(Number(val)||0, maxPri, priorityColors[label]||'#94A3B8')}
+              </div>`).join('')}
+          </div>
+        </div>
+      </div>`;
+    })()}
   </div>
 
   <!-- FAQ drawer modal -->
@@ -2681,14 +3126,16 @@ TAB.audit = async () => {
 // ── System ────────────────────────────────────────────────
 TAB.system = async () => {
   if (!isAdmin()) return `<div class="d-alert d-alert-err">Access denied.</div>`;
-  let configs = []; let backups = [];
+  let configs = []; let backups = []; let sysHealth = null;
   try {
-    const [cfgRes, bkpRes] = await Promise.all([
+    const [cfgRes, bkpRes, hlthRes] = await Promise.all([
       ApiService.getSystemConfigurations(),
-      ApiService.getBackups()
+      ApiService.getBackups(),
+      ApiService.getSystemHealth().catch(() => null)
     ]);
-    configs = cfgRes.data || cfgRes || [];
-    backups = bkpRes.data || bkpRes || [];
+    configs    = cfgRes.data  || cfgRes  || [];
+    backups    = bkpRes.data  || bkpRes  || [];
+    sysHealth  = hlthRes?.data || hlthRes || null;
   } catch(_){}
 
   const lastBackup = backups[0];
@@ -2719,16 +3166,119 @@ TAB.system = async () => {
       <button class="btn-d btn-d-sec btn-d-sm btn-d-ico" data-action="edit-config" data-key="${c.configKey||c.key}" data-value="${c.sensitive?'':c.configValue||''}" data-category="${c.category||''}" data-desc="${c.description||''}">${I.edit}</button>
     </div>`).join('') : '<div style="color:#94A3B8;font-size:12px;padding:8px 0">No configurations found</div>';
 
+  // ── Build health widget rows from real backend data ──────
+  const dbStatus   = sysHealth?.databaseStatus || (ApiService.isOnline() ? 'UNKNOWN' : 'DOWN');
+  const memUsedPct = sysHealth?.memoryUsedPct  ?? '—';
+  const diskUsedPct= sysHealth?.diskUsedPct    ?? '—';
+  const uptimeMs   = sysHealth?.uptimeMs;
+  const uptimeFmt  = uptimeMs != null ? (() => {
+    const h = Math.floor(uptimeMs / 3600000);
+    const m = Math.floor((uptimeMs % 3600000) / 60000);
+    return h > 0 ? `${h}h ${m}m` : `${m}m`;
+  })() : '—';
+  const memBar = (pct) => {
+    const color = pct > 85 ? '#EF4444' : pct > 60 ? '#F59E0B' : '#10B981';
+    return `<div style="display:flex;align-items:center;gap:6px;margin-left:auto">
+      <div style="width:60px;height:6px;background:#E2E8F0;border-radius:4px;overflow:hidden">
+        <div style="width:${pct}%;height:100%;background:${color};border-radius:4px"></div>
+      </div>
+      <span style="font-size:11px;font-weight:700;color:${color}">${pct}%</span>
+    </div>`;
+  };
+
   return `
   <div class="dash-page-hd"><div><div class="dash-page-title">System</div><div class="dash-page-sub">Backups, configuration, health & developer tools</div></div></div>
+
+  <!-- System Health Monitor -->
+  <div class="dash-chart-card" style="margin-bottom:16px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+      <div>
+        <div class="dash-chart-hd" style="margin-bottom:2px">System Health Monitor</div>
+        <div class="dash-chart-sub">Real-time status of all system components</div>
+      </div>
+      <button class="btn-d btn-d-sec" id="btn-refresh-health" style="font-size:12px">${I.refresh} Refresh</button>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px" id="health-grid">
+      <!-- API Server -->
+      <div style="border:1px solid #e2e8f0;border-radius:10px;padding:14px">
+        <div style="font-size:11px;font-weight:700;color:#64748B;text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">API Server</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+          <span style="font-size:13px">Status</span>
+          <span class="bdg ${ApiService.isOnline()?'bdg-green':'bdg-red'}">${ApiService.isOnline()?'Online':'Offline'}</span>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+          <span style="font-size:13px">Uptime</span>
+          <span style="font-size:12px;font-weight:600">${uptimeFmt}</span>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <span style="font-size:13px">Active Threads</span>
+          <span style="font-size:12px;font-weight:600">${sysHealth?.activeThreads ?? '—'}</span>
+        </div>
+      </div>
+      <!-- Database -->
+      <div style="border:1px solid #e2e8f0;border-radius:10px;padding:14px">
+        <div style="font-size:11px;font-weight:700;color:#64748B;text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Database</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+          <span style="font-size:13px">Connection</span>
+          <span class="bdg ${dbStatus==='UP'?'bdg-green':'bdg-red'}">${dbStatus}</span>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <span style="font-size:13px">Configurations</span>
+          <span style="font-size:12px;font-weight:600">${configs.length} keys</span>
+        </div>
+      </div>
+      <!-- Memory -->
+      <div style="border:1px solid #e2e8f0;border-radius:10px;padding:14px">
+        <div style="font-size:11px;font-weight:700;color:#64748B;text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">JVM Memory</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+          <span style="font-size:13px">Used / Max</span>
+          <span style="font-size:12px;font-weight:600">${sysHealth?.memoryUsedMb ?? '—'} / ${sysHealth?.memoryMaxMb ?? '—'} MB</span>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <span style="font-size:13px">Usage</span>
+          ${typeof memUsedPct === 'number' ? memBar(memUsedPct) : '<span style="font-size:12px">—</span>'}
+        </div>
+      </div>
+      <!-- Disk -->
+      <div style="border:1px solid #e2e8f0;border-radius:10px;padding:14px">
+        <div style="font-size:11px;font-weight:700;color:#64748B;text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Disk Space</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+          <span style="font-size:13px">Free / Total</span>
+          <span style="font-size:12px;font-weight:600">${sysHealth?.diskFreeGb ?? '—'} / ${sysHealth?.diskTotalGb ?? '—'} GB</span>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <span style="font-size:13px">Usage</span>
+          ${typeof diskUsedPct === 'number' ? memBar(diskUsedPct) : '<span style="font-size:12px">—</span>'}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Update Management / Version Info -->
+  <div class="dash-chart-card" style="margin-bottom:16px">
+    <div class="dash-chart-hd" style="margin-bottom:4px">Update Management</div>
+    <div class="dash-chart-sub" style="margin-bottom:16px">Application version information and runtime environment</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px">
+      ${[
+        { label:'Application',    value: sysHealth?.appName        || 'Luz Technology System' },
+        { label:'App Version',    value: sysHealth?.appVersion     || '1.0.0' },
+        { label:'Spring Boot',    value: sysHealth?.springBootVersion || '3.5.10' },
+        { label:'Java Version',   value: sysHealth?.javaVersion    || '—' },
+        { label:'Last Backup',    value: lastBackup ? fmt.ago(lastBackup.createdAt) : 'Never' },
+        { label:'Server Time',    value: sysHealth?.serverTime ? new Date(sysHealth.serverTime).toLocaleString() : '—' },
+      ].map(item => `
+        <div style="background:#F8FAFC;border:1px solid #E2E8F0;border-radius:8px;padding:12px">
+          <div style="font-size:11px;color:#94A3B8;font-weight:600;margin-bottom:4px">${item.label}</div>
+          <div style="font-size:13px;font-weight:700;color:#1e293b">${item.value}</div>
+        </div>`).join('')}
+    </div>
+    <div style="margin-top:12px;padding:10px 14px;background:#F0FDF4;border-radius:8px;border-left:3px solid #10B981;font-size:12px;color:#065f46">
+      ✓ Running latest version — no updates available
+    </div>
+  </div>
+
   <div class="d-widgets">
     <div class="d-widget">
-      <div class="d-widget-ttl">System Health</div>
-      <div class="d-widget-row"><span>API Server</span><span class="bdg ${ApiService.isOnline()?'bdg-green':'bdg-red'}">${ApiService.isOnline()?'Online':'Offline'}</span></div>
-      <div class="d-widget-row"><span>Auth Service</span><span class="bdg ${localStorage.getItem('luz_jwt') ? 'bdg-green' : 'bdg-red'}">${localStorage.getItem('luz_jwt') ? 'Active' : 'No Session'}</span></div>
-      <div class="d-widget-row"><span>Last Backup</span><span style="font-size:12px">${lastBackup ? fmt.ago(lastBackup.createdAt) + (lastBackup.status !== 'COMPLETED' ? ` <span class="bdg bdg-red" style="font-size:10px">${lastBackup.status}</span>` : '') : 'Never'}</span></div>
-      <div class="d-widget-row"><span>Configurations</span><span>${configs.length} keys</span></div>
-    </div>
     <div class="d-widget">
       <div class="d-widget-ttl">Backups</div>
       <button class="btn-d btn-d-primary" style="width:100%;margin-bottom:12px" id="btn-trigger-backup">
@@ -3801,6 +4351,14 @@ function bindTab(tab) {
     }
     else if (action === 'download-report') { downloadReport(rtype, format, el); }
     else if (action === 'view-order')    { viewOrderDetail(id); }
+    else if (action === 'delivery-note') {
+      try {
+        await ApiService.downloadDeliveryNote(id);
+        showToast('Delivery note downloaded', 'success');
+      } catch(e) {
+        showToast(e.message || 'Could not download delivery note', 'error');
+      }
+    }
     else if (action === 'reconcile-txn') {
       const btn = el;
       btn.disabled = true; btn.innerHTML = `${I.refresh} Working…`;
@@ -4539,6 +5097,7 @@ function bindTab(tab) {
     document.getElementById('user-search')?.addEventListener('input', filterUsers);
     document.getElementById('user-role-filter')?.addEventListener('change', filterUsers);
   }
+  if (tab === 'orders')   bindOrdersTab();
   if (tab === 'support')  bindSupportTab();
   if (tab === 'pos')      bindPOS();
   if (tab === 'security') bindSecurityTab();
@@ -4929,6 +5488,7 @@ async function viewOrderDetail(id) {
   } catch(_){}
   const ship = Array.isArray(shipment) ? shipment[0] : shipment;
   const adminView = isAdmin();
+  const canPrintDelivery = !isSupportAgent();
 
   const custName  = order.customerName || order.userName ||
     ((order.customer?.firstName||'') + ' ' + (order.customer?.lastName||'')).trim() || '—';
@@ -4975,6 +5535,28 @@ async function viewOrderDetail(id) {
       </div>
     </div>` : '';
 
+  const addressParts = [
+    order.shippingVillage,
+    order.shippingCell,
+    order.shippingSector,
+    order.shippingDistrict,
+    order.shippingProvince
+  ].filter(Boolean).join(', ');
+  const deliveryBlock = `
+    <div style="margin-top:14px;padding:12px;background:#F8FAFC;border-radius:10px;border:1px solid #E2E8F0">
+      <div style="font-size:11px;font-weight:700;color:#475569;margin-bottom:8px;text-transform:uppercase;letter-spacing:.05em">Delivery Address</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:12px;color:#334155">
+        <div><span style="color:#64748B;font-weight:600">Province: </span>${esc(order.shippingProvince||'—')}</div>
+        <div><span style="color:#64748B;font-weight:600">District: </span>${esc(order.shippingDistrict||'—')}</div>
+        <div><span style="color:#64748B;font-weight:600">Sector: </span>${esc(order.shippingSector||'—')}</div>
+        <div><span style="color:#64748B;font-weight:600">Cell: </span>${esc(order.shippingCell||'—')}</div>
+        <div><span style="color:#64748B;font-weight:600">Village: </span>${esc(order.shippingVillage||'—')}</div>
+        <div><span style="color:#64748B;font-weight:600">Delivery Phone: </span>${esc(order.deliveryPhoneNumber||custPhone||'—')}</div>
+      </div>
+      <div style="font-size:12px;color:#334155;margin-top:8px"><span style="color:#64748B;font-weight:600">Address: </span>${esc(addressParts || order.shippingAddress || '—')}</div>
+      <div style="font-size:12px;color:#334155;margin-top:6px"><span style="color:#64748B;font-weight:600">Instructions: </span>${esc(order.deliveryInstructions||'—')}</div>
+    </div>`;
+
   /* ── Status update (both roles can update status per backend) ── */
   const statusBlock = `
     <div class="f-field" style="margin-top:16px">
@@ -4999,14 +5581,24 @@ async function viewOrderDetail(id) {
     <div style="margin-top:14px;font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px">Items Ordered</div>
     ${itemsList}
     ${totalsBlock}
+    ${deliveryBlock}
     ${shipSection}
     ${paymentBlock}
     ${statusBlock}`;
 
   document.getElementById('d-drawer-footer').innerHTML = `
     <button class="btn-d btn-d-sec" id="d-btn-cancel">Close</button>
+    ${canPrintDelivery ? `<button class="btn-d btn-d-sec" id="order-delivery-note">${I.download} Delivery Note</button>` : ''}
     <button class="btn-d btn-d-primary" id="order-status-save">Update Status</button>`;
   document.getElementById('d-btn-cancel')?.addEventListener('click', closeDrawer);
+  document.getElementById('order-delivery-note')?.addEventListener('click', async () => {
+    try {
+      await ApiService.downloadDeliveryNote(id);
+      showToast('Delivery note downloaded', 'success');
+    } catch(err) {
+      showToast(err.message || 'Could not download delivery note', 'error');
+    }
+  });
   document.getElementById('order-status-save')?.addEventListener('click', async () => {
     const status = document.getElementById('order-status-upd').value;
     try {
@@ -5188,6 +5780,59 @@ function bindSecurityTab() {
 
 // ── System tab bindings ───────────────────────────────────
 function bindSystemTab() {
+  // Refresh health monitor
+  document.getElementById('btn-refresh-health')?.addEventListener('click', async () => {
+    const btn  = document.getElementById('btn-refresh-health');
+    const grid = document.getElementById('health-grid');
+    if (btn) { btn.disabled = true; btn.textContent = 'Refreshing…'; }
+    try {
+      const res = await ApiService.getSystemHealth();
+      const h   = res?.data || res || {};
+      const dbOk  = h.databaseStatus === 'UP';
+      const apiOk = ApiService.isOnline();
+      const uptimeFmt = h.uptimeMs != null ? (() => {
+        const hr = Math.floor(h.uptimeMs / 3600000);
+        const mn = Math.floor((h.uptimeMs % 3600000) / 60000);
+        return hr > 0 ? `${hr}h ${mn}m` : `${mn}m`;
+      })() : '—';
+      const bar = (pct) => {
+        const c = pct > 85 ? '#EF4444' : pct > 60 ? '#F59E0B' : '#10B981';
+        return `<div style="display:flex;align-items:center;gap:6px;margin-left:auto">
+          <div style="width:60px;height:6px;background:#E2E8F0;border-radius:4px;overflow:hidden">
+            <div style="width:${pct}%;height:100%;background:${c};border-radius:4px"></div>
+          </div>
+          <span style="font-size:11px;font-weight:700;color:${c}">${pct}%</span>
+        </div>`;
+      };
+      if (grid) grid.innerHTML = `
+        <div style="border:1px solid #e2e8f0;border-radius:10px;padding:14px">
+          <div style="font-size:11px;font-weight:700;color:#64748B;text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">API Server</div>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px"><span style="font-size:13px">Status</span><span class="bdg ${apiOk?'bdg-green':'bdg-red'}">${apiOk?'Online':'Offline'}</span></div>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px"><span style="font-size:13px">Uptime</span><span style="font-size:12px;font-weight:600">${uptimeFmt}</span></div>
+          <div style="display:flex;align-items:center;justify-content:space-between"><span style="font-size:13px">Active Threads</span><span style="font-size:12px;font-weight:600">${h.activeThreads ?? '—'}</span></div>
+        </div>
+        <div style="border:1px solid #e2e8f0;border-radius:10px;padding:14px">
+          <div style="font-size:11px;font-weight:700;color:#64748B;text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Database</div>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px"><span style="font-size:13px">Connection</span><span class="bdg ${dbOk?'bdg-green':'bdg-red'}">${h.databaseStatus||'—'}</span></div>
+        </div>
+        <div style="border:1px solid #e2e8f0;border-radius:10px;padding:14px">
+          <div style="font-size:11px;font-weight:700;color:#64748B;text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">JVM Memory</div>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px"><span style="font-size:13px">Used / Max</span><span style="font-size:12px;font-weight:600">${h.memoryUsedMb ?? '—'} / ${h.memoryMaxMb ?? '—'} MB</span></div>
+          <div style="display:flex;align-items:center;justify-content:space-between"><span style="font-size:13px">Usage</span>${bar(h.memoryUsedPct ?? 0)}</div>
+        </div>
+        <div style="border:1px solid #e2e8f0;border-radius:10px;padding:14px">
+          <div style="font-size:11px;font-weight:700;color:#64748B;text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Disk Space</div>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px"><span style="font-size:13px">Free / Total</span><span style="font-size:12px;font-weight:600">${h.diskFreeGb ?? '—'} / ${h.diskTotalGb ?? '—'} GB</span></div>
+          <div style="display:flex;align-items:center;justify-content:space-between"><span style="font-size:13px">Usage</span>${bar(h.diskUsedPct ?? 0)}</div>
+        </div>`;
+      showToast('Health data refreshed', 'success');
+    } catch(e) {
+      showToast('Failed to fetch health data', 'error');
+    } finally {
+      if (btn) { btn.disabled = false; btn.innerHTML = `${I.refresh} Refresh`; }
+    }
+  });
+
   document.getElementById('btn-trigger-backup')?.addEventListener('click', async () => {
     const btn = document.getElementById('btn-trigger-backup');
     const txt = document.getElementById('backup-btn-txt');
@@ -5328,6 +5973,85 @@ function bindSystemTab() {
   });
 }
 
+// ── Orders tab (includes Communication Templates) ────────
+function bindOrdersTab() {
+  async function loadTemplatesGrid() {
+    const grid = document.getElementById('comm-templates-grid');
+    if (!grid) return;
+    try {
+      const res  = await ApiService.listEmailTemplates();
+      const list = res?.data || res || [];
+      if (!list.length) { grid.innerHTML = '<div style="color:#94A3B8;text-align:center;padding:24px;grid-column:1/-1">No templates found</div>'; return; }
+
+      const iconMap = { 'order-confirmation':'📦', 'password-reset':'🔑', 'mfa-otp':'🔐', 'low-stock-alert':'⚠️' };
+      grid.innerHTML = list.map(t => `
+        <div style="border:1.5px solid #e2e8f0;border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:10px">
+          <div style="font-size:22px">${iconMap[t.name]||'📧'}</div>
+          <div>
+            <div style="font-size:13px;font-weight:700;color:#1e293b;margin-bottom:3px">${t.name}.html</div>
+            <div style="font-size:11px;color:#64748B;line-height:1.4">${t.description}</div>
+          </div>
+          <div style="display:flex;gap:6px;margin-top:auto">
+            <button class="btn-d btn-d-sec btn-d-sm" data-tmpl-name="${t.name}" data-tmpl-desc="${t.description}" id="btn-view-tmpl-${t.name}" style="flex:1">${I.eye} View</button>
+            <button class="btn-d btn-d-primary btn-d-sm" data-tmpl-edit="${t.name}" data-tmpl-desc="${t.description}" style="flex:1">${I.edit} Edit</button>
+          </div>
+        </div>`).join('');
+
+      // Bind view/edit buttons
+      grid.querySelectorAll('[data-tmpl-name],[data-tmpl-edit]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const name = btn.dataset.tmplName || btn.dataset.tmplEdit;
+          const desc = btn.dataset.tmplDesc || '';
+          const modal = document.getElementById('tmpl-editor-modal');
+          const title = document.getElementById('tmpl-modal-title');
+          const descEl= document.getElementById('tmpl-modal-desc');
+          const ta    = document.getElementById('tmpl-editor-content');
+          const saveBtn = document.getElementById('tmpl-modal-save');
+          if (!modal || !ta) return;
+          title.textContent = btn.dataset.tmplName ? `Preview: ${name}.html` : `Edit: ${name}.html`;
+          if (descEl) descEl.textContent = desc;
+          saveBtn.style.display = btn.dataset.tmplName ? 'none' : '';
+          ta.value = 'Loading…'; ta.readOnly = !!btn.dataset.tmplName;
+          modal.style.display = 'flex';
+          try {
+            const r = await ApiService.getEmailTemplate(name);
+            ta.value = r?.data?.content || r?.content || '<!-- empty -->';
+          } catch { ta.value = '<!-- Could not load template -->'; }
+          saveBtn.dataset.tmplSaveName = name;
+        });
+      });
+    } catch(e) {
+      if (grid) grid.innerHTML = `<div style="color:#EF4444;text-align:center;padding:24px;grid-column:1/-1">Could not load templates</div>`;
+    }
+  }
+
+  // Template modal save
+  document.getElementById('tmpl-modal-save')?.addEventListener('click', async () => {
+    const btn  = document.getElementById('tmpl-modal-save');
+    const name = btn.dataset.tmplSaveName;
+    const content = document.getElementById('tmpl-editor-content')?.value || '';
+    if (!name || !content.trim()) return;
+    btn.disabled = true; btn.textContent = 'Saving…';
+    try {
+      await ApiService.updateEmailTemplate(name, content);
+      showToast('Template saved successfully', 'success');
+      document.getElementById('tmpl-editor-modal').style.display = 'none';
+    } catch(e) {
+      showToast(e.message || 'Failed to save template', 'error');
+    } finally { btn.disabled = false; btn.textContent = 'Save Template'; }
+  });
+
+  const closeModal = () => { const m = document.getElementById('tmpl-editor-modal'); if (m) m.style.display = 'none'; };
+  document.getElementById('tmpl-modal-close')?.addEventListener('click', closeModal);
+  document.getElementById('tmpl-modal-cancel')?.addEventListener('click', closeModal);
+  document.getElementById('tmpl-editor-modal')?.addEventListener('click', e => { if (e.target === e.currentTarget) closeModal(); });
+
+  document.getElementById('btn-reload-templates')?.addEventListener('click', loadTemplatesGrid);
+
+  // Auto-load on tab open
+  loadTemplatesGrid();
+}
+
 // ── Support tab ───────────────────────────────────────────
 let _supActiveChatId = null;
 
@@ -5337,7 +6061,7 @@ function bindSupportTab() {
     btn.addEventListener('click', () => {
       _supSubTab = btn.dataset.supMain;
       document.querySelectorAll('.sup-main-tab').forEach(b => b.classList.toggle('active', b===btn));
-      ['tickets','chats','faq'].forEach(id => {
+      ['tickets','chats','faq','performance'].forEach(id => {
         const el = document.getElementById(`sup-panel-${id}`);
         if (el) el.style.display = id === _supSubTab ? '' : 'none';
       });

@@ -319,10 +319,37 @@ export const ApiService = {
       return await request('/api/cart', { method: 'DELETE' });
     },
     async checkout(shippingAddress, billingAddress, paymentMethod, couponCode) {
+      const payload = typeof shippingAddress === 'object' && shippingAddress !== null
+        ? shippingAddress
+        : { shippingAddress, billingAddress, paymentMethod, couponCode };
       return await request('/api/cart/checkout', {
         method: 'POST',
-        body: JSON.stringify({ shippingAddress, billingAddress, paymentMethod, couponCode })
+        body: JSON.stringify(payload)
       });
+    }
+  },
+
+  addresses: {
+    async get() {
+      return await request('/api/users/addresses');
+    },
+    async create(data) {
+      return await request('/api/users/addresses', {
+        method: 'POST',
+        body: JSON.stringify(data)
+      });
+    },
+    async update(id, data) {
+      return await request(`/api/users/addresses/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(data)
+      });
+    },
+    async setDefault(id) {
+      return await request(`/api/users/addresses/${id}/default`, { method: 'PATCH' });
+    },
+    async delete(id) {
+      return await request(`/api/users/addresses/${id}`, { method: 'DELETE' });
     }
   },
 
@@ -850,6 +877,23 @@ export const ApiService = {
   async restoreBackup(id) {
     return await request(`/api/admin/backups/${id}/restore`, { method: 'POST' });
   },
+  async getSystemHealth() {
+    return await request('/api/admin/system/health');
+  },
+
+  // ── Email Templates ──────────────────────────────────────
+  async listEmailTemplates() {
+    return await request('/api/admin/email-templates');
+  },
+  async getEmailTemplate(name) {
+    return await request(`/api/admin/email-templates/${name}`);
+  },
+  async updateEmailTemplate(name, content) {
+    return await request(`/api/admin/email-templates/${name}`, {
+      method: 'PUT',
+      body: JSON.stringify({ content })
+    });
+  },
 
   // ── MTN Sandbox Tests ────────────────────────────────────
   async runMtnSandboxTests({ collectionKey, disbursementKey } = {}) {
@@ -1195,5 +1239,8 @@ export const ApiService = {
   },
   async downloadInvoice(orderId) {
     return await this._downloadBlob(`/api/reports/invoices/${orderId}`, `invoice-${orderId}.pdf`);
+  },
+  async downloadDeliveryNote(orderId) {
+    return await this._downloadBlob(`/api/reports/delivery-notes/${orderId}`, `delivery-note-${orderId}.pdf`);
   },
 };

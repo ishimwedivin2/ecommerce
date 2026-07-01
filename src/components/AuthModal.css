@@ -68,7 +68,7 @@
 .auth-side {
   width: 300px;
   flex-shrink: 0;
-  background: linear-gradient(160deg, #ff6b00 0%, #ff8c00 50%, #e55a00 100%);
+  background: linear-gradient(160deg, #0f172a 0%, #1e293b 58%, #020617 100%);
   padding: 40px 28px;
   display: flex;
   flex-direction: column;
@@ -80,7 +80,7 @@
   position: absolute;
   width: 340px; height: 340px;
   border-radius: 50%;
-  background: rgba(255,255,255,0.07);
+  background: rgba(255,255,255,0.06);
   top: -80px; right: -80px;
   pointer-events: none;
 }
@@ -89,7 +89,7 @@
   position: absolute;
   width: 200px; height: 200px;
   border-radius: 50%;
-  background: rgba(255,255,255,0.05);
+  background: rgba(255,255,255,0.04);
   bottom: -40px; left: -40px;
   pointer-events: none;
 }
@@ -147,7 +147,8 @@
 }
 .auth-benefit-icon {
   width: 30px; height: 30px;
-  background: rgba(255,255,255,0.18);
+  background: rgba(255,255,255,0.12);
+  border: 1px solid rgba(255,255,255,0.08);
   border-radius: 8px;
   display: flex; align-items: center; justify-content: center;
   flex-shrink: 0;

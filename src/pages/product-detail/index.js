@@ -91,7 +91,7 @@ export async function render(state) {
 }
 
 export function bindEvents(state, helpers) {
-  const { renderHeader, refresh, toast } = helpers;
+  const { renderHeader, refresh, toast, openCartDrawer } = helpers;
 
   function checkAuth(cb) {
     if (!ApiService.getCurrentUser()) {
@@ -118,6 +118,7 @@ export function bindEvents(state, helpers) {
       await ApiService.cart.addItem(pid, qty);
       toast('Product added to cart!');
       renderHeader();
+      openCartDrawer?.();
     });
   });
 

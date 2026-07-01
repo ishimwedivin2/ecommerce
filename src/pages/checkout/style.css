@@ -99,7 +99,9 @@
   font-weight: 600;
   color: var(--text-dark, #1E293B);
 }
-.chk-field input {
+.chk-field input,
+.chk-field select,
+.chk-field textarea {
   padding: 10px 14px;
   border: 1.5px solid var(--border, #E2E8F0);
   border-radius: 10px;
@@ -110,7 +112,82 @@
   color: var(--text-dark, #1E293B);
   background: white;
 }
-.chk-field input:focus { border-color: var(--primary, #FF6B00); }
+.chk-field select:disabled {
+  color: #94A3B8;
+  background: #F8FAFC;
+  cursor: not-allowed;
+}
+.chk-field textarea {
+  min-height: 76px;
+  resize: vertical;
+  line-height: 1.45;
+}
+.chk-field input:focus,
+.chk-field select:focus,
+.chk-field textarea:focus { border-color: var(--primary, #FF6B00); }
+.chk-address-mode {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.chk-address-mode-btn {
+  border: 1.5px solid #E2E8F0;
+  background: #fff;
+  color: #475569;
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.chk-address-mode-btn.active {
+  border-color: var(--primary, #FF6B00);
+  background: #FFF7F0;
+  color: var(--primary, #FF6B00);
+}
+.chk-address-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 12px;
+}
+.chk-address-preview {
+  border: 1.5px solid #E2E8F0;
+  background: #F8FAFC;
+  border-radius: 10px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: #475569;
+  font-size: 13px;
+  margin-bottom: 14px;
+}
+.chk-address-preview strong { color: #1E293B; }
+.chk-address-preview em {
+  color: #059669;
+  font-style: normal;
+  font-size: 12px;
+  font-weight: 700;
+}
+.chk-check-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #475569;
+  margin: -2px 0 12px;
+  cursor: pointer;
+}
+.chk-check-row input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--primary, #FF6B00);
+}
+@media (max-width: 560px) {
+  .chk-address-grid,
+  .chk-address-mode { grid-template-columns: 1fr; }
+}
 .req  { color: #EF4444; }
 .opt  { font-size: 11px; color: #94A3B8; font-weight: 400; }
 .chk-hint { font-size: 12px; color: #64748B; }
