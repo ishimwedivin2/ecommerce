@@ -138,9 +138,13 @@ let _finSubTab        = 'overview';
 let _expenseCache     = [];
 let _finDateFrom      = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
 let _finDateTo        = new Date().toISOString().slice(0, 10);
+let _routeHelpers     = null;
 
 // ── Main render ───────────────────────────────────────────
 export async function render(state) {
+  activeTab = state.activeAdminTab || 'analytics';
+  _finSubTab = state.activeFinanceTab || _finSubTab || 'overview';
+
   const u = getUser();
   const initials = `${(u.firstName||'A')[0]}${(u.lastName||'D')[0]}`.toUpperCase();
   const roleLabel = isAdmin() ? 'Admin' : isSupportAgent() ? 'Support' : 'Employee';
@@ -226,19 +230,20 @@ export async function render(state) {
 
 // ── bindEvents — called by router after innerHTML is set ──
 export async function bindEvents(state, helpers) {
+  _routeHelpers = helpers;
   // Measure actual header height so .dash-root sits exactly below it
   const headerEl = document.getElementById('app-header-container');
   if (headerEl) {
     const h = headerEl.getBoundingClientRect().height;
     if (h > 0) document.documentElement.style.setProperty('--admin-header-h', h + 'px');
   }
-  bindShell();
+  bindShell(helpers);
   await loadTab(activeTab);
   loadBadges();
 }
 
 // ── Shell bindings ────────────────────────────────────────
-function bindShell() {
+function bindShell(helpers) {
   document.getElementById('sidebar-toggle').onclick = () => {
     sidebarCollapsed = !sidebarCollapsed;
     document.getElementById('dash-sidebar').classList.toggle('collapsed', sidebarCollapsed);
@@ -251,6 +256,7 @@ function bindShell() {
     const tab = btn.dataset.tab;
     if (tab === activeTab) return;
     activeTab = tab;
+    helpers?.syncUrl?.({ currentView: 'admin', activeAdminTab: tab, activeFinanceTab: _finSubTab });
     document.querySelectorAll('.dash-nav-item').forEach(el => el.classList.toggle('active', el.dataset.tab === tab));
     document.getElementById('topbar-title').textContent = btn.querySelector('.dash-nav-label').textContent;
     loadTab(tab);
@@ -1545,7 +1551,7 @@ TAB.inventory = async () => {
     `<tr><td colspan="6"><div class="d-empty"><div class="d-empty-ico">📋</div><div class="d-empty-ttl">No movements yet</div></div></td></tr>`;
 
   const locations = [...new Set(items.map(i => i.location || i.warehouse || 'Main').filter(Boolean))];
-  const inStock   = items.filter(i=>i.quantity>0&&i.quantity>(reorderOf(i))).length;
+  const inStock   = items.filter(i=>i.quantity>0).length;
   const lowCount  = items.filter(i=>i.quantity>0&&i.quantity<=(reorderOf(i))).length;
   const outCount  = items.filter(i=>!i.quantity||i.quantity<=0).length;
 
@@ -4664,7 +4670,7 @@ function bindTab(tab) {
         const matchSt  = !stf ||
           (stf === 'out' && stock <= 0) ||
           (stf === 'low' && stock > 0 && stock <= reorderOf(item)) ||
-          (stf === 'ok'  && stock > reorderOf(item));
+          (stf === 'ok'  && stock > 0);
         return matchQ && matchLoc && matchSt;
       });
       const reorderOf2 = i => i.reorderPoint || i.lowStockThreshold || 10;
@@ -6699,6 +6705,7 @@ function bindFinanceTab() {
   document.querySelectorAll('[data-action="fin-subtab"]').forEach(btn => {
     btn.addEventListener('click', async () => {
       _finSubTab = btn.dataset.tab;
+      _routeHelpers?.syncUrl?.({ currentView: 'admin', activeAdminTab: 'finance', activeFinanceTab: _finSubTab });
       loadTab('finance');
     });
   });
@@ -6881,8 +6888,13 @@ function bindFinanceTab() {
       return;
     }
     try {
-      if (id) await ApiService.updateExpense(id, payload);
-      else    await ApiService.createExpense(payload);
+      const res = id ? await ApiService.updateExpense(id, payload) : await ApiService.createExpense(payload);
+      const savedExpense = res?.data || res;
+      const savedDate = savedExpense?.expenseDate?.slice?.(0, 10) || payload.expenseDate;
+      if (savedDate) {
+        if (!_finDateFrom || savedDate < _finDateFrom) _finDateFrom = savedDate;
+        if (!_finDateTo || savedDate > _finDateTo) _finDateTo = savedDate;
+      }
       closeExpenseModal();
       showToast(id ? 'Expense updated' : 'Expense added', 'success');
       loadTab('finance');

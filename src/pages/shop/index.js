@@ -1,6 +1,5 @@
 import './style.css';
 import { ApiService } from '../../api.js';
-import { setState } from '../../store.js';
 
 const BACKEND_URL = 'http://localhost:8080';
 const PAGE_SIZE = 24;
@@ -236,8 +235,9 @@ function bindPagination() {
 function bindCardActions() {
   document.querySelectorAll('[data-action="shop-detail"]').forEach(el => {
     el.addEventListener('click', () => {
-      setState({ currentView: 'product-detail', selectedProductId: el.dataset.id });
-      import('../../router.js').then(m => m.renderAll());
+      import('../../router.js').then(m => {
+        m.helpers.navigate('product-detail', { selectedProductId: el.dataset.id });
+      });
     });
   });
   document.querySelectorAll('[data-action="shop-add-cart"]').forEach(el => {

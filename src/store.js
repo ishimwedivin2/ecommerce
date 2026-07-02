@@ -6,6 +6,9 @@ export const appState = {
   selectedTicketId: null,
   searchQuery: '',
   activeAdminTab: 'analytics',
+  activeFinanceTab: 'overview',
+  activeEmployeeTab: 'orders',
+  activeSupportAgentTab: 'tickets',
   authModalMode: null, // null | 'login' | 'register' | 'forgot' | 'reset' | 'mfa'
   isUserDropdownOpen: false,
   pendingMfaToken: null,

@@ -129,7 +129,7 @@ export async function render() {
 }
 
 export function bindEvents(helpers) {
-  const { navigate, renderCartDrawer, renderHeader, renderAuthModal, toast } = helpers;
+  const { navigate, renderCartDrawer, renderHeader, renderAuthModal, syncUrl, toast } = helpers;
 
   document.getElementById('cart-drawer-close')?.addEventListener('click', () => closeDrawer(renderCartDrawer));
   document.getElementById('cart-drawer-overlay')?.addEventListener('click', (e) => {
@@ -138,7 +138,7 @@ export function bindEvents(helpers) {
 
   document.getElementById('cart-drawer-signin')?.addEventListener('click', () => {
     closeDrawer(renderCartDrawer);
-    setState({ authModalMode: 'login' });
+    syncUrl?.({ authModalMode: 'login' });
     renderAuthModal();
   });
 

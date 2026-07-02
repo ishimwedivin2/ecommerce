@@ -367,10 +367,10 @@ function successScreen(parentEl, title, body, btnLabel, onAction) {
 
 // ── bindEvents export ────────────────────────────────────────
 export function bindEvents(helpers) {
-  const { renderAuthModal, renderAll } = helpers;
+  const { renderAuthModal, navigate, syncUrl } = helpers;
 
   // ── Close modal
-  const closeModal = () => { setState({ authModalMode: null }); renderAuthModal(); };
+  const closeModal = () => { syncUrl?.({ authModalMode: null }); renderAuthModal(); };
   document.getElementById('auth-close')?.addEventListener('click', closeModal);
   document.getElementById('auth-overlay')?.addEventListener('click', e => {
     if (e.target.id === 'auth-overlay') closeModal();
@@ -379,7 +379,7 @@ export function bindEvents(helpers) {
   // ── Tab switches (login ↔ register + "switch" links)
   document.querySelectorAll('[data-tab]').forEach(btn => {
     btn.addEventListener('click', () => {
-      setState({ authModalMode: btn.dataset.tab });
+      syncUrl?.({ authModalMode: btn.dataset.tab });
       renderAuthModal();
     });
   });
@@ -394,7 +394,7 @@ export function bindEvents(helpers) {
   // LOGIN
   // ════════════════════════════════════════════════════════════
   document.getElementById('btn-forgot')?.addEventListener('click', () => {
-    setState({ authModalMode: 'forgot' }); renderAuthModal();
+    syncUrl?.({ authModalMode: 'forgot' }); renderAuthModal();
   });
 
   document.getElementById('form-login')?.addEventListener('submit', async e => {
@@ -411,15 +411,14 @@ export function bindEvents(helpers) {
     try {
       const res = await ApiService.auth.login(email, pass);
       if (res.data?.mfaRequired) {
-        setState({ pendingMfaToken: res.data.mfaToken, authModalMode: 'mfa' });
+        syncUrl?.({ pendingMfaToken: res.data.mfaToken, authModalMode: 'mfa' });
         renderAuthModal();
       } else {
         const user = ApiService.getCurrentUser();
         const roles = (user?.roles || []).map(r => (r?.name || r || '').toString());
         const view = roleToView(roles);
-        setState({ authModalMode: null, currentView: view });
         window.dispatchEvent(new Event('luz-login'));
-        renderAll();
+        navigate?.(view, { authModalMode: null });
         showToast(`Welcome back${user?.firstName ? ', ' + user.firstName : ''}!`, 'success');
       }
     } catch (err) {
@@ -428,7 +427,7 @@ export function bindEvents(helpers) {
         setAlert('auth-alert-login', 'error',
           'Account locked due to too many failed attempts. <button class="auth-link" id="btn-alert-forgot">Reset your password</button>');
         document.getElementById('btn-alert-forgot')?.addEventListener('click', () => {
-          setState({ authModalMode: 'forgot' }); renderAuthModal();
+          syncUrl?.({ authModalMode: 'forgot' }); renderAuthModal();
         });
       } else {
         setAlert('auth-alert-login', 'error', 'Incorrect email or password. Please try again.');
@@ -470,7 +469,7 @@ export function bindEvents(helpers) {
           'Account created!',
           'Your Luz Technology account is ready. Sign in to start shopping.',
           'Sign In Now',
-          () => { setState({ authModalMode: 'login', _regPrefillEmail: email }); renderAuthModal(); }
+          () => { syncUrl?.({ authModalMode: 'login', _regPrefillEmail: email }); renderAuthModal(); }
         );
       }
     } catch (err) {
@@ -488,7 +487,7 @@ export function bindEvents(helpers) {
   // MFA
   // ════════════════════════════════════════════════════════════
   document.getElementById('btn-mfa-back')?.addEventListener('click', () => {
-    setState({ authModalMode: 'login', pendingMfaToken: null }); renderAuthModal();
+    syncUrl?.({ authModalMode: 'login', pendingMfaToken: null }); renderAuthModal();
   });
 
   const otpBoxes = [...document.querySelectorAll('.auth-otp-box')];
@@ -541,9 +540,8 @@ export function bindEvents(helpers) {
         const mfaUser = ApiService.getCurrentUser();
         const mfaRoles = (mfaUser?.roles || []).map(r => (r?.name || r || '').toString());
         const mfaView = roleToView(mfaRoles);
-        setState({ pendingMfaToken: null, authModalMode: null, currentView: mfaView });
         window.dispatchEvent(new Event('luz-login'));
-        renderAll();
+        navigate?.(mfaView, { pendingMfaToken: null, authModalMode: null });
         showToast('Identity verified. Welcome!', 'success');
       } catch (_) {
         setAlert('auth-alert-mfa', 'error', 'Invalid or expired verification code. Please try again.');
@@ -556,15 +554,37 @@ export function bindEvents(helpers) {
   }
 
   document.getElementById('btn-mfa-resend')?.addEventListener('click', () => {
-    showToast('Please sign in again to receive a new code.', 'info');
-    setState({ authModalMode: 'login', pendingMfaToken: null }); renderAuthModal();
+    if (!appState.pendingMfaToken) {
+      showToast('Sign in again to request a new code.', 'info');
+      syncUrl?.({ authModalMode: 'login', pendingMfaToken: null });
+      renderAuthModal();
+      return;
+    }
+
+    setLoading('btn-mfa-resend', true, 'Resending...');
+    ApiService.auth.resendMfa(appState.pendingMfaToken)
+      .then(res => {
+        if (res.success && res.data?.mfaToken) {
+          syncUrl?.({ pendingMfaToken: res.data.mfaToken, authModalMode: 'mfa' });
+          renderAuthModal();
+          showToast('A new verification code has been sent.', 'success');
+        } else {
+          throw new Error(res.message || 'Unable to resend code');
+        }
+      })
+      .catch(err => {
+        showToast(err.message || 'Unable to resend code', 'error');
+      })
+      .finally(() => {
+        setLoading('btn-mfa-resend', false, 'Resend code');
+      });
   });
 
   // ════════════════════════════════════════════════════════════
   // FORGOT PASSWORD
   // ════════════════════════════════════════════════════════════
   document.getElementById('btn-forgot-back')?.addEventListener('click', () => {
-    setState({ authModalMode: 'login' }); renderAuthModal();
+    syncUrl?.({ authModalMode: 'login' }); renderAuthModal();
   });
 
   document.getElementById('form-forgot')?.addEventListener('submit', async e => {
@@ -581,7 +601,7 @@ export function bindEvents(helpers) {
         'Check your inbox',
         'If an account exists with that email, you\'ll receive a reset link shortly. Don\'t forget to check your spam folder.',
         'Back to Sign In',
-        () => { setState({ authModalMode: 'login' }); renderAuthModal(); }
+        () => { syncUrl?.({ authModalMode: 'login' }); renderAuthModal(); }
       );
     }
   });
@@ -620,7 +640,7 @@ export function bindEvents(helpers) {
           'Password reset!',
           'Your password has been updated successfully. You can now sign in with your new password.',
           'Sign In',
-          () => { setState({ authModalMode: 'login', pendingResetToken: null }); renderAuthModal(); }
+          () => { syncUrl?.({ authModalMode: 'login', pendingResetToken: null }); renderAuthModal(); }
         );
       }
     } catch (err) {

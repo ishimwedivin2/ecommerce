@@ -143,6 +143,12 @@
 .header-action-btn:hover { background: var(--bg-main); color: var(--primary); }
 .badge-btn { position: relative; }
 
+.header-action-btn.badge-btn svg {
+  width: 40px;
+  height: 40px;
+  display: block;
+}
+
 /* ── Hover Dropdowns (Account + Notifications) ────────── */
 #header-user-dropdown,
 .notifications-panel {

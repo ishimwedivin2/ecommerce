@@ -1,7 +1,6 @@
 import '../admin/style.css';
 import './style.css';
 import { ApiService } from '../../api.js';
-import { setState } from '../../store.js';
 import { connectWS, subscribeWS, unsubscribeWS } from '../../chat-ws.js';
 
 const BASE = 'http://localhost:8080';
@@ -755,7 +754,7 @@ function openCreateReturnModal(orders, customerId, parentOverlay) {
 
 // ── render ─────────────────────────────────────────────────
 export async function render(state) {
-  _activeTab = 'tickets';
+  _activeTab = state.activeSupportAgentTab || 'tickets';
 
   const user = ApiService.getCurrentUser();
 
@@ -771,10 +770,10 @@ export async function render(state) {
         </div>
         <div class="dash-sidebar-section">
           <div class="dash-sidebar-label">Menu</div>
-          <button class="dash-nav-item active" data-sa-tab="tickets">${ICONS.tickets}<span class="dash-nav-label">Tickets</span></button>
-          <button class="dash-nav-item" data-sa-tab="chat">${ICONS.chat}<span class="dash-nav-label">Live Chat</span></button>
-          <button class="dash-nav-item" data-sa-tab="customers">${ICONS.customers}<span class="dash-nav-label">Customers</span></button>
-          <button class="dash-nav-item" data-sa-tab="profile">${ICONS.profile}<span class="dash-nav-label">My Profile</span></button>
+          <button class="dash-nav-item ${_activeTab==='tickets'?'active':''}" data-sa-tab="tickets">${ICONS.tickets}<span class="dash-nav-label">Tickets</span></button>
+          <button class="dash-nav-item ${_activeTab==='chat'?'active':''}" data-sa-tab="chat">${ICONS.chat}<span class="dash-nav-label">Live Chat</span></button>
+          <button class="dash-nav-item ${_activeTab==='customers'?'active':''}" data-sa-tab="customers">${ICONS.customers}<span class="dash-nav-label">Customers</span></button>
+          <button class="dash-nav-item ${_activeTab==='profile'?'active':''}" data-sa-tab="profile">${ICONS.profile}<span class="dash-nav-label">My Profile</span></button>
         </div>
         <div style="margin-top:auto;padding:12px 14px;">
           <button class="dash-nav-item" id="sa-logout" style="color:#ef4444;">
@@ -937,7 +936,10 @@ export async function bindEvents(state, helpers) {
   }
 
   document.querySelectorAll('[data-sa-tab]').forEach(btn => {
-    btn.addEventListener('click', () => loadTab(btn.dataset.saTab));
+    btn.addEventListener('click', () => {
+      helpers?.syncUrl?.({ currentView: 'support-agent', activeSupportAgentTab: btn.dataset.saTab });
+      loadTab(btn.dataset.saTab);
+    });
   });
 
   document.getElementById('sa-logout')?.addEventListener('click', () => {
@@ -945,9 +947,8 @@ export async function bindEvents(state, helpers) {
     localStorage.removeItem('luz_jwt');
     localStorage.removeItem('luz_user');
     localStorage.removeItem('luz_refresh_token');
-    setState({ currentView: 'home' });
-    import('../../router.js').then(m => m.renderAll());
+    helpers?.navigate?.('home', { activeCategory: null });
   });
 
-  await loadTab('tickets');
+  await loadTab(_activeTab);
 }

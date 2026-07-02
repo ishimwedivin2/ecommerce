@@ -164,6 +164,13 @@ export const ApiService = {
       return res;
     },
 
+    async resendMfa(mfaToken) {
+      return await request('/api/auth/mfa/resend', {
+        method: 'POST',
+        body: JSON.stringify({ mfaToken })
+      });
+    },
+
     async refreshAccessToken() {
       const rt = storedRefreshToken || localStorage.getItem('luz_refresh_token');
       if (!rt) throw new Error('No refresh token available');
@@ -1180,7 +1187,10 @@ export const ApiService = {
     return await request(`/api/finance/expenses/${id}`, { method: 'PUT', body: JSON.stringify(data) });
   },
   async updateExpenseStatus(id, status) {
-    return await request(`/api/finance/expenses/${id}/status?status=${encodeURIComponent(status)}`, { method: 'PATCH' });
+    return await request(`/api/finance/expenses/${id}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status })
+    });
   },
   async deleteExpense(id) {
     return await request(`/api/finance/expenses/${id}`, { method: 'DELETE' });

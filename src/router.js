@@ -20,16 +20,156 @@ import * as SupportAgentPage from './pages/support-agent/index.js';
 import * as EmployeePage from './pages/employee/index.js';
 import * as ShopPage from './pages/shop/index.js';
 
+const ADMIN_TABS = new Set([
+  'analytics', 'orders', 'payments', 'products', 'inventory', 'suppliers',
+  'procurement', 'returns', 'shipments', 'fulfillment', 'pos', 'coupons',
+  'discounts', 'banners', 'crm', 'support', 'finance', 'reports', 'users',
+  'security', 'audit', 'system'
+]);
+const EMPLOYEE_TABS = new Set(['orders', 'returns', 'profile']);
+const SUPPORT_AGENT_TABS = new Set(['tickets', 'chat', 'customers', 'profile']);
+const FINANCE_SUBTABS = new Set(['overview', 'expenses', 'taxes', 'pl', 'mgmt', 'reconciliation']);
+
+function cleanPath(pathname = window.location.pathname) {
+  const path = pathname.replace(/\/+$/, '');
+  return path || '/';
+}
+
+function routeFromLocation(location = window.location) {
+  const path = cleanPath(location.pathname);
+  const parts = path.split('/').filter(Boolean).map(decodeURIComponent);
+  const params = new URLSearchParams(location.search);
+
+  if (params.get('view') === 'reset-password' && params.get('token')) {
+    return {
+      matched: true,
+      state: { pendingResetToken: params.get('token'), authModalMode: 'reset' }
+    };
+  }
+
+  if (path === '/' || path === '/home') {
+    return { matched: path !== '/', state: { currentView: 'home', authModalMode: null } };
+  }
+
+  const [section, sub, third] = parts;
+  if (section === 'login') return { matched: true, state: { currentView: 'home', authModalMode: 'login' } };
+  if (section === 'register') return { matched: true, state: { currentView: 'home', authModalMode: 'register' } };
+  if (section === 'forgot-password') return { matched: true, state: { currentView: 'home', authModalMode: 'forgot' } };
+  if (section === 'reset-password') return { matched: true, state: { currentView: 'home', authModalMode: 'reset', pendingResetToken: params.get('token') } };
+
+  if (section === 'shop') return { matched: true, state: { currentView: 'shop', authModalMode: null } };
+  if (section === 'cart') return { matched: true, state: { currentView: 'cart', authModalMode: null } };
+  if (section === 'checkout') return { matched: true, state: { currentView: 'checkout', authModalMode: null } };
+  if (section === 'wishlist') return { matched: true, state: { currentView: 'wishlist', authModalMode: null } };
+  if (section === 'profile' || section === 'customer') return { matched: true, state: { currentView: 'profile', authModalMode: null } };
+  if (section === 'support' && sub === 'tickets' && third) {
+    return { matched: true, state: { currentView: 'ticket-detail', selectedTicketId: third, authModalMode: null } };
+  }
+  if (section === 'support') return { matched: true, state: { currentView: 'support', authModalMode: null } };
+  if (section === 'product' && sub) {
+    return { matched: true, state: { currentView: 'product-detail', selectedProductId: sub, authModalMode: null } };
+  }
+
+  if (section === 'inventory') {
+    return { matched: true, state: { currentView: 'admin', activeAdminTab: 'inventory', authModalMode: null } };
+  }
+  if (section === 'admin') {
+    const activeAdminTab = ADMIN_TABS.has(sub) ? sub : 'analytics';
+    const state = { currentView: 'admin', activeAdminTab, authModalMode: null };
+    if (activeAdminTab === 'finance' && FINANCE_SUBTABS.has(third)) state.activeFinanceTab = third;
+    return { matched: true, state };
+  }
+  if (section === 'employee') {
+    return {
+      matched: true,
+      state: { currentView: 'employee', activeEmployeeTab: EMPLOYEE_TABS.has(sub) ? sub : 'orders', authModalMode: null }
+    };
+  }
+  if (section === 'support-agent') {
+    return {
+      matched: true,
+      state: { currentView: 'support-agent', activeSupportAgentTab: SUPPORT_AGENT_TABS.has(sub) ? sub : 'tickets', authModalMode: null }
+    };
+  }
+
+  return { matched: false, state: {} };
+}
+
+export function pathFromState(state = appState) {
+  if (state.authModalMode === 'login') return '/login';
+  if (state.authModalMode === 'register') return '/register';
+  if (state.authModalMode === 'forgot') return '/forgot-password';
+  if (state.authModalMode === 'reset') {
+    const token = state.pendingResetToken ? `?token=${encodeURIComponent(state.pendingResetToken)}` : '';
+    return `/reset-password${token}`;
+  }
+
+  switch (state.currentView) {
+    case 'home':
+      return '/';
+    case 'shop':
+      return '/shop';
+    case 'cart':
+      return '/cart';
+    case 'checkout':
+      return '/checkout';
+    case 'wishlist':
+      return '/wishlist';
+    case 'profile':
+      return '/customer';
+    case 'support':
+      return '/support';
+    case 'ticket-detail':
+      return state.selectedTicketId ? `/support/tickets/${encodeURIComponent(state.selectedTicketId)}` : '/support';
+    case 'product-detail':
+      return state.selectedProductId ? `/product/${encodeURIComponent(state.selectedProductId)}` : '/shop';
+    case 'admin': {
+      const tab = ADMIN_TABS.has(state.activeAdminTab) ? state.activeAdminTab : 'analytics';
+      if (tab === 'finance' && FINANCE_SUBTABS.has(state.activeFinanceTab)) return `/admin/finance/${state.activeFinanceTab}`;
+      return tab === 'analytics' ? '/admin' : `/admin/${tab}`;
+    }
+    case 'employee': {
+      const tab = EMPLOYEE_TABS.has(state.activeEmployeeTab) ? state.activeEmployeeTab : 'orders';
+      return tab === 'orders' ? '/employee' : `/employee/${tab}`;
+    }
+    case 'support-agent': {
+      const tab = SUPPORT_AGENT_TABS.has(state.activeSupportAgentTab) ? state.activeSupportAgentTab : 'tickets';
+      return tab === 'tickets' ? '/support-agent' : `/support-agent/${tab}`;
+    }
+    default:
+      return '/';
+  }
+}
+
+export function syncUrlToState({ replace = false } = {}) {
+  const nextPath = pathFromState(appState);
+  const current = `${cleanPath()}${window.location.search}`;
+  if (current === nextPath) return;
+  const method = replace ? 'replaceState' : 'pushState';
+  window.history[method]({ ...appState }, '', nextPath);
+}
+
+export function applyCurrentPathToState() {
+  const route = routeFromLocation();
+  if (route.matched) setState(route.state);
+  return route.matched;
+}
+
 // Helpers passed to every page/component
 export const helpers = {
-  navigate(view, extra = {}) {
+  navigate(view, extra = {}, options = {}) {
     if (view === 'cart') {
       setState({ isCartDrawerOpen: true, ...extra });
       renderCartDrawer();
       return;
     }
     setState({ currentView: view, authModalMode: null, isUserDropdownOpen: false, ...extra });
-    renderAll();
+    syncUrlToState({ replace: options.replace });
+    renderAll({ syncUrl: false });
+  },
+  syncUrl(extra = {}, options = {}) {
+    setState(extra);
+    syncUrlToState(options);
   },
   refresh() { renderView(); },
   renderHeader,
@@ -193,7 +333,9 @@ export async function openCartDrawer() {
   await renderCartDrawer();
 }
 
-export async function renderAll() {
+export async function renderAll(options = {}) {
+  if (options.syncUrl !== false) syncUrlToState({ replace: options.replaceUrl });
+
   const staffViews = ['admin', 'support-agent', 'employee'];
   const isAdmin = staffViews.includes(appState.currentView);
   // Toggle admin-mode class — hides footer and chat widget on staff dashboards
@@ -235,6 +377,8 @@ function bindHeaderHeightEvents(container) {
 }
 
 export function init() {
+  applyCurrentPathToState();
+
   // Start session guard if user is already logged in
   if (ApiService.getCurrentUser()) SessionGuard.start();
 
@@ -267,6 +411,10 @@ export function init() {
   });
 
   window.addEventListener('resize', updateAdminHeaderHeight);
+  window.addEventListener('popstate', () => {
+    applyCurrentPathToState();
+    renderAll({ syncUrl: false });
+  });
 
-  renderAll();
+  renderAll({ replaceUrl: true });
 }

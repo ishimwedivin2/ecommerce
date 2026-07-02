@@ -15,7 +15,7 @@ export async function render() {
   if (!cart.items || cart.items.length === 0) {
     return `
       <div class="empty-state">
-        <svg width="64" height="64" fill="none" stroke="var(--slate-300)" stroke-width="1.5" viewBox="0 0 24 24"><path d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z"></path></svg>
+        <svg width="64" height="64" fill="none" stroke="var(--slate-300)" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 4h2.2l2.1 10.1a2 2 0 0 0 2 1.6h8.2a2 2 0 0 0 1.9-1.4L21 8H7.4"></path><path stroke-linecap="round" d="M9.5 10h9"></path><path stroke-linecap="round" d="M10.2 12.8h7.8"></path><circle cx="9" cy="20" r="1.6"></circle><circle cx="17" cy="20" r="1.6"></circle></svg>
         <h2>Your Cart is Empty</h2>
         <p>Browse our products to find best deals and add items to your cart.</p>
         <button class="btn-primary" id="btn-back-shopping">Back to Shopping</button>

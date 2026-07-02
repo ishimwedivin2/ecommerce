@@ -144,7 +144,7 @@ export async function render() {
         ` : ''}
 
         <button class="header-action-btn badge-btn" data-navigate="cart" title="Shopping Cart">
-          <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><path d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z"></path></svg>
+          <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.1" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 4h2.2l2.1 10.1a2 2 0 0 0 2 1.6h8.2a2 2 0 0 0 1.9-1.4L21 8H7.4"></path><path stroke-linecap="round" d="M9.5 10h9"></path><path stroke-linecap="round" d="M10.2 12.8h7.8"></path><circle cx="9" cy="20" r="1.6"></circle><circle cx="17" cy="20" r="1.6"></circle></svg>
           ${cartCount > 0 ? `<div class="badge" id="cart-badge">${cartCount}</div>` : ''}
         </button>
       </div>
@@ -153,7 +153,7 @@ export async function render() {
 }
 
 export function bindEvents(helpers) {
-  const { navigate, renderAuthModal, renderHeader, renderView, openCartDrawer } = helpers;
+  const { navigate, renderAuthModal, renderHeader, renderView, openCartDrawer, syncUrl } = helpers;
 
   // Navigation links
   document.querySelectorAll('[data-navigate]').forEach(elem => {
@@ -208,7 +208,7 @@ export function bindEvents(helpers) {
 
   // Login button
   document.getElementById('btn-header-login')?.addEventListener('click', () => {
-    setState({ authModalMode: 'login' });
+    syncUrl?.({ authModalMode: 'login' });
     renderAuthModal();
   });
 

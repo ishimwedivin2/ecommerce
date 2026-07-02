@@ -1,6 +1,5 @@
 import '../admin/style.css';
 import { ApiService } from '../../api.js';
-import { setState } from '../../store.js';
 
 let _activeTab = 'orders';
 let _orderCache = [];
@@ -116,7 +115,7 @@ function buildProfileTab() {
 }
 
 export async function render(state) {
-  _activeTab = 'orders';
+  _activeTab = state.activeEmployeeTab || 'orders';
   const user = ApiService.getCurrentUser();
   return `
     <div class="dash-root" id="emp-root">
@@ -130,9 +129,9 @@ export async function render(state) {
         </div>
         <div class="dash-sidebar-section">
           <div class="dash-sidebar-label">Menu</div>
-          <button class="dash-nav-item active" data-emp-tab="orders">${ICONS.orders}<span class="dash-nav-label">Orders</span></button>
-          <button class="dash-nav-item" data-emp-tab="returns">${ICONS.returns}<span class="dash-nav-label">Returns</span></button>
-          <button class="dash-nav-item" data-emp-tab="profile">${ICONS.profile}<span class="dash-nav-label">My Profile</span></button>
+          <button class="dash-nav-item ${_activeTab==='orders'?'active':''}" data-emp-tab="orders">${ICONS.orders}<span class="dash-nav-label">Orders</span></button>
+          <button class="dash-nav-item ${_activeTab==='returns'?'active':''}" data-emp-tab="returns">${ICONS.returns}<span class="dash-nav-label">Returns</span></button>
+          <button class="dash-nav-item ${_activeTab==='profile'?'active':''}" data-emp-tab="profile">${ICONS.profile}<span class="dash-nav-label">My Profile</span></button>
         </div>
         <div style="margin-top:auto;padding:12px 14px;">
           <button class="dash-nav-item" id="emp-logout" style="color:#ef4444;">
@@ -229,16 +228,18 @@ export async function bindEvents(state, helpers) {
   }
 
   document.querySelectorAll('[data-emp-tab]').forEach(btn => {
-    btn.addEventListener('click', () => loadTab(btn.dataset.empTab));
+    btn.addEventListener('click', () => {
+      helpers?.syncUrl?.({ currentView: 'employee', activeEmployeeTab: btn.dataset.empTab });
+      loadTab(btn.dataset.empTab);
+    });
   });
 
   document.getElementById('emp-logout')?.addEventListener('click', () => {
     localStorage.removeItem('luz_jwt');
     localStorage.removeItem('luz_user');
     localStorage.removeItem('luz_refresh_token');
-    setState({ currentView: 'home' });
-    import('../../router.js').then(m => m.renderAll());
+    helpers?.navigate?.('home', { activeCategory: null });
   });
 
-  await loadTab('orders');
+  await loadTab(_activeTab);
 }
