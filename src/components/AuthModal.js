@@ -8,7 +8,7 @@ function roleToView(roles) {
   if (normalized.some(r => r.includes('ADMIN'))) return 'admin';
   if (normalized.some(r => r.includes('SUPPORT_AGENT') || r.includes('SUPPORT'))) return 'support-agent';
   if (normalized.some(r => r.includes('EMPLOYEE'))) return 'employee';
-  return 'home';
+  return 'shop'; // customers go to shop
 }
 
 // ── SVG Icons ───────────────────────────────────────────────

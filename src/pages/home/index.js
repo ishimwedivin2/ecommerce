@@ -280,6 +280,49 @@ export async function render(state) {
         </div>
       </div>
     ` : ''}
+
+    <section class="about-section animate-fade-up">
+      <div class="about-header">
+        <span class="about-eyebrow">Who We Are</span>
+        <h2 class="about-title">About Luz Technology Ltd</h2>
+        <p class="about-intro">Powering Rwanda's digital future through reliable networking, ICT solutions, and professional technology services.</p>
+      </div>
+
+      <div class="about-cards">
+
+        <div class="about-card about-card--mission">
+          <div class="about-card-icon">
+            <svg width="28" height="28" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+            </svg>
+          </div>
+          <h3 class="about-card-title">Our Mission</h3>
+          <p class="about-card-text">To provide reliable networking equipment, ICT solutions, and professional technology services that help businesses and organizations achieve efficient, secure, and scalable digital operations — built on a foundation of quality, reliability, and customer success.</p>
+        </div>
+
+        <div class="about-card about-card--vision">
+          <div class="about-card-icon">
+            <svg width="28" height="28" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+              <path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+            </svg>
+          </div>
+          <h3 class="about-card-title">Our Vision</h3>
+          <p class="about-card-text">To become a leading provider of networking and information technology solutions in Rwanda and the East African region — driven by innovation, quality service, and an unwavering commitment to customer satisfaction.</p>
+        </div>
+
+        <div class="about-card about-card--ops">
+          <div class="about-card-icon">
+            <svg width="28" height="28" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2V9M9 21H5a2 2 0 01-2-2V9m0 0h18"/>
+            </svg>
+          </div>
+          <h3 class="about-card-title">Our Operations</h3>
+          <p class="about-card-text">Our mission drives accurate inventory management, professional customer relations, and scalable systems — ensuring products are always available, service is consistently excellent, and our infrastructure is ready to support regional expansion across East Africa.</p>
+        </div>
+
+      </div>
+    </section>
   `;
 }
 

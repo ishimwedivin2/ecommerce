@@ -63,46 +63,105 @@ function statusBadge(status) {
   return `<span class="prof-badge" style="color:${m.color};background:${m.bg}">${m.icon ? `${m.icon} ` : ''}${m.label}</span>`;
 }
 
-function menuItem(id, label, icon, current) {
-  return `<button class="prof-menu-item ${current === id ? 'active' : ''}" data-section="${id}">${icon} ${label}</button>`;
+// SVG icons for the profile sidebar nav
+const PROF_ICONS = {
+  profile:   `<svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>`,
+  orders:    `<svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg>`,
+  addresses: `<svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>`,
+  password:  `<svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>`,
+  returns:   `<svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.35"/></svg>`,
+  logout:    `<svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>`,
+};
+
+function menuItem(id, label, current) {
+  const icon = PROF_ICONS[id] || '';
+  return `
+    <button class="dash-nav-item ${current === id ? 'active' : ''}" data-section="${id}">
+      <span class="dash-nav-icon">${icon}</span>
+      <span class="dash-nav-label">${label}</span>
+    </button>`;
 }
 
 function renderProfileSection(user) {
   return `
   <div class="prof-stack">
-    <div class="prof-card">
-      <div class="prof-avatar">${(user.firstName || 'U')[0].toUpperCase()}</div>
-      <div class="prof-name">${escHtml(user.firstName || '')} ${escHtml(user.lastName || '')}</div>
-      <div class="prof-email">${escHtml(user.email || '')}</div>
-      <div class="prof-joined">Member since ${fmtDateShort(user.createdAt)}</div>
+    <div class="prof-hero-card">
+      <div class="prof-hero-banner"></div>
+      <div class="prof-hero-body">
+        <div class="prof-hero-avatar-wrap">
+          <div class="prof-hero-avatar">${(user.firstName || 'U')[0].toUpperCase()}</div>
+          <div class="prof-hero-avatar-ring"></div>
+        </div>
+        <div class="prof-hero-info">
+          <div class="prof-hero-name">${escHtml(user.firstName || '')} ${escHtml(user.lastName || '')}</div>
+          <div class="prof-hero-email">
+            <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,12 2,6"/></svg>
+            ${escHtml(user.email || '')}
+          </div>
+          <div class="prof-hero-since">
+            <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            Member since ${fmtDateShort(user.createdAt)}
+          </div>
+        </div>
+        <div class="prof-hero-badge">Customer</div>
+      </div>
     </div>
 
-    <div class="prof-section">
-      <div class="prof-section-title">Edit Profile</div>
+    <div class="prof-form-card">
+      <div class="prof-form-header">
+        <div class="prof-form-header-icon">
+          <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+        </div>
+        <div>
+          <div class="prof-form-title">Edit Profile</div>
+          <div class="prof-form-sub">Update your personal information</div>
+        </div>
+      </div>
       <form id="prof-edit-form">
-        <div class="prof-field">
-          <label>First Name</label>
-          <input id="prof-fn" type="text" value="${escVal(user.firstName)}" required>
-        </div>
-        <div class="prof-field">
-          <label>Last Name</label>
-          <input id="prof-ln" type="text" value="${escVal(user.lastName)}" required>
-        </div>
-        <div class="prof-field">
-          <label>Email Address</label>
-          <input type="email" value="${escVal(user.email)}" disabled>
-          <small>Email cannot be changed</small>
-        </div>
-        <div class="prof-field">
-          <label>Phone Number</label>
-          <input id="prof-phone" type="tel" value="${escVal(user.phoneNumber)}" placeholder="+250 7XX XXX XXX">
-        </div>
-        <div class="prof-field">
-          <label>Default Shipping Address</label>
-          <input id="prof-addr" type="text" value="${escVal(user.address)}" placeholder="Street, City, Country">
+        <div class="prof-field-grid">
+          <div class="prof-field-modern">
+            <label>First Name</label>
+            <div class="prof-input-wrap">
+              <svg class="prof-input-icon" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+              <input id="prof-fn" type="text" value="${escVal(user.firstName)}" placeholder="First name" required>
+            </div>
+          </div>
+          <div class="prof-field-modern">
+            <label>Last Name</label>
+            <div class="prof-input-wrap">
+              <svg class="prof-input-icon" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+              <input id="prof-ln" type="text" value="${escVal(user.lastName)}" placeholder="Last name" required>
+            </div>
+          </div>
+          <div class="prof-field-modern prof-field-full">
+            <label>Email Address <span class="prof-badge-locked">Locked</span></label>
+            <div class="prof-input-wrap">
+              <svg class="prof-input-icon" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,12 2,6"/></svg>
+              <input type="email" value="${escVal(user.email)}" disabled placeholder="Email">
+            </div>
+          </div>
+          <div class="prof-field-modern">
+            <label>Phone Number</label>
+            <div class="prof-input-wrap">
+              <svg class="prof-input-icon" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12 19.79 19.79 0 0 1 1.61 3.38 2 2 0 0 1 3.6 1.18h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L7.91 8.96a16 16 0 0 0 6 6l1.14-1.14a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+              <input id="prof-phone" type="tel" value="${escVal(user.phoneNumber)}" placeholder="+250 7XX XXX XXX">
+            </div>
+          </div>
+          <div class="prof-field-modern">
+            <label>Default Shipping Address</label>
+            <div class="prof-input-wrap">
+              <svg class="prof-input-icon" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+              <input id="prof-addr" type="text" value="${escVal(user.address)}" placeholder="Street, City, Country">
+            </div>
+          </div>
         </div>
         <div id="prof-edit-msg" class="prof-msg" style="display:none"></div>
-        <button type="submit" class="btn-primary prof-save-btn">Save Changes</button>
+        <div class="prof-form-footer">
+          <button type="submit" class="prof-save-btn-modern">
+            <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+            Save Changes
+          </button>
+        </div>
       </form>
     </div>
   </div>`;
@@ -268,23 +327,47 @@ function renderAddressesSection(addresses) {
 function renderPasswordSection() {
   return `
   <div class="prof-stack">
-    <div class="prof-section">
-      <div class="prof-section-title">Reset Password</div>
+    <div class="prof-form-card">
+      <div class="prof-form-header">
+        <div class="prof-form-header-icon" style="background:linear-gradient(135deg,#7C3AED,#A855F7)">
+          <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        </div>
+        <div>
+          <div class="prof-form-title">Reset Password</div>
+          <div class="prof-form-sub">Keep your account secure with a strong password</div>
+        </div>
+      </div>
       <form id="prof-pwd-form">
-        <div class="prof-field">
-          <label>Current Password</label>
-          <input id="prof-cur-pwd" type="password" placeholder="••••••••" required>
-        </div>
-        <div class="prof-field">
-          <label>New Password</label>
-          <input id="prof-new-pwd" type="password" placeholder="Min 8 characters" required>
-        </div>
-        <div class="prof-field">
-          <label>Confirm New Password</label>
-          <input id="prof-cfm-pwd" type="password" placeholder="Repeat new password" required>
+        <div class="prof-field-grid" style="grid-template-columns:1fr">
+          <div class="prof-field-modern">
+            <label>Current Password</label>
+            <div class="prof-input-wrap">
+              <svg class="prof-input-icon" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+              <input id="prof-cur-pwd" type="password" placeholder="Enter current password" required>
+            </div>
+          </div>
+          <div class="prof-field-modern">
+            <label>New Password</label>
+            <div class="prof-input-wrap">
+              <svg class="prof-input-icon" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+              <input id="prof-new-pwd" type="password" placeholder="Min 8 characters" required>
+            </div>
+          </div>
+          <div class="prof-field-modern">
+            <label>Confirm New Password</label>
+            <div class="prof-input-wrap">
+              <svg class="prof-input-icon" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+              <input id="prof-cfm-pwd" type="password" placeholder="Repeat new password" required>
+            </div>
+          </div>
         </div>
         <div id="prof-pwd-msg" class="prof-msg" style="display:none"></div>
-        <button type="submit" class="btn-primary prof-save-btn">Update Password</button>
+        <div class="prof-form-footer">
+          <button type="submit" class="prof-save-btn-modern" style="background:linear-gradient(135deg,#7C3AED,#A855F7)">
+            <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            Update Password
+          </button>
+        </div>
       </form>
     </div>
   </div>`;
@@ -318,10 +401,18 @@ function renderReturnsSection(returns) {
 function renderLogoutSection() {
   return `
   <div class="prof-stack">
-    <div class="prof-section prof-danger-zone">
-      <div class="prof-section-title" style="color:#DC2626">Logout</div>
-      <p class="prof-danger-desc">End your current session and return to the homepage.</p>
-      <button id="btn-account-logout" class="prof-delete-btn">Log Out</button>
+    <div class="prof-logout-card">
+      <div class="prof-logout-icon">
+        <svg width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+      </div>
+      <div class="prof-logout-text">
+        <div class="prof-logout-title">Sign Out</div>
+        <div class="prof-logout-desc">End your current session and return to the homepage. All unsaved changes will be lost.</div>
+      </div>
+      <button id="btn-account-logout" class="prof-logout-btn">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+        Log Out
+      </button>
     </div>
   </div>`;
 }
@@ -382,15 +473,29 @@ export async function render() {
 
   return `
   <div class="prof-account-wrap">
-    <aside class="prof-menu">
-      <div class="prof-menu-title">My Account</div>
-      ${menuItem('profile', 'Profile Info', '👤', section)}
-      ${menuItem('orders', 'Orders', '🧾', section)}
-      ${menuItem('addresses', 'Shipping Addresses', '📍', section)}
-      ${menuItem('password', 'Password Reset', '🔐', section)}
-      ${menuItem('returns', 'Returns & Refunds', '↩️', section)}
-      ${menuItem('logout', 'Logout', '🚪', section)}
-    </aside>
+    <nav class="dash-sidebar prof-dash-sidebar" id="prof-sidebar">
+      <div class="dash-sidebar-header">
+        <div class="dash-sidebar-logo">L</div>
+        <div class="dash-sidebar-brand">Luz Technology<span>My Account</span></div>
+      </div>
+      <div class="dash-sidebar-section">
+        <div class="dash-sidebar-label">Account</div>
+        ${menuItem('profile',   'Profile Info',         section)}
+        ${menuItem('orders',    'Orders',               section)}
+        ${menuItem('addresses', 'Shipping Addresses',   section)}
+      </div>
+      <div class="dash-sidebar-section">
+        <div class="dash-sidebar-label">Security</div>
+        ${menuItem('password', 'Password Reset', section)}
+      </div>
+      <div class="dash-sidebar-section">
+        <div class="dash-sidebar-label">Activity</div>
+        ${menuItem('returns', 'Returns &amp; Refunds', section)}
+      </div>
+      <div class="dash-sidebar-section" style="margin-top:auto">
+        ${menuItem('logout', 'Logout', section)}
+      </div>
+    </nav>
 
     <main class="prof-account-content">
       ${renderContent(section, data)}
@@ -508,7 +613,7 @@ async function rerenderProfile(helpers) {
 }
 
 function bindSectionMenu(helpers) {
-  document.querySelectorAll('.prof-menu-item').forEach(btn => {
+  document.querySelectorAll('#prof-sidebar .dash-nav-item').forEach(btn => {
     btn.addEventListener('click', async () => {
       const section = btn.dataset.section || 'profile';
       setSection(section);

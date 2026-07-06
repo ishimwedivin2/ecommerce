@@ -184,39 +184,7 @@ input:focus, select:focus, textarea:focus {
   color: var(--primary);
 }
 
-/* Professional Search Bar */
-.search-bar-container {
-  flex: 1;
-  max-width: 520px;
-  position: relative;
-  display: flex;
-}
-
-.search-input {
-  width: 100%;
-  padding: 10px 42px 10px 18px;
-  border-radius: 99px;
-  background-color: var(--slate-50);
-  border: 1px solid var(--slate-200);
-  font-size: 14px;
-}
-
-.search-input:focus {
-  background-color: white;
-  border-color: var(--primary);
-}
-
-.search-btn {
-  position: absolute;
-  right: 14px;
-  top: 50%;
-  transform: translateY(-50%);
-  color: var(--slate-500);
-}
-
-.search-btn:hover {
-  color: var(--primary);
-}
+/* Search bar styles are defined in Header.css */
 
 .header-actions {
   display: flex;

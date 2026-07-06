@@ -1,4 +1,5 @@
 import '../admin/style.css';
+import '../role-profile.css';
 import { ApiService } from '../../api.js';
 
 let _activeTab = 'orders';
@@ -92,23 +93,148 @@ function buildReturnsTab(returns) {
   `;
 }
 
+function escH(s) { return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+function escV(s) { return String(s==null?'':s).replace(/"/g,'&quot;'); }
+function fmtDateShortEmp(v) { return v ? new Date(v).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'}) : '—'; }
+
 function buildProfileTab() {
   const user = ApiService.getCurrentUser() || {};
+  const initials = ((user.firstName||'E')[0]).toUpperCase();
   return `
-    <div class="dash-section-header"><h3>My Profile</h3></div>
-    <div style="background:white;border-radius:12px;padding:28px;max-width:420px;border:1px solid #e2e8f0;">
-      <div style="display:flex;align-items:center;gap:16px;margin-bottom:24px;">
-        <div style="width:56px;height:56px;border-radius:50%;background:#3b82f6;display:flex;align-items:center;justify-content:center;color:white;font-size:22px;font-weight:700;">
-          ${(user.firstName||'E')[0]}
-        </div>
-        <div>
-          <div style="font-weight:700;font-size:16px;">${user.firstName||''} ${user.lastName||''}</div>
-          <div style="font-size:13px;color:#64748b;">Employee</div>
+    <div style="max-width:760px;">
+      <!-- Hero card -->
+      <div class="rp-hero-card">
+        <div class="rp-hero-banner blue"></div>
+        <div class="rp-hero-body">
+          <div class="rp-hero-avatar-wrap">
+            <div class="rp-hero-avatar blue">${initials}</div>
+            <div class="rp-hero-avatar-ring"></div>
+          </div>
+          <div class="rp-hero-info">
+            <div class="rp-hero-name">${escH(user.firstName||'')} ${escH(user.lastName||'')}</div>
+            <div class="rp-hero-email">
+              <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,12 2,6"/></svg>
+              ${escH(user.email||'')}
+            </div>
+            <div class="rp-hero-since">
+              <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+              Member since ${fmtDateShortEmp(user.createdAt)}
+            </div>
+          </div>
+          <div class="rp-hero-badge blue">Employee</div>
         </div>
       </div>
-      <div style="display:flex;flex-direction:column;gap:12px;font-size:14px;">
-        <div><span style="color:#64748b;width:80px;display:inline-block;">Email</span>${user.email||'—'}</div>
-        <div><span style="color:#64748b;width:80px;display:inline-block;">Phone</span>${user.phoneNumber||'—'}</div>
+
+      <!-- Edit Profile -->
+      <div class="rp-form-card">
+        <div class="rp-form-header">
+          <div class="rp-form-header-icon blue">
+            <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          </div>
+          <div>
+            <div class="rp-form-title">Edit Profile</div>
+            <div class="rp-form-sub">Update your personal information</div>
+          </div>
+        </div>
+        <form id="emp-prof-edit-form">
+          <div class="rp-field-grid">
+            <div class="rp-field">
+              <label>First Name</label>
+              <div class="rp-input-wrap">
+                <svg class="rp-input-icon" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                <input id="emp-prof-fn" type="text" value="${escV(user.firstName)}" placeholder="First name" required>
+              </div>
+            </div>
+            <div class="rp-field">
+              <label>Last Name</label>
+              <div class="rp-input-wrap">
+                <svg class="rp-input-icon" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                <input id="emp-prof-ln" type="text" value="${escV(user.lastName)}" placeholder="Last name" required>
+              </div>
+            </div>
+            <div class="rp-field rp-field-full">
+              <label>Email Address <span class="rp-badge-locked">Locked</span></label>
+              <div class="rp-input-wrap">
+                <svg class="rp-input-icon" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,12 2,6"/></svg>
+                <input type="email" value="${escV(user.email)}" disabled placeholder="Email">
+              </div>
+            </div>
+            <div class="rp-field rp-field-full">
+              <label>Phone Number</label>
+              <div class="rp-input-wrap">
+                <svg class="rp-input-icon" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12 19.79 19.79 0 0 1 1.61 3.38 2 2 0 0 1 3.6 1.18h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L7.91 8.96a16 16 0 0 0 6 6l1.14-1.14a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+                <input id="emp-prof-phone" type="tel" value="${escV(user.phoneNumber)}" placeholder="+250 7XX XXX XXX">
+              </div>
+            </div>
+          </div>
+          <div id="emp-prof-msg" class="rp-msg" style="display:none"></div>
+          <div class="rp-form-footer">
+            <button type="submit" class="rp-save-btn blue">
+              <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+              Save Changes
+            </button>
+          </div>
+        </form>
+      </div>
+
+      <!-- Change Password -->
+      <div class="rp-form-card">
+        <div class="rp-form-header">
+          <div class="rp-form-header-icon blue">
+            <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+          </div>
+          <div>
+            <div class="rp-form-title">Change Password</div>
+            <div class="rp-form-sub">Keep your account secure with a strong password</div>
+          </div>
+        </div>
+        <form id="emp-prof-pwd-form">
+          <div class="rp-field-grid rp-pwd-grid">
+            <div class="rp-field">
+              <label>Current Password</label>
+              <div class="rp-input-wrap">
+                <svg class="rp-input-icon" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                <input id="emp-prof-cur-pwd" type="password" placeholder="Current password" required>
+              </div>
+            </div>
+            <div class="rp-field">
+              <label>New Password</label>
+              <div class="rp-input-wrap">
+                <svg class="rp-input-icon" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                <input id="emp-prof-new-pwd" type="password" placeholder="Min 8 characters" required>
+              </div>
+            </div>
+            <div class="rp-field">
+              <label>Confirm New Password</label>
+              <div class="rp-input-wrap">
+                <svg class="rp-input-icon" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                <input id="emp-prof-cfm-pwd" type="password" placeholder="Repeat new password" required>
+              </div>
+            </div>
+          </div>
+          <div id="emp-prof-pwd-msg" class="rp-msg" style="display:none"></div>
+          <div class="rp-form-footer">
+            <button type="submit" class="rp-save-btn blue">
+              <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+              Update Password
+            </button>
+          </div>
+        </form>
+      </div>
+
+      <!-- Logout -->
+      <div class="rp-logout-card" id="emp-prof-logout-card">
+        <div class="rp-logout-icon">
+          <svg width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+        </div>
+        <div class="rp-logout-text">
+          <div class="rp-logout-title">Sign Out</div>
+          <div class="rp-logout-desc">End your current session and return to the homepage.</div>
+        </div>
+        <button class="rp-logout-btn" id="emp-prof-logout-btn">
+          <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+          Log Out
+        </button>
       </div>
     </div>
   `;
@@ -171,10 +297,91 @@ async function loadTab(tab) {
       body.innerHTML = buildReturnsTab(_returnCache);
     } else if (tab === 'profile') {
       body.innerHTML = buildProfileTab();
+      bindProfileTabEvents();
     }
   } catch (e) {
     body.innerHTML = `<div class="dash-empty">Failed to load: ${e.message}</div>`;
   }
+}
+
+function showRpMsg(id, msg, type) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = msg;
+  el.className = 'rp-msg rp-msg-' + type;
+  el.style.display = '';
+  setTimeout(() => { el.style.display = 'none'; }, 5000);
+}
+
+function bindProfileTabEvents() {
+  // Edit form
+  document.getElementById('emp-prof-edit-form')?.addEventListener('submit', async e => {
+    e.preventDefault();
+    const btn = e.target.querySelector('button[type=submit]');
+    btn.disabled = true; btn.textContent = 'Saving…';
+    try {
+      const res = await fetch('http://localhost:8080/api/users/profile', {
+        method: 'PUT',
+        headers: { 'Content-Type':'application/json', 'Authorization':'Bearer '+localStorage.getItem('luz_jwt') },
+        body: JSON.stringify({
+          firstName: document.getElementById('emp-prof-fn').value.trim(),
+          lastName:  document.getElementById('emp-prof-ln').value.trim(),
+          phoneNumber: document.getElementById('emp-prof-phone').value.trim(),
+        })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const u = JSON.parse(localStorage.getItem('luz_user') || '{}');
+        const updated = { ...u, ...(data.data || {}) };
+        localStorage.setItem('luz_user', JSON.stringify(updated));
+        showRpMsg('emp-prof-msg', 'Profile saved successfully!', 'success');
+      } else {
+        const d = await res.json().catch(() => ({}));
+        showRpMsg('emp-prof-msg', d.message || 'Failed to save profile', 'error');
+      }
+    } catch (err) {
+      showRpMsg('emp-prof-msg', err.message || 'Network error', 'error');
+    } finally {
+      btn.disabled = false; btn.textContent = 'Save Changes';
+    }
+  });
+
+  // Password form
+  document.getElementById('emp-prof-pwd-form')?.addEventListener('submit', async e => {
+    e.preventDefault();
+    const newPwd = document.getElementById('emp-prof-new-pwd').value;
+    const cfmPwd = document.getElementById('emp-prof-cfm-pwd').value;
+    if (newPwd !== cfmPwd) { showRpMsg('emp-prof-pwd-msg', 'Passwords do not match', 'error'); return; }
+    if (newPwd.length < 8) { showRpMsg('emp-prof-pwd-msg', 'Password must be at least 8 characters', 'error'); return; }
+    const btn = e.target.querySelector('button[type=submit]');
+    btn.disabled = true; btn.textContent = 'Updating…';
+    try {
+      const res = await fetch('http://localhost:8080/api/auth/change-password', {
+        method: 'POST',
+        headers: { 'Content-Type':'application/json', 'Authorization':'Bearer '+localStorage.getItem('luz_jwt') },
+        body: JSON.stringify({ currentPassword: document.getElementById('emp-prof-cur-pwd').value, newPassword: newPwd })
+      });
+      if (res.ok) {
+        showRpMsg('emp-prof-pwd-msg', 'Password updated successfully!', 'success');
+        e.target.reset();
+      } else {
+        const d = await res.json().catch(() => ({}));
+        showRpMsg('emp-prof-pwd-msg', d.message || 'Failed to update password', 'error');
+      }
+    } catch (err) {
+      showRpMsg('emp-prof-pwd-msg', err.message || 'Network error', 'error');
+    } finally {
+      btn.disabled = false; btn.textContent = 'Update Password';
+    }
+  });
+
+  // Logout button in profile tab
+  document.getElementById('emp-prof-logout-btn')?.addEventListener('click', () => {
+    localStorage.removeItem('luz_jwt');
+    localStorage.removeItem('luz_user');
+    localStorage.removeItem('luz_refresh_token');
+    window.location.href = '/';
+  });
 }
 
 function bindOrderTabEvents() {
