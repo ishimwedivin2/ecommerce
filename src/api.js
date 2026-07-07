@@ -281,6 +281,31 @@ export const ApiService = {
     }
   },
 
+  // LOCATIONS (Rwanda administrative hierarchy — served dynamically by backend)
+  locations: {
+    // Public reads — return enabled nodes only (used by checkout dropdowns)
+    async provinces() {
+      return await request('/api/locations/provinces');
+    },
+    async children(parentId) {
+      return await request(`/api/locations/${parentId}/children`);
+    },
+    // Management reads — include disabled nodes (ADMIN / EMPLOYEE)
+    async manageProvinces() {
+      return await request('/api/locations/manage/provinces');
+    },
+    async manageChildren(parentId) {
+      return await request(`/api/locations/manage/${parentId}/children`);
+    },
+    // Management mutations (ADMIN / EMPLOYEE)
+    async toggle(id) {
+      return await request(`/api/locations/${id}/toggle`, { method: 'PATCH' });
+    },
+    async setEnabled(id, enabled) {
+      return await request(`/api/locations/${id}/status?enabled=${enabled}`, { method: 'PATCH' });
+    }
+  },
+
   // REVIEWS
   reviews: {
     async getByProduct(productId) {

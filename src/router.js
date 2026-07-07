@@ -23,10 +23,10 @@ import * as ShopPage from './pages/shop/index.js';
 const ADMIN_TABS = new Set([
   'analytics', 'orders', 'payments', 'products', 'inventory', 'suppliers',
   'procurement', 'returns', 'shipments', 'fulfillment', 'pos', 'coupons',
-  'discounts', 'banners', 'crm', 'support', 'finance', 'reports', 'users',
+  'discounts', 'banners', 'locations', 'crm', 'support', 'finance', 'reports', 'users',
   'security', 'audit', 'system'
 ]);
-const EMPLOYEE_TABS = new Set(['orders', 'returns', 'profile']);
+const EMPLOYEE_TABS = new Set(['orders', 'returns', 'locations', 'profile']);
 const SUPPORT_AGENT_TABS = new Set(['tickets', 'chat', 'customers', 'profile']);
 const FINANCE_SUBTABS = new Set(['overview', 'expenses', 'taxes', 'pl', 'mgmt', 'reconciliation']);
 

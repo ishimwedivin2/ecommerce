@@ -1,7 +1,7 @@
 import './style.css';
 import { ApiService } from '../../api.js';
 import { setState } from '../../store.js';
-import { getCells, getDistricts, getProvinces, getSectors, getVillages } from '../../rwanda-locations.js';
+import { getChildren, getProvinces } from '../../rwanda-locations.js';
 
 const BACKEND = 'http://localhost:8080';
 
@@ -84,7 +84,6 @@ export async function render() {
   const user = ApiService.getCurrentUser() || {};
   const items = _cart.items || [];
   const subtotal = Number(_cart.totalAmount || 0);
-  const provincesHtml = getProvinces().map(p => `<option value="${escVal(p)}">${esc(p)}</option>`).join('');
   const savedAddressOptions = _savedAddresses.map(a => `
     <option value="${escVal(a.id)}">${esc(a.label || a.formattedAddress || `${a.village}, ${a.district}`)}</option>`).join('');
 
@@ -151,9 +150,8 @@ export async function render() {
         <div id="new-address-panel" style="${_savedAddresses.length ? 'display:none' : ''}">
           <div class="chk-field">
             <label>Province <span class="req">*</span></label>
-            <select id="chk-province">
-              <option value="">Select province</option>
-              ${provincesHtml}
+            <select id="chk-province" disabled>
+              <option value="">Loading provinces…</option>
             </select>
           </div>
           <div class="chk-address-grid">
@@ -313,11 +311,20 @@ export async function render() {
 </div>`;
 }
 
-function populateSelect(id, values, placeholder) {
+// `nodes` are location DTOs { id, name, ... }. Option value is the id (used to
+// fetch the next level); the name is kept in data-name for building address text.
+function populateSelect(id, nodes, placeholder) {
   const el = document.getElementById(id);
   if (!el) return;
-  el.innerHTML = `<option value="">${placeholder}</option>` + values.map(v => `<option value="${escVal(v)}">${esc(v)}</option>`).join('');
-  el.disabled = values.length === 0;
+  el.innerHTML = `<option value="">${placeholder}</option>` +
+    nodes.map(n => `<option value="${escVal(n.id)}" data-name="${escVal(n.name)}">${esc(n.name)}</option>`).join('');
+  el.disabled = nodes.length === 0;
+}
+
+// Read the human-readable name of a select's chosen option (empty string if none).
+function selectedName(id) {
+  const el = document.getElementById(id);
+  return el?.selectedOptions?.[0]?.dataset?.name?.trim() || '';
 }
 
 function selectedAddressMode() {
@@ -353,7 +360,7 @@ function renderSavedAddressPreview() {
   if (notes) notes.value = address.deliveryInstructions || '';
 }
 
-function initAddressControls() {
+async function initAddressControls() {
   renderSavedAddressPreview();
   document.getElementById('chk-saved-address')?.addEventListener('change', renderSavedAddressPreview);
 
@@ -369,39 +376,49 @@ function initAddressControls() {
     });
   });
 
-  document.getElementById('chk-province')?.addEventListener('change', e => {
-    populateSelect('chk-district', getDistricts(e.target.value), 'Select district');
+  // Cascading dropdowns: each level fetches its enabled children by parent id.
+  document.getElementById('chk-province')?.addEventListener('change', async e => {
+    populateSelect('chk-district', [], 'Loading…');
     populateSelect('chk-sector', [], 'Select sector');
     populateSelect('chk-cell', [], 'Select cell');
     populateSelect('chk-village', [], 'Select village');
+    populateSelect('chk-district', await getChildren(e.target.value), 'Select district');
   });
-  document.getElementById('chk-district')?.addEventListener('change', e => {
-    const p = document.getElementById('chk-province')?.value;
-    populateSelect('chk-sector', getSectors(p, e.target.value), 'Select sector');
+  document.getElementById('chk-district')?.addEventListener('change', async e => {
+    populateSelect('chk-sector', [], 'Loading…');
     populateSelect('chk-cell', [], 'Select cell');
     populateSelect('chk-village', [], 'Select village');
+    populateSelect('chk-sector', await getChildren(e.target.value), 'Select sector');
   });
-  document.getElementById('chk-sector')?.addEventListener('change', e => {
-    const p = document.getElementById('chk-province')?.value;
-    const d = document.getElementById('chk-district')?.value;
-    populateSelect('chk-cell', getCells(p, d, e.target.value), 'Select cell');
+  document.getElementById('chk-sector')?.addEventListener('change', async e => {
+    populateSelect('chk-cell', [], 'Loading…');
     populateSelect('chk-village', [], 'Select village');
+    populateSelect('chk-cell', await getChildren(e.target.value), 'Select cell');
   });
-  document.getElementById('chk-cell')?.addEventListener('change', e => {
-    const p = document.getElementById('chk-province')?.value;
-    const d = document.getElementById('chk-district')?.value;
-    const s = document.getElementById('chk-sector')?.value;
-    populateSelect('chk-village', getVillages(p, d, s, e.target.value), 'Select village');
+  document.getElementById('chk-cell')?.addEventListener('change', async e => {
+    populateSelect('chk-village', [], 'Loading…');
+    populateSelect('chk-village', await getChildren(e.target.value), 'Select village');
   });
+
+  // Populate the province dropdown from the backend.
+  const provinceEl = document.getElementById('chk-province');
+  if (provinceEl) {
+    try {
+      populateSelect('chk-province', await getProvinces(), 'Select province');
+    } catch (_) {
+      provinceEl.innerHTML = '<option value="">Unable to load locations</option>';
+      provinceEl.disabled = true;
+    }
+  }
 }
 
 function getNewAddressDetails() {
   return {
-    province: document.getElementById('chk-province')?.value?.trim() || '',
-    district: document.getElementById('chk-district')?.value?.trim() || '',
-    sector: document.getElementById('chk-sector')?.value?.trim() || '',
-    cell: document.getElementById('chk-cell')?.value?.trim() || '',
-    village: document.getElementById('chk-village')?.value?.trim() || '',
+    province: selectedName('chk-province'),
+    district: selectedName('chk-district'),
+    sector: selectedName('chk-sector'),
+    cell: selectedName('chk-cell'),
+    village: selectedName('chk-village'),
     label: document.getElementById('chk-address-label')?.value?.trim() || '',
     deliveryInstructions: document.getElementById('chk-delivery-instructions')?.value?.trim() || '',
     deliveryPhoneNumber: document.getElementById('chk-delivery-phone')?.value?.trim() || '',

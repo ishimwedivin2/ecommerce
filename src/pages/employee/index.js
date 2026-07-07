@@ -1,14 +1,17 @@
 import '../admin/style.css';
 import '../role-profile.css';
 import { ApiService } from '../../api.js';
+import * as LocationManager from '../../components/LocationManager.js';
 
 let _activeTab = 'orders';
 let _orderCache = [];
 let _returnCache = [];
+let _helpers = null;
 
 const ICONS = {
   orders:   `<svg class="dash-nav-icon" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z"/></svg>`,
   returns:  `<svg class="dash-nav-icon" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"/></svg>`,
+  locations:`<svg class="dash-nav-icon" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/></svg>`,
   profile:  `<svg class="dash-nav-icon" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>`,
 };
 
@@ -257,6 +260,7 @@ export async function render(state) {
           <div class="dash-sidebar-label">Menu</div>
           <button class="dash-nav-item ${_activeTab==='orders'?'active':''}" data-emp-tab="orders">${ICONS.orders}<span class="dash-nav-label">Orders</span></button>
           <button class="dash-nav-item ${_activeTab==='returns'?'active':''}" data-emp-tab="returns">${ICONS.returns}<span class="dash-nav-label">Returns</span></button>
+          <button class="dash-nav-item ${_activeTab==='locations'?'active':''}" data-emp-tab="locations">${ICONS.locations}<span class="dash-nav-label">Locations</span></button>
           <button class="dash-nav-item ${_activeTab==='profile'?'active':''}" data-emp-tab="profile">${ICONS.profile}<span class="dash-nav-label">My Profile</span></button>
         </div>
         <div style="margin-top:auto;padding:12px 14px;">
@@ -295,6 +299,9 @@ async function loadTab(tab) {
       const res = await fetch('http://localhost:8080/api/returns?page=0&size=100', { headers }).then(r => r.json());
       _returnCache = res.data?.content || res.data || [];
       body.innerHTML = buildReturnsTab(_returnCache);
+    } else if (tab === 'locations') {
+      body.innerHTML = LocationManager.render();
+      await LocationManager.bindEvents(body, { toast: _helpers?.toast });
     } else if (tab === 'profile') {
       body.innerHTML = buildProfileTab();
       bindProfileTabEvents();
@@ -428,6 +435,7 @@ function bindStatusSelects() {
 }
 
 export async function bindEvents(state, helpers) {
+  _helpers = helpers;
   const headerEl = document.getElementById('app-header-container');
   if (headerEl) {
     const h = headerEl.getBoundingClientRect().height;

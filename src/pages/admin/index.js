@@ -3,6 +3,7 @@ import '../role-profile.css';
 import { ApiService } from '../../api.js';
 import { appState } from '../../store.js';
 import { connectWS, subscribeWS, unsubscribeWS } from '../../chat-ws.js';
+import * as LocationManager from '../../components/LocationManager.js';
 import { Chart, registerables } from 'chart.js';
 Chart.register(...registerables);
 
@@ -95,6 +96,7 @@ function navItems() {
     { id:'returns',      label:'Returns',     icon:I.rotate,  badge:'returns' },
     { id:'fulfillment',  label:'Fulfillment', icon:I.pkg },
     { id:'shipments',    label:'Shipments',   icon:I.truck },
+    { id:'locations',    label:'Locations',   icon:I.truck },
     { section: 'Sales' },
     { id:'pos',      label:'Point of Sale', icon:I.pos },
     { id:'coupons',   label:'Coupons',   icon:I.percent },
@@ -368,6 +370,9 @@ function statusBdg(status) {
 // TAB RENDERERS
 // ══════════════════════════════════════════════════════════
 const TAB = {};
+
+// ── Locations (shipping hierarchy management) ─────────────
+TAB.locations = async () => LocationManager.render();
 
 // ── Analytics ────────────────────────────────────────────
 let _analyticsRange = { preset: '30d' };
@@ -5265,6 +5270,7 @@ function bindTab(tab) {
 
   if (tab === 'coupons')  document.getElementById('btn-add-coupon')?.addEventListener('click',  () => openDrawer('coupon', null));
   if (tab === 'banners')  document.getElementById('btn-add-banner')?.addEventListener('click',  () => openDrawer('banner', null));
+  if (tab === 'locations') LocationManager.bindEvents(page, { toast: showToast });
   if (tab === 'users') {
     document.getElementById('btn-add-user')?.addEventListener('click', () => openDrawer('user', null));
 
