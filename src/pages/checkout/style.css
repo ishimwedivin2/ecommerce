@@ -78,9 +78,10 @@
 /* ── Panels (left) ───────────────────────────────────── */
 .chk-left {
   background: white;
-  border: 1.5px solid var(--border, #E2E8F0);
+  border: 1px solid var(--border, #E2E8F0);
   border-radius: 16px;
   padding: 28px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, .04), 0 10px 30px rgba(15, 23, 42, .05);
 }
 .chk-sect-title {
   font-size: 15px;
@@ -124,7 +125,12 @@
 }
 .chk-field input:focus,
 .chk-field select:focus,
-.chk-field textarea:focus { border-color: var(--primary, #FF6B00); }
+.chk-field textarea:focus {
+  border-color: var(--primary, #FF6B00);
+  box-shadow: 0 0 0 3px rgba(255, 107, 0, .12);
+}
+/* Native invalid state for required fields (shows once the browser flags them) */
+.chk-field input:required:invalid:not(:placeholder-shown) { border-color: #FCA5A5; }
 .chk-address-mode {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -186,8 +192,15 @@
 }
 @media (max-width: 560px) {
   .chk-address-grid,
-  .chk-address-mode { grid-template-columns: 1fr; }
+  .chk-address-mode,
+  .payment-methods { grid-template-columns: 1fr; }
+  .chk-left { padding: 20px; }
 }
+
+/* Disabled buttons (e.g. Pay while an order is being placed) read as inactive */
+.chk-left button:disabled,
+.chk-btn-row button:disabled,
+.chk-next:disabled { opacity: .6; cursor: not-allowed; }
 .req  { color: #EF4444; }
 .opt  { font-size: 11px; color: #94A3B8; font-weight: 400; }
 .chk-hint { font-size: 12px; color: #64748B; }
@@ -224,7 +237,7 @@
   outline: none;
   transition: border-color 0.2s;
 }
-.coupon-row input:focus { border-color: var(--primary, #FF6B00); }
+.coupon-row input:focus { border-color: var(--primary, #FF6B00); box-shadow: 0 0 0 3px rgba(255, 107, 0, .12); }
 .coupon-feedback {
   font-size: 13px;
   margin: 6px 0 4px;
@@ -237,7 +250,7 @@
 /* ── Payment methods ─────────────────────────────────── */
 .payment-methods {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, 1fr);
   gap: 10px;
   margin-bottom: 20px;
 }
@@ -246,16 +259,16 @@
   flex-direction: column;
   align-items: center;
   gap: 4px;
-  padding: 14px 12px;
+  padding: 16px 12px;
   border: 2px solid var(--border, #E2E8F0);
   border-radius: 12px;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: border-color .18s, background .18s, box-shadow .18s, transform .18s;
   text-align: center;
   background: white;
   user-select: none;
 }
-.payment-method-card:hover  { border-color: var(--primary, #FF6B00); background: #FFF7F0; }
+.payment-method-card:hover  { border-color: var(--primary, #FF6B00); background: #FFF7F0; transform: translateY(-1px); }
 .payment-method-card.active { border-color: var(--primary, #FF6B00); background: #FFF7F0; box-shadow: 0 0 0 3px rgba(255,107,0,.08); }
 .payment-method-icon { font-size: 22px; }
 .payment-method-card strong { font-size: 13px; color: var(--text-dark, #1E293B); }
@@ -401,9 +414,10 @@
 .chk-right { position: sticky; top: 80px; }
 .chk-summary {
   background: white;
-  border: 1.5px solid var(--border, #E2E8F0);
+  border: 1px solid var(--border, #E2E8F0);
   border-radius: 16px;
   padding: 20px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, .04), 0 10px 30px rgba(15, 23, 42, .05);
 }
 .chk-summary-title {
   font-size: 15px;

@@ -26,6 +26,7 @@ let _receipt       = null;   // fetched after payment confirmed
 let _pollTimer     = null;
 let _pollCount     = 0;
 let _savedAddresses = [];
+let _isPlacingOrder = false;   // guards against duplicate orders from double-clicking Pay
 const MAX_POLLS    = 40;     // 40 × 3 s = 2 min timeout
 
 // ── helpers ──────────────────────────────────────────────
@@ -76,6 +77,7 @@ export async function render() {
   _appliedCoupon = null;
   _order  = null;
   _receipt = null;
+  _isPlacingOrder = false;
   if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; }
   // Reset Stripe so it re-mounts to the fresh DOM element on next render
   window._stripe = null;
@@ -121,7 +123,7 @@ export async function render() {
         <h3 class="chk-sect-title">Shipping Information</h3>
         <div class="chk-field">
           <label>Full Name <span class="req">*</span></label>
-          <input id="chk-name" type="text" value="${user.firstName ? user.firstName + ' ' + (user.lastName || '') : ''}" placeholder="John Doe">
+          <input id="chk-name" type="text" value="${user.firstName ? user.firstName + ' ' + (user.lastName || '') : ''}" placeholder="John Doe" required>
         </div>
         <div class="chk-field">
           <label>Delivery Phone <span class="req">*</span></label>
@@ -150,26 +152,26 @@ export async function render() {
         <div id="new-address-panel" style="${_savedAddresses.length ? 'display:none' : ''}">
           <div class="chk-field">
             <label>Province <span class="req">*</span></label>
-            <select id="chk-province" disabled>
+            <select id="chk-province" disabled required>
               <option value="">Loading provinces…</option>
             </select>
           </div>
           <div class="chk-address-grid">
             <div class="chk-field">
               <label>District <span class="req">*</span></label>
-              <select id="chk-district" disabled><option value="">Select district</option></select>
+              <select id="chk-district" disabled required><option value="">Select district</option></select>
             </div>
             <div class="chk-field">
               <label>Sector <span class="req">*</span></label>
-              <select id="chk-sector" disabled><option value="">Select sector</option></select>
+              <select id="chk-sector" disabled required><option value="">Select sector</option></select>
             </div>
             <div class="chk-field">
               <label>Cell <span class="req">*</span></label>
-              <select id="chk-cell" disabled><option value="">Select cell</option></select>
+              <select id="chk-cell" disabled required><option value="">Select cell</option></select>
             </div>
             <div class="chk-field">
               <label>Village <span class="req">*</span></label>
-              <select id="chk-village" disabled><option value="">Select village</option></select>
+              <select id="chk-village" disabled required><option value="">Select village</option></select>
             </div>
           </div>
           <div class="chk-field">
@@ -226,7 +228,7 @@ export async function render() {
           <h3 class="chk-sect-title">MTN Mobile Money</h3>
           <div class="chk-field">
             <label>MTN Phone Number <span class="req">*</span></label>
-            <input id="mtn-phone" type="tel" value="${user.phoneNumber || ''}" placeholder="e.g. 0788123456">
+            <input id="mtn-phone" type="tel" value="${user.phoneNumber || ''}" placeholder="e.g. 0788123456" required>
             <small class="chk-hint">You will receive a payment prompt on this number</small>
           </div>
         </div>
@@ -236,7 +238,7 @@ export async function render() {
           <h3 class="chk-sect-title">Airtel Money</h3>
           <div class="chk-field">
             <label>Airtel Phone Number <span class="req">*</span></label>
-            <input id="airtel-phone" type="tel" value="${user.phoneNumber || ''}" placeholder="e.g. 0730123456">
+            <input id="airtel-phone" type="tel" value="${user.phoneNumber || ''}" placeholder="e.g. 0730123456" required>
             <small class="chk-hint">You will receive a payment prompt on this number</small>
           </div>
         </div>
@@ -579,6 +581,8 @@ export function bindEvents(state, helpers) {
   // ── Step 2 → Pay ──
   document.getElementById('btn-step2-pay')?.addEventListener('click', async () => {
     showError('step2-err', '');
+    // Prevent duplicate orders: ignore repeat clicks while a payment is already in flight.
+    if (_isPlacingOrder) return;
     if (!validatePaymentFields()) return;
 
     let checkoutPayload;
@@ -589,6 +593,7 @@ export function bindEvents(state, helpers) {
       return;
     }
 
+    _isPlacingOrder = true;
     const btn = document.getElementById('btn-step2-pay');
     btn.disabled = true;
     btn.textContent = 'Placing order…';
@@ -629,6 +634,7 @@ export function bindEvents(state, helpers) {
     } catch (err) {
       setStep(2);
       showError('step2-err', err.message || 'Payment failed. Please try again.');
+      _isPlacingOrder = false;
       btn.disabled = false;
       const subtotal = Number(_cart?.totalAmount || 0);
       btn.textContent = 'Pay ' + fmtMoney(subtotal * 1.18);
