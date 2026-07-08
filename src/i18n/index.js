@@ -8,9 +8,9 @@ let translationObserver = null;
 let translating = false;
 
 export const SUPPORTED_LOCALES = [
-  { code: 'en', label: 'EN', name: 'English' },
-  { code: 'fr', label: 'FR', name: 'Francais' },
-  { code: 'rw', label: 'RW', name: 'Kinyarwanda' },
+  { code: 'en', label: 'EN', name: 'English', flag: 'gb' },
+  { code: 'fr', label: 'FR', name: 'Francais', flag: 'fr' },
+  { code: 'rw', label: 'Kinya', name: 'Kinyarwanda', flag: 'rw' },
 ];
 
 function normalizeLocale(locale) {

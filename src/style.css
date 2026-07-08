@@ -1738,8 +1738,7 @@ input:focus, select:focus, textarea:focus {
 }
 
 .footer-slim {
-  max-width: 1280px;
-  margin: 0 auto;
+  width: 100%;
   padding: 14px 24px;
   display: flex;
   align-items: center;
@@ -2021,6 +2020,10 @@ input:focus, select:focus, textarea:focus {
   .header-main {
     flex-wrap: wrap;
     padding: 16px;
+  }
+
+  .footer-slim {
+    padding-inline: 16px;
   }
   
   .search-bar-container {

@@ -7,18 +7,7 @@ import * as CategoryNav from './components/CategoryNav.js';
 import * as AuthModal from './components/AuthModal.js';
 import * as ChatWidget from './components/ChatWidget.js';
 import * as CartDrawer from './components/CartDrawer.js';
-import * as HomePage from './pages/home/index.js';
-import * as ProductDetailPage from './pages/product-detail/index.js';
-import * as CartPage from './pages/cart/index.js';
-import * as CheckoutPage from './pages/checkout/index.js';
-import * as WishlistPage from './pages/wishlist/index.js';
-import * as ProfilePage from './pages/profile/index.js';
-import * as SupportPage from './pages/support/index.js';
-import * as TicketDetailPage from './pages/ticket-detail/index.js';
-import * as AdminPage from './pages/admin/index.js';
-import * as SupportAgentPage from './pages/support-agent/index.js';
-import * as EmployeePage from './pages/employee/index.js';
-import * as ShopPage from './pages/shop/index.js';
+import * as Footer from './components/Footer.js';
 import { translateHtml, t } from './i18n/index.js';
 
 const ADMIN_TABS = new Set([
@@ -30,6 +19,31 @@ const ADMIN_TABS = new Set([
 const EMPLOYEE_TABS = new Set(['orders', 'returns', 'locations', 'profile']);
 const SUPPORT_AGENT_TABS = new Set(['tickets', 'chat', 'customers', 'profile']);
 const FINANCE_SUBTABS = new Set(['overview', 'expenses', 'taxes', 'pl', 'mgmt', 'reconciliation']);
+
+const pageLoaders = {
+  home: () => import('./pages/home/index.js'),
+  'product-detail': () => import('./pages/product-detail/index.js'),
+  cart: () => import('./pages/cart/index.js'),
+  checkout: () => import('./pages/checkout/index.js'),
+  wishlist: () => import('./pages/wishlist/index.js'),
+  profile: () => import('./pages/profile/index.js'),
+  support: () => import('./pages/support/index.js'),
+  'ticket-detail': () => import('./pages/ticket-detail/index.js'),
+  shop: () => import('./pages/shop/index.js'),
+  admin: () => import('./pages/admin/index.js'),
+  'support-agent': () => import('./pages/support-agent/index.js'),
+  employee: () => import('./pages/employee/index.js'),
+};
+
+const pageCache = new Map();
+
+async function loadPage(view) {
+  if (!pageLoaders[view]) return null;
+  if (!pageCache.has(view)) {
+    pageCache.set(view, pageLoaders[view]());
+  }
+  return pageCache.get(view);
+}
 
 function cleanPath(pathname = window.location.pathname) {
   const path = pathname.replace(/\/+$/, '');
@@ -219,71 +233,14 @@ export async function renderView() {
   container.innerHTML = `<div style="text-align:center;padding:48px;font-weight:500;">${t('Loading...')}</div>`;
 
   try {
-    let html = '';
-    switch (appState.currentView) {
-      case 'home':
-        html = await HomePage.render(appState);
-        container.innerHTML = html;
-        HomePage.bindEvents(appState, helpers);
-        break;
-      case 'product-detail':
-        html = await ProductDetailPage.render(appState);
-        container.innerHTML = html;
-        ProductDetailPage.bindEvents(appState, helpers);
-        break;
-      case 'cart':
-        html = await CartPage.render(appState);
-        container.innerHTML = html;
-        CartPage.bindEvents(appState, helpers);
-        break;
-      case 'checkout':
-        html = await CheckoutPage.render(appState);
-        container.innerHTML = html;
-        CheckoutPage.bindEvents(appState, helpers);
-        break;
-      case 'wishlist':
-        html = await WishlistPage.render(appState);
-        container.innerHTML = html;
-        WishlistPage.bindEvents(appState, helpers);
-        break;
-      case 'profile':
-        html = await ProfilePage.render(appState);
-        container.innerHTML = html;
-        ProfilePage.bindEvents(appState, helpers);
-        break;
-      case 'support':
-        html = await SupportPage.render(appState);
-        container.innerHTML = html;
-        SupportPage.bindEvents(appState, helpers);
-        break;
-      case 'ticket-detail':
-        html = await TicketDetailPage.render(appState);
-        container.innerHTML = html;
-        TicketDetailPage.bindEvents(appState, helpers);
-        break;
-      case 'shop':
-        html = await ShopPage.render(appState);
-        container.innerHTML = html;
-        ShopPage.bindEvents(appState, helpers);
-        break;
-      case 'admin':
-        html = await AdminPage.render(appState);
-        container.innerHTML = html;
-        AdminPage.bindEvents(appState, helpers);
-        break;
-      case 'support-agent':
-        html = await SupportAgentPage.render(appState);
-        container.innerHTML = html;
-        SupportAgentPage.bindEvents(appState, helpers);
-        break;
-      case 'employee':
-        html = await EmployeePage.render(appState);
-        container.innerHTML = html;
-        EmployeePage.bindEvents(appState, helpers);
-        break;
-      default:
-        container.innerHTML = `<div style="text-align:center;padding:48px;"><h2>Page Not Found</h2></div>`;
+    const page = await loadPage(appState.currentView);
+    if (!page) {
+      container.innerHTML = `<div style="text-align:center;padding:48px;"><h2>Page Not Found</h2></div>`;
+      return;
     }
+    const html = await page.render(appState);
+    container.innerHTML = html;
+    page.bindEvents?.(appState, helpers);
   } catch (error) {
     console.error('Render error:', error);
     container.innerHTML = `
@@ -332,6 +289,20 @@ export async function renderCartDrawer() {
   translateHtml(container);
 }
 
+export async function renderFooter() {
+  const container = document.getElementById('app-footer-container');
+  if (!container) return;
+
+  const staffViews = ['admin', 'support-agent', 'employee'];
+  if (staffViews.includes(appState.currentView)) {
+    container.innerHTML = '';
+    return;
+  }
+
+  container.innerHTML = Footer.render();
+  translateHtml(container);
+}
+
 export async function openCartDrawer() {
   setState({ isCartDrawerOpen: true });
   await renderCartDrawer();
@@ -352,6 +323,7 @@ export async function renderAll(options = {}) {
     renderView().catch(console.error),
     renderAuthModal().catch(console.error),
     renderCartDrawer().catch(console.error),
+    renderFooter().catch(console.error),
   ];
   if (!isAdmin) {
     tasks.push(renderChatWidget().catch(console.error));

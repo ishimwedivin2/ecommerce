@@ -6,38 +6,7 @@ import { getLocale, setLocale, SUPPORTED_LOCALES, t } from '../i18n/index.js';
 
 export async function render() {
   const user = ApiService.getCurrentUser();
-
-  let cartCount = 0;
-  let wishlistCount = 0;
-  let notifCount = 0;
-
-  if (user) {
-    try {
-      const roles = (user?.roles||[]).map(r=>(r?.name||r||'').toString());
-      const isStaff = roles.some(r=>r==='ROLE_ADMIN'||r==='ROLE_EMPLOYEE');
-      const [cartRes, wishRes, notifRes, lowStockRes] = await Promise.allSettled([
-        ApiService.cart.get(),
-        ApiService.wishlist.get(),
-        ApiService.notifications.getUnreadCount(),
-        isStaff ? ApiService.inventory.getLowStock() : Promise.resolve(null),
-      ]);
-
-      if (cartRes.status === 'fulfilled') {
-        cartCount = cartRes.value?.data?.totalItems || 0;
-      }
-      if (wishRes.status === 'fulfilled') {
-        wishlistCount = wishRes.value?.data?.length || 0;
-      }
-      if (notifRes.status === 'fulfilled') {
-        notifCount = notifRes.value?.data || 0;
-      }
-      if (lowStockRes.status === 'fulfilled' && lowStockRes.value) {
-        const ls = lowStockRes.value;
-        const lsItems = ls ? (Array.isArray(ls)?ls:(ls?.data||ls?.content||[])) : [];
-        notifCount += lsItems.length;
-      }
-    } catch (e) {}
-  }
+  const currentLocale = SUPPORTED_LOCALES.find(l => l.code === getLocale()) || SUPPORTED_LOCALES[0];
 
   const accountMenuHtml = user ? `
     <div class="header-action-btn" style="position: relative; cursor: pointer;" id="header-user-dropdown-trigger">
@@ -143,8 +112,12 @@ export async function render() {
       </div>
 
       <div class="header-actions">
-        <label class="header-lang" style="display:flex;align-items:center;gap:4px;font-size:12px;color:var(--text-light);" title="${t('language')}">
-          <select id="locale-select" aria-label="${t('language')}" style="height:32px;border:1px solid var(--border-dark);border-radius:8px;background:white;font-weight:700;font-size:12px;padding:0 6px;cursor:pointer;">
+        <label class="header-lang" title="${t('language')}">
+          <span class="locale-current" aria-hidden="true">
+            <span class="locale-flag flag-${currentLocale.flag}"></span>
+            <span>${currentLocale.label}</span>
+          </span>
+          <select id="locale-select" aria-label="${t('language')}" class="locale-select">
             ${SUPPORTED_LOCALES.map(l => `<option value="${l.code}" ${getLocale() === l.code ? 'selected' : ''}>${l.label}</option>`).join('')}
           </select>
         </label>
@@ -153,14 +126,14 @@ export async function render() {
 
         <button class="header-action-btn badge-btn" data-navigate="wishlist" title="Wishlist">
           <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><path d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"></path></svg>
-          ${wishlistCount > 0 ? `<div class="badge" id="wishlist-badge">${wishlistCount}</div>` : ''}
+          <div class="badge" id="wishlist-badge" style="display:none">0</div>
         </button>
 
         ${user ? `
         <div style="position:relative;" id="notif-bell-wrapper">
           <button class="header-action-btn badge-btn" id="btn-notifications" title="Notifications">
             <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"></path></svg>
-            ${notifCount > 0 ? `<div class="badge" id="notif-badge">${notifCount}</div>` : '<div class="badge" id="notif-badge" style="display:none">0</div>'}
+            <div class="badge" id="notif-badge" style="display:none">0</div>
           </button>
           <div id="notifications-panel" class="notifications-panel" style="display:none;">
             <div class="notif-panel-header">
@@ -174,7 +147,7 @@ export async function render() {
 
         <button class="header-action-btn badge-btn" data-navigate="cart" title="Shopping Cart">
           <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.1" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 4h2.2l2.1 10.1a2 2 0 0 0 2 1.6h8.2a2 2 0 0 0 1.9-1.4L21 8H7.4"></path><path stroke-linecap="round" d="M9.5 10h9"></path><path stroke-linecap="round" d="M10.2 12.8h7.8"></path><circle cx="9" cy="20" r="1.6"></circle><circle cx="17" cy="20" r="1.6"></circle></svg>
-          ${cartCount > 0 ? `<div class="badge" id="cart-badge">${cartCount}</div>` : ''}
+          <div class="badge" id="cart-badge" style="display:none">0</div>
         </button>
       </div>
     </div>
@@ -187,6 +160,8 @@ export function bindEvents(helpers) {
   document.getElementById('locale-select')?.addEventListener('change', (e) => {
     setLocale(e.target.value);
   });
+
+  refreshHeaderBadges();
 
   // Navigation links
   document.querySelectorAll('[data-navigate]').forEach(elem => {
@@ -380,4 +355,45 @@ export function bindEvents(helpers) {
     });
   }
   searchBtn?.addEventListener('click', doSearch);
+}
+
+function setBadge(id, count) {
+  const badge = document.getElementById(id);
+  if (!badge) return;
+  const value = Number(count || 0);
+  badge.textContent = value;
+  badge.style.display = value > 0 ? 'flex' : 'none';
+}
+
+async function refreshHeaderBadges() {
+  const user = ApiService.getCurrentUser();
+  if (!user) {
+    setBadge('cart-badge', 0);
+    setBadge('wishlist-badge', 0);
+    setBadge('notif-badge', 0);
+    return;
+  }
+
+  const roles = (user?.roles || []).map(r => (r?.name || r || '').toString());
+  const isStaff = roles.some(r => r === 'ROLE_ADMIN' || r === 'ROLE_EMPLOYEE');
+  const [cartRes, wishRes, notifRes, lowStockRes] = await Promise.allSettled([
+    ApiService.cart.get(),
+    ApiService.wishlist.get(),
+    ApiService.notifications.getUnreadCount(),
+    isStaff ? ApiService.inventory.getLowStock() : Promise.resolve(null),
+  ]);
+
+  if (cartRes.status === 'fulfilled') {
+    setBadge('cart-badge', cartRes.value?.data?.totalItems || 0);
+  }
+  if (wishRes.status === 'fulfilled') {
+    setBadge('wishlist-badge', wishRes.value?.data?.length || 0);
+  }
+  let notifCount = notifRes.status === 'fulfilled' ? (notifRes.value?.data || 0) : 0;
+  if (lowStockRes.status === 'fulfilled' && lowStockRes.value) {
+    const ls = lowStockRes.value;
+    const lsItems = ls ? (Array.isArray(ls) ? ls : (ls?.data || ls?.content || [])) : [];
+    notifCount += lsItems.length;
+  }
+  setBadge('notif-badge', notifCount);
 }
