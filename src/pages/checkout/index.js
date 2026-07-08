@@ -660,8 +660,9 @@ export function bindEvents(state, helpers) {
     if (!_receipt) { toast('Receipt not yet loaded — try again in a moment', 'error'); return; }
     const r = _receipt;
     const _taxRate = Number(r.taxRate || 0);
+    const receiptSubtotalWithTax = Number(r.subTotalAmount || 0) + Number(r.taxAmount || 0);
     const itemsHtml = (r.items || []).map(i =>
-      `<div class="pi"><span>${i.productName||'Product'} ×${i.quantity}</span><span>${fmtMoney(Number(i.subTotal) * (1 + _taxRate))}</span></div>`
+      `<tr><td>${i.productName||'Product'}</td><td>${i.quantity}</td><td>${fmtMoney(Number(i.unitPrice || 0) * (1 + _taxRate))}</td><td>${fmtMoney(Number(i.subTotal || 0) * (1 + _taxRate))}</td></tr>`
     ).join('');
     const win = window.open('', '_blank', 'width=520,height=760');
     win.document.write(`<!DOCTYPE html><html><head>
@@ -669,21 +670,25 @@ export function bindEvents(state, helpers) {
       <style>
         *{box-sizing:border-box;margin:0;padding:0}
         body{font-family:Arial,sans-serif;padding:28px;color:#1e293b;max-width:420px;margin:0 auto}
-        .brand{text-align:center;font-size:20px;font-weight:800;color:#FF6B00;margin-bottom:2px}
+        .logo{width:72px;height:72px;object-fit:contain;display:block;margin:0 auto 8px}
+        .brand{text-align:center;font-size:20px;font-weight:800;color:#1e293b;margin-bottom:2px}
         .sub{text-align:center;font-size:11px;color:#94a3b8;margin-bottom:10px}
         h2{text-align:center;font-size:14px;font-weight:700;margin-bottom:12px}
         .meta{font-size:12px;color:#64748b;line-height:2;margin-bottom:12px}
         .meta div{display:flex;justify-content:space-between}
-        .items{border-top:1px dashed #ccc;border-bottom:1px dashed #ccc;padding:10px 0;margin:12px 0}
-        .pi{display:flex;justify-content:space-between;font-size:13px;margin-bottom:5px}
+        .items{width:100%;border-collapse:collapse;border-top:1px dashed #ccc;border-bottom:1px dashed #ccc;margin:12px 0}
+        .items th{font-size:11px;color:#64748b;text-align:left;padding:8px 4px;border-bottom:1px solid #e2e8f0}
+        .items td{font-size:12px;padding:7px 4px;border-bottom:1px solid #f1f5f9}
+        .items th:not(:first-child),.items td:not(:first-child){text-align:right}
         .totals{font-size:13px}
         .tot-r{display:flex;justify-content:space-between;color:#64748b;margin-bottom:3px;padding:2px 0}
         .grand{display:flex;justify-content:space-between;font-size:16px;font-weight:800;border-top:2px solid #e2e8f0;padding-top:8px;margin-top:6px}
-        .grand span:last-child{color:#FF6B00}
+        .grand span:last-child{color:#0f172a}
         .footer{text-align:center;font-size:11px;color:#94a3b8;margin-top:20px;border-top:1px dashed #ccc;padding-top:12px}
         @media print{body{padding:10px}}
       </style>
     </head><body>
+      <img class="logo" src="/logo.jpg" alt="Luz Technology">
       <div class="brand">Luz Technology</div>
       <div class="sub">Payment Receipt</div>
       <h2>Order #${r.orderNumber||'—'}</h2>
@@ -694,8 +699,8 @@ export function bindEvents(state, helpers) {
         <div><span>Reference</span><span>${r.paymentReference||'—'}</span></div>
         <div><span>Date</span><span>${r.issuedAt ? new Date(r.issuedAt).toLocaleString('en-GB',{dateStyle:'medium',timeStyle:'short'}) : '—'}</span></div>
       </div>
-      <div class="items">${itemsHtml}</div>
-      <div class="tot-r"><span>Subtotal</span><span>${fmtMoney(Number(r.subTotalAmount||0) * (1 + _taxRate))}</span></div>
+      <table class="items"><thead><tr><th>Item</th><th>Qty</th><th>Unit Price</th><th>Subtotal</th></tr></thead><tbody>${itemsHtml}</tbody></table>
+      <div class="tot-r"><span>Subtotal (tax incl.)</span><span>${fmtMoney(receiptSubtotalWithTax)}</span></div>
       ${Number(r.discountAmount) > 0 ? `<div class="tot-r" style="color:#10b981;"><span>${r.couponCode ? 'Discount (' + r.couponCode + ')' : 'Discount'}</span><span>-${fmtMoney(r.discountAmount)}</span></div>` : ''}
       <div class="grand"><span>Total Paid</span><span>${fmtMoney(r.totalAmount)}</span></div>
       <div class="tot-r" style="margin-top:4px;font-size:11px;color:#94a3b8;"><span>Tax (${Number((_taxRate)*100).toFixed(0)}%) included</span><span>${fmtMoney(r.taxAmount)}</span></div>
@@ -854,11 +859,12 @@ function renderReceiptBlock() {
     </tr>`;
   }).join('');
 
-  const subWithTax = Number(r.subTotalAmount || 0) * (1 + taxRate);
+  const subWithTax = Number(r.subTotalAmount || 0) + Number(r.taxAmount || 0);
 
   el.innerHTML = `
   <div class="rcpt-box">
     <div class="rcpt-header">
+      <img class="rcpt-logo" src="/logo.jpg" alt="Luz Technology">
       <div class="rcpt-brand">Luz Technology</div>
       <div class="rcpt-title">Payment Receipt</div>
     </div>
@@ -871,11 +877,11 @@ function renderReceiptBlock() {
       <div class="rcpt-row"><span>Date</span><span>${fmtDate(r.issuedAt)}</span></div>
     </div>
     <table class="rcpt-table">
-      <thead><tr><th>Item</th><th style="text-align:center">Qty</th><th style="text-align:right">Unit</th><th style="text-align:right">Total</th></tr></thead>
+      <thead><tr><th>Item</th><th style="text-align:center">Qty</th><th style="text-align:right">Unit Price</th><th style="text-align:right">Subtotal</th></tr></thead>
       <tbody>${itemsHtml}</tbody>
     </table>
     <div class="rcpt-totals">
-      <div class="rcpt-total-row"><span>Subtotal</span><span>${fmtMoney(subWithTax)}</span></div>
+      <div class="rcpt-total-row"><span>Subtotal (tax incl.)</span><span>${fmtMoney(subWithTax)}</span></div>
       ${Number(r.discountAmount) > 0 ? `
       <div class="rcpt-total-row" style="color:#10B981;">
         <span>${r.couponCode ? 'Discount (' + r.couponCode + ')' : 'Discount'}</span>

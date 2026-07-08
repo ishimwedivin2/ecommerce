@@ -644,7 +644,7 @@
   padding: 5px 12px; font-size: 12px; cursor: pointer; background: white; color: #475569;
   transition: all 0.2s;
 }
-.rcpt-head-btn:hover { border-color: var(--primary, #FF6B00); color: var(--primary, #FF6B00); }
+.rcpt-head-btn:hover { border-color: #1E293B; color: #1E293B; }
 .rcpt-head-close {
   border: none; background: #F1F5F9; border-radius: 8px;
   width: 32px; height: 32px; font-size: 18px;
@@ -654,11 +654,13 @@
 .rcpt-head-close:hover { background: #E2E8F0; }
 .rcpt-modal-body { padding: 20px; }
 .rcpt-brand-bar {
-  background: var(--primary, #FF6B00); color: white;
+  background: #F8FAFC; color: var(--text-dark, #1E293B);
   border-radius: 10px; padding: 14px; text-align: center; margin-bottom: 14px;
+  border: 1px solid var(--border, #E2E8F0);
 }
+.rcpt-brand-logo { width: 72px; height: 72px; object-fit: contain; display: block; margin: 0 auto 10px; }
 .rcpt-brand-name { font-size: 18px; font-weight: 800; }
-.rcpt-brand-sub  { font-size: 11px; opacity: .85; text-transform: uppercase; letter-spacing: 1px; margin-top: 2px; }
+.rcpt-brand-sub  { font-size: 11px; color: #64748B; text-transform: uppercase; letter-spacing: 1px; margin-top: 2px; }
 .rcpt-meta-grid  { background: #FAFAFA; border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; }
 .rcpt-mrow {
   display: flex; justify-content: space-between;

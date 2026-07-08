@@ -6761,8 +6761,10 @@ function showPOSReceipt(receipt) {
   const items    = receipt.items || [];
   const orderId  = receipt.orderId || receipt.id || '';
   const orderNum = receipt.orderNumber || orderId;
-  const subtotal = receipt.subTotalAmount || receipt.subtotal || 0;
-  const taxAmt   = receipt.taxAmount || 0;
+  const taxRate  = Number(receipt.taxRate ?? 0.18);
+  const subtotal = Number(receipt.subTotalAmount || receipt.subtotal || 0);
+  const taxAmt   = Number(receipt.taxAmount || 0);
+  const subtotalWithTax = subtotal + taxAmt;
   const total    = receipt.totalAmount || 0;
 
   const el = document.createElement('div');
@@ -6773,9 +6775,10 @@ function showPOSReceipt(receipt) {
 
       <!-- Header -->
       <div style="padding:24px 24px 0;text-align:center;">
-        <div style="font-size:13px;font-weight:700;color:#FF6B00;letter-spacing:.08em;text-transform:uppercase;margin-bottom:2px;">Luz Technology</div>
+        <img src="/logo.jpg" alt="Luz Technology" style="width:72px;height:72px;object-fit:contain;display:block;margin:0 auto 8px;">
+        <div style="font-size:13px;font-weight:700;color:#1E293B;letter-spacing:.08em;text-transform:uppercase;margin-bottom:2px;">Luz Technology</div>
         <div style="font-size:11px;color:#94A3B8;margin-bottom:12px;">Official Receipt</div>
-        <div style="width:48px;height:48px;background:#FFF7F0;border-radius:50%;margin:0 auto 8px;display:flex;align-items:center;justify-content:center;font-size:22px;">🧾</div>
+        <div style="width:48px;height:48px;background:#F1F5F9;border-radius:50%;margin:0 auto 8px;display:flex;align-items:center;justify-content:center;font-size:22px;">🧾</div>
         <div style="font-size:16px;font-weight:800;">Sale Complete</div>
         <div style="font-size:12px;color:#64748B;margin-top:2px;">Order #${orderNum}</div>
         <div style="font-size:11px;color:#94A3B8;">${new Date().toLocaleString('en-GB',{dateStyle:'medium',timeStyle:'short'})}</div>
@@ -6784,20 +6787,35 @@ function showPOSReceipt(receipt) {
       <!-- Receipt printable body -->
       <div id="pos-rcpt-printable" style="padding:16px 24px;">
         <!-- Items -->
-        <div style="border-top:1px dashed #E2E8F0;border-bottom:1px dashed #E2E8F0;padding:12px 0;margin:12px 0;">
+        <table style="width:100%;border-collapse:collapse;border-top:1px dashed #E2E8F0;border-bottom:1px dashed #E2E8F0;margin:12px 0;">
+          <thead>
+            <tr>
+              <th style="font-size:11px;color:#64748B;text-align:left;padding:8px 4px;border-bottom:1px solid #E2E8F0;">Item</th>
+              <th style="font-size:11px;color:#64748B;text-align:right;padding:8px 4px;border-bottom:1px solid #E2E8F0;">Qty</th>
+              <th style="font-size:11px;color:#64748B;text-align:right;padding:8px 4px;border-bottom:1px solid #E2E8F0;">Unit Price</th>
+              <th style="font-size:11px;color:#64748B;text-align:right;padding:8px 4px;border-bottom:1px solid #E2E8F0;">Subtotal</th>
+            </tr>
+          </thead>
+          <tbody>
           ${items.length ? items.map(i=>`
-            <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:5px;">
-              <span style="max-width:220px;">${i.productName||'Product'} <span style="color:#94A3B8">×${i.quantity}</span></span>
-              <span style="font-weight:600;">${fmt.money((i.subTotal||((i.unitPrice||0)*(i.quantity||1)))*1.18)}</span>
-            </div>`).join('') :
-            '<div style="font-size:13px;color:#94A3B8;text-align:center;">Items processed successfully.</div>'}
-        </div>
+            <tr>
+              <td style="font-size:12px;padding:7px 4px;border-bottom:1px solid #F1F5F9;">${i.productName||'Product'}</td>
+              <td style="font-size:12px;padding:7px 4px;border-bottom:1px solid #F1F5F9;text-align:right;">${i.quantity}</td>
+              <td style="font-size:12px;padding:7px 4px;border-bottom:1px solid #F1F5F9;text-align:right;">${fmt.money(Number(i.unitPrice || 0) * (1 + taxRate))}</td>
+              <td style="font-size:12px;padding:7px 4px;border-bottom:1px solid #F1F5F9;text-align:right;font-weight:600;">${fmt.money(Number(i.subTotal || ((i.unitPrice||0)*(i.quantity||1))) * (1 + taxRate))}</td>
+            </tr>`).join('') :
+            '<tr><td colspan="4" style="font-size:13px;color:#94A3B8;text-align:center;padding:12px 4px;">Items processed successfully.</td></tr>'}
+          </tbody>
+        </table>
 
         <!-- Totals -->
-        <div style="display:flex;justify-content:space-between;font-size:16px;font-weight:800;padding-top:8px;border-top:2px solid #F1F5F9;margin-top:4px;">
-          <span>Total Paid</span><span style="color:#FF6B00;">${fmt.money(total)}</span>
+        <div style="display:flex;justify-content:space-between;font-size:13px;color:#64748B;margin-top:4px;">
+          <span>Subtotal (tax incl.)</span><span>${fmt.money(subtotalWithTax)}</span>
         </div>
-        ${taxAmt ? `<div style="display:flex;justify-content:space-between;font-size:11px;color:#94A3B8;margin-top:4px;"><span>Includes VAT (18%)</span><span>${fmt.money(taxAmt)}</span></div>` : ''}
+        <div style="display:flex;justify-content:space-between;font-size:16px;font-weight:800;padding-top:8px;border-top:2px solid #F1F5F9;margin-top:4px;">
+          <span>Total Paid</span><span style="color:#0F172A;">${fmt.money(total)}</span>
+        </div>
+        ${taxAmt ? `<div style="display:flex;justify-content:space-between;font-size:11px;color:#94A3B8;margin-top:4px;"><span>Tax (${Math.round(taxRate * 100)}%) included</span><span>${fmt.money(taxAmt)}</span></div>` : ''}
 
         <!-- Meta -->
         <div style="margin-top:12px;padding:10px;background:#F8FAFC;border-radius:8px;font-size:12px;color:#64748B;line-height:1.8;">
@@ -6816,7 +6834,7 @@ function showPOSReceipt(receipt) {
       <div style="padding:12px 24px 20px;display:flex;gap:8px;">
         <button id="pos-rcpt-pdf" style="flex:1;padding:10px 8px;background:#1E293B;color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer;font-size:13px;">⬇ Download PDF</button>
         <button id="pos-rcpt-print" style="flex:1;padding:10px 8px;background:#475569;color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer;font-size:13px;">🖨 Print</button>
-        <button id="pos-receipt-close" style="flex:1;padding:10px 8px;background:#FF6B00;color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer;font-size:13px;">Done</button>
+        <button id="pos-receipt-close" style="flex:1;padding:10px 8px;background:#0F172A;color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer;font-size:13px;">Done</button>
       </div>
     </div>`;
 
@@ -6850,30 +6868,36 @@ function showPOSReceipt(receipt) {
       <title>Receipt — ${orderNum}</title>
       <style>
         body { font-family: Arial, sans-serif; margin: 0; padding: 24px; color: #1e293b; }
-        .brand { text-align:center; font-size:18px; font-weight:800; color:#FF6B00; margin-bottom:2px; }
+        .logo { width:72px; height:72px; object-fit:contain; display:block; margin:0 auto 8px; }
+        .brand { text-align:center; font-size:18px; font-weight:800; color:#1e293b; margin-bottom:2px; }
         .sub   { text-align:center; font-size:11px; color:#94A3B8; margin-bottom:12px; }
         .title { text-align:center; font-size:16px; font-weight:700; margin-bottom:4px; }
         .meta  { text-align:center; font-size:12px; color:#64748B; margin-bottom:16px; }
-        .items { border-top:1px dashed #ccc; border-bottom:1px dashed #ccc; padding:10px 0; margin:12px 0; }
-        .item  { display:flex; justify-content:space-between; font-size:13px; margin-bottom:4px; }
+        .items { width:100%; border-collapse:collapse; border-top:1px dashed #ccc; border-bottom:1px dashed #ccc; margin:12px 0; }
+        .items th { font-size:11px; color:#64748B; text-align:left; padding:8px 4px; border-bottom:1px solid #e2e8f0; }
+        .items td { font-size:12px; padding:7px 4px; border-bottom:1px solid #f1f5f9; }
+        .items th:not(:first-child), .items td:not(:first-child) { text-align:right; }
         .totals  { font-size:13px; }
         .tot-row { display:flex; justify-content:space-between; margin-bottom:4px; color:#64748B; }
         .grand { display:flex; justify-content:space-between; font-size:16px; font-weight:800; border-top:2px solid #e2e8f0; padding-top:8px; margin-top:6px; }
-        .grand span:last-child { color:#FF6B00; }
+        .grand span:last-child { color:#0f172a; }
         .info  { font-size:12px; color:#64748B; line-height:1.8; background:#f8fafc; padding:10px; border-radius:6px; margin-top:12px; }
         .footer { text-align:center; font-size:11px; color:#94A3B8; margin-top:16px; border-top:1px dashed #ccc; padding-top:10px; }
         @media print { body { padding:10px; } }
       </style>
     </head><body>
+      <img class="logo" src="/logo.jpg" alt="Luz Technology">
       <div class="brand">Luz Technology</div>
       <div class="sub">Official Receipt</div>
       <div class="title">Sale Complete — #${orderNum}</div>
       <div class="meta">${new Date().toLocaleString('en-GB',{dateStyle:'medium',timeStyle:'short'})}</div>
-      <div class="items">
-        ${items.map(i=>`<div class="item"><span>${i.productName||'Product'} ×${i.quantity}</span><span>${fmt.money((i.subTotal||((i.unitPrice||0)*(i.quantity||1)))*1.18)}</span></div>`).join('')}
-      </div>
+      <table class="items">
+        <thead><tr><th>Item</th><th>Qty</th><th>Unit Price</th><th>Subtotal</th></tr></thead>
+        <tbody>${items.map(i=>`<tr><td>${i.productName||'Product'}</td><td>${i.quantity}</td><td>${fmt.money(Number(i.unitPrice || 0) * (1 + taxRate))}</td><td>${fmt.money(Number(i.subTotal || ((i.unitPrice||0)*(i.quantity||1))) * (1 + taxRate))}</td></tr>`).join('')}</tbody>
+      </table>
+      <div class="tot-row"><span>Subtotal (tax incl.)</span><span>${fmt.money(subtotalWithTax)}</span></div>
       <div class="grand"><span>Total Paid</span><span>${fmt.money(total)}</span></div>
-      ${taxAmt ? `<div class="tot-row" style="font-size:11px;color:#94a3b8;margin-top:4px;"><span>Includes VAT (18%)</span><span>${fmt.money(taxAmt)}</span></div>` : ''}
+      ${taxAmt ? `<div class="tot-row" style="font-size:11px;color:#94a3b8;margin-top:4px;"><span>Tax (${Math.round(taxRate * 100)}%) included</span><span>${fmt.money(taxAmt)}</span></div>` : ''}
       <div class="info">
         <div><strong>Payment:</strong> ${(receipt.paymentMethod||'—').replace(/_/g,' ')}</div>
         ${receipt.paymentReference ? `<div><strong>Reference:</strong> ${receipt.paymentReference}</div>` : ''}

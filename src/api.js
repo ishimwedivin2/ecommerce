@@ -1,3 +1,5 @@
+import { getLocale } from './i18n/index.js';
+
 const BASE_URL = 'http://localhost:8080';
 
 let token = localStorage.getItem('luz_jwt') || null;
@@ -16,6 +18,7 @@ try {
 async function request(path, options = {}, _isRetry = false) {
   const headers = {
     'Content-Type': 'application/json',
+    'Accept-Language': getLocale(),
     ...options.headers,
   };
 
@@ -30,7 +33,7 @@ async function request(path, options = {}, _isRetry = false) {
     try {
       const refreshRes = await fetch(`${BASE_URL}/api/auth/refresh`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Accept-Language': getLocale() },
         body: JSON.stringify({ refreshToken: storedRefreshToken })
       });
       const refreshEnv = await refreshRes.json();

@@ -345,13 +345,21 @@
   font-size: 13px;
 }
 .rcpt-header {
-  background: var(--primary, #FF6B00);
-  color: white;
+  background: #F8FAFC;
+  color: var(--text-dark, #1E293B);
   padding: 18px 20px 14px;
   text-align: center;
+  border-bottom: 1px solid var(--border, #E2E8F0);
+}
+.rcpt-logo {
+  width: 72px;
+  height: 72px;
+  object-fit: contain;
+  display: block;
+  margin: 0 auto 10px;
 }
 .rcpt-brand { font-size: 18px; font-weight: 800; letter-spacing: 0.5px; }
-.rcpt-title { font-size: 12px; opacity: 0.85; margin-top: 2px; text-transform: uppercase; letter-spacing: 1px; }
+.rcpt-title { font-size: 12px; color: #64748B; margin-top: 2px; text-transform: uppercase; letter-spacing: 1px; }
 .rcpt-meta  { padding: 14px 20px; background: #FAFAFA; border-bottom: 1px solid var(--border, #E2E8F0); }
 .rcpt-row {
   display: flex;

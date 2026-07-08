@@ -2,6 +2,7 @@ import './Header.css';
 import { ApiService } from '../api.js';
 import { appState, setState } from '../store.js';
 import { showToast } from './toast.js';
+import { getLocale, setLocale, SUPPORTED_LOCALES, t } from '../i18n/index.js';
 
 export async function render() {
   const user = ApiService.getCurrentUser();
@@ -49,10 +50,10 @@ export async function render() {
             ${(user.roles || []).map(r => {
               const name = (r?.name || r || '').toString();
               const map = {
-                ROLE_ADMIN:         { label:'Administrator', color:'#7c3aed', bg:'#ede9fe' },
-                ROLE_EMPLOYEE:      { label:'Employee',      color:'#0369a1', bg:'#e0f2fe' },
-                ROLE_SUPPORT_AGENT: { label:'Support Agent', color:'#0f766e', bg:'#ccfbf1' },
-                ROLE_CUSTOMER:      { label:'Customer',      color:'#15803d', bg:'#dcfce7' },
+                ROLE_ADMIN:         { label:t('Administrator'), color:'#7c3aed', bg:'#ede9fe' },
+                ROLE_EMPLOYEE:      { label:t('Employee'),      color:'#0369a1', bg:'#e0f2fe' },
+                ROLE_SUPPORT_AGENT: { label:t('Support Agent'), color:'#0f766e', bg:'#ccfbf1' },
+                ROLE_CUSTOMER:      { label:t('Customer'),      color:'#15803d', bg:'#dcfce7' },
               };
               const chip = map[name] || { label: name.replace('ROLE_',''), color:'#64748b', bg:'#f1f5f9' };
               return `<span style="display:inline-block;padding:2px 8px;border-radius:20px;font-size:10px;font-weight:700;background:${chip.bg};color:${chip.color};margin-right:3px;">${chip.label}</span>`;
@@ -142,6 +143,12 @@ export async function render() {
       </div>
 
       <div class="header-actions">
+        <label class="header-lang" style="display:flex;align-items:center;gap:4px;font-size:12px;color:var(--text-light);" title="${t('language')}">
+          <select id="locale-select" aria-label="${t('language')}" style="height:32px;border:1px solid var(--border-dark);border-radius:8px;background:white;font-weight:700;font-size:12px;padding:0 6px;cursor:pointer;">
+            ${SUPPORTED_LOCALES.map(l => `<option value="${l.code}" ${getLocale() === l.code ? 'selected' : ''}>${l.label}</option>`).join('')}
+          </select>
+        </label>
+
         ${accountMenuHtml}
 
         <button class="header-action-btn badge-btn" data-navigate="wishlist" title="Wishlist">
@@ -176,6 +183,10 @@ export async function render() {
 
 export function bindEvents(helpers) {
   const { navigate, renderAuthModal, renderHeader, renderView, openCartDrawer, syncUrl } = helpers;
+
+  document.getElementById('locale-select')?.addEventListener('change', (e) => {
+    setLocale(e.target.value);
+  });
 
   // Navigation links
   document.querySelectorAll('[data-navigate]').forEach(elem => {

@@ -19,6 +19,7 @@ import * as AdminPage from './pages/admin/index.js';
 import * as SupportAgentPage from './pages/support-agent/index.js';
 import * as EmployeePage from './pages/employee/index.js';
 import * as ShopPage from './pages/shop/index.js';
+import { translateHtml, t } from './i18n/index.js';
 
 const ADMIN_TABS = new Set([
   'analytics', 'orders', 'payments', 'products', 'inventory', 'suppliers',
@@ -215,7 +216,7 @@ export async function renderView() {
   const container = document.getElementById('app-view-container');
   if (!container) return;
 
-  container.innerHTML = `<div style="text-align:center;padding:48px;font-weight:500;">Loading...</div>`;
+  container.innerHTML = `<div style="text-align:center;padding:48px;font-weight:500;">${t('Loading...')}</div>`;
 
   try {
     let html = '';
@@ -287,9 +288,9 @@ export async function renderView() {
     console.error('Render error:', error);
     container.innerHTML = `
       <div style="text-align:center;padding:48px;border:1px dashed var(--border);border-radius:12px;background:white;">
-        <h2 style="color:var(--danger);">Something went wrong</h2>
+        <h2 style="color:var(--danger);">${t('Something went wrong')}</h2>
         <p style="margin:12px 0 20px;">${error.message || 'An unexpected error occurred.'}</p>
-        <button class="btn-primary" id="btn-reload-home">Return to Home</button>
+        <button class="btn-primary" id="btn-reload-home">${t('Return to Home')}</button>
       </div>
     `;
     document.getElementById('btn-reload-home')?.addEventListener('click', () => {
@@ -309,6 +310,7 @@ export async function renderAuthModal() {
     container.innerHTML = AuthModal.render(appState.authModalMode);
     document.getElementById('auth-overlay')?.setAttribute('data-modal-mode', appState.authModalMode);
     AuthModal.bindEvents(helpers);
+    translateHtml(container);
   } else {
     container.innerHTML = '';
   }
@@ -319,6 +321,7 @@ export async function renderChatWidget(options = {}) {
   if (!container) return;
   container.innerHTML = await ChatWidget.render(options);
   ChatWidget.bindEvents(helpers);
+  translateHtml(container);
 }
 
 export async function renderCartDrawer() {
@@ -326,6 +329,7 @@ export async function renderCartDrawer() {
   if (!container) return;
   container.innerHTML = await CartDrawer.render();
   CartDrawer.bindEvents(helpers);
+  translateHtml(container);
 }
 
 export async function openCartDrawer() {
@@ -356,6 +360,7 @@ export async function renderAll(options = {}) {
     if (chatMount) chatMount.innerHTML = '';
   }
   await Promise.all(tasks);
+  translateHtml(document.body);
   updateAdminHeaderHeight();
 }
 
@@ -386,6 +391,7 @@ export function init() {
   window.addEventListener('luz-login', () => SessionGuard.start());
   // Stop guard on logout
   window.addEventListener('luz-logout', () => SessionGuard.stop());
+  window.addEventListener('luz-locale-change', () => renderAll({ syncUrl: false }));
 
   // Global chat-updated event
   window.addEventListener('chat-updated', async (e) => {

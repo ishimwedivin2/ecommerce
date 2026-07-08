@@ -1,6 +1,7 @@
 // Global application state — single source of truth
 export const appState = {
   currentView: 'home',
+  locale: localStorage.getItem('luz_locale') || 'en',
   activeCategory: null,
   selectedProductId: null,
   selectedTicketId: null,

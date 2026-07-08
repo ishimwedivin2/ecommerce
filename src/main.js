@@ -2,6 +2,7 @@ import './style.css';
 import { setState } from './store.js';
 import { init } from './router.js';
 import { ApiService } from './api.js';
+import { observeTranslations } from './i18n/index.js';
 
 const params = new URLSearchParams(window.location.search);
 
@@ -18,4 +19,5 @@ if (params.get('view') === 'reset-password' && params.get('token')) {
   else if (user) setState({ currentView: 'shop' }); // customers → shop
 }
 
+observeTranslations();
 init();
