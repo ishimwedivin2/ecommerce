@@ -1,4 +1,5 @@
 import './style.css';
+import '../shop/style.css';
 import { ApiService } from '../../api.js';
 import { setState } from '../../store.js';
 
@@ -129,7 +130,7 @@ function renderProductCard(p) {
 
   return `
     <div class="sp-card" data-id="${p.id}">
-      <div class="sp-card-img-wrap">
+      <div class="sp-card-img-wrap" data-action="view-details" data-id="${p.id}">
         <img src="${image || FALLBACK}" alt="${p.name}" class="sp-card-img"
           onerror="this.onerror=null;this.src='${FALLBACK}'">
         ${p.discountPercentage ? `<span class="sp-card-badge">-${p.discountPercentage}% OFF</span>` : ''}
@@ -140,7 +141,7 @@ function renderProductCard(p) {
       <div class="sp-card-body">
         ${categoryName ? `<span class="sp-card-cat">${categoryName}</span>` : ''}
         <h3 class="sp-card-name" data-action="view-details" data-id="${p.id}">${p.name}</h3>
-        <div class="sp-card-rating">${renderStars(p.averageRating || p.rating || 4.5)} <span>(${p.reviewsCount || 0})</span></div>
+        <div class="sp-card-rating">${renderStars(p.averageRating || p.rating || 4.5)} ${p.reviewsCount > 0 ? `<span>(${p.reviewsCount})</span>` : ''}</div>
         <div class="sp-card-price-row">
           ${vatDiscounted
             ? `<span class="sp-price-orig">RWF ${vatPrice.toLocaleString('en-US')}</span><span class="sp-price-now">RWF ${vatDiscounted.toLocaleString('en-US')}</span>`
@@ -148,8 +149,44 @@ function renderProductCard(p) {
         </div>
       </div>
       <div class="sp-card-footer">
+        ${(() => {
+          const qty = p.inventoryItem?.quantity ?? p.stock ?? null;
+          const outOfStock = qty !== null && qty <= 0;
+          return outOfStock
+            ? `<button class="sp-btn-cart" disabled style="opacity:.5;cursor:not-allowed">Out of Stock</button>`
+            : `<button class="sp-btn-cart" data-action="add-to-cart" data-id="${p.id}">
+                <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
+                Add to Cart
+               </button>`;
+        })()}
+        <button class="sp-btn-detail" data-action="view-details" data-id="${p.id}">View</button>
+      </div>
+    </div>
+  `;
+}
+
+function renderRecommendationCard(p) {
+  const image = getPrimaryImage(p);
+  const price = parseFloat(p.price) || 0;
+  const vatPrice = Math.round(price * 1.18);
+  const categoryName = p.category?.name || p.categoryName || '';
+  const FALLBACK = 'https://images.unsplash.com/photo-1542751371-adc38448a05e?w=400&q=80';
+
+  return `
+    <div class="sp-card rec-card" data-id="${p.id}">
+      <div class="sp-card-img-wrap" data-action="view-details" data-id="${p.id}">
+        <img src="${image || FALLBACK}" alt="${p.name}" class="sp-card-img"
+          onerror="this.onerror=null;this.src='${FALLBACK}'">
+      </div>
+      <div class="sp-card-body">
+        ${categoryName ? `<span class="sp-card-cat">${categoryName}</span>` : ''}
+        <h3 class="sp-card-name" data-action="view-details" data-id="${p.id}">${p.name}</h3>
+        <div class="sp-card-rating">${renderStars(p.averageRating || p.rating || 4.5)} ${p.reviewsCount > 0 ? `<span>(${p.reviewsCount})</span>` : ''}</div>
+        <div class="sp-card-price-row"><span class="sp-price-now">RWF ${vatPrice.toLocaleString('en-US')}</span></div>
+      </div>
+      <div class="sp-card-footer">
         <button class="sp-btn-cart" data-action="add-to-cart" data-id="${p.id}">
-          <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
+          <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M12 4.5v15m7.5-7.5h-15"></path></svg>
           Add to Cart
         </button>
         <button class="sp-btn-detail" data-action="view-details" data-id="${p.id}">View</button>
@@ -164,11 +201,16 @@ export async function render(state) {
   // clear any stale search/category state so returning home always shows all products
   setState({ searchQuery: '', activeCategory: null });
 
-  const [bannersRes, featuredRes, productsRes, faqsRes] = await Promise.all([
+  const recommendationRequest = ApiService.getCurrentUser()
+    ? ApiService.wishlist.getRecommendations(8).catch(() => ({ data: [] }))
+    : Promise.resolve({ data: [] });
+
+  const [bannersRes, featuredRes, productsRes, faqsRes, recsRes] = await Promise.all([
     ApiService.banners.getActive().catch(() => ({ data: [] })),
     ApiService.products.getFeatured().catch(() => ({ data: [] })),
     ApiService.products.search({ ...currentFilters, page: 0, size: PAGE_SIZE }),
     ApiService.support.getFAQs().catch(() => ({ data: [] })),
+    recommendationRequest,
   ]);
 
   const banners = bannersRes.data || [];
@@ -177,6 +219,7 @@ export async function render(state) {
   const products = Array.isArray(productsPage) ? productsPage : (productsPage.content || []);
   totalPages = productsPage.totalPages || 1;
   const faqs = faqsRes.data || [];
+  const recommendations = Array.isArray(recsRes.data) ? recsRes.data : [];
 
   const heroBannerHtml = buildHeroBanner(banners, featuredProducts);
 
@@ -210,6 +253,19 @@ export async function render(state) {
   return `
     ${heroBannerHtml}
     ${trustBadgesHtml}
+
+    ${recommendations.length ? `
+      <section class="recommendation-section animate-fade-up">
+        <div class="section-header">
+          <div>
+            <h2 class="section-title">Recommended for You</h2>
+            <p class="recommendation-subtitle">Based on your wishlist and previous shopping interests</p>
+          </div>
+          <button class="btn-rec-view-all" data-action="go-wishlist">View Wishlist</button>
+        </div>
+        <div class="recommendation-row sp-grid">${recommendations.map(renderRecommendationCard).join('')}</div>
+      </section>
+    ` : ''}
 
     <div class="filters-bar">
       <div class="filter-groups">
@@ -249,7 +305,7 @@ export async function render(state) {
       </h2>
     </div>
 
-    <div class="product-grid" id="product-grid">${productCardsHtml}</div>
+    <div class="sp-grid" id="product-grid">${productCardsHtml}</div>
 
     ${showLoadMore ? `
       <div class="load-more-container" id="load-more-container">
@@ -491,6 +547,15 @@ function bindCardEvents(container, helpers) {
     });
   });
 
+  container.querySelectorAll('[data-action="go-wishlist"]').forEach(btn => {
+    if (btn._bound) return;
+    btn._bound = true;
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      navigate('wishlist');
+    });
+  });
+
   container.querySelectorAll('[data-action="view-details"]').forEach(btn => {
     if (btn._bound) return;
     btn._bound = true;
@@ -525,7 +590,7 @@ function bindCardEvents(container, helpers) {
 
   // Pre-mark wishlisted items
   if (ApiService.getCurrentUser()) {
-    container.querySelectorAll('.wishlist-toggle').forEach(async (btn) => {
+    container.querySelectorAll('.sp-card-wish').forEach(async (btn) => {
       try {
         const res = await ApiService.wishlist.check(btn.getAttribute('data-id'));
         if (res.data) btn.classList.add('active');

@@ -28,6 +28,7 @@ const I = {
   card: `<svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>`,
   pkg: `<svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="16.5" y1="9.4" x2="7.5" y2="4.21"/><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>`,
   bell: `<svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>`,
+  alert: `<svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>`,
   x: `<svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`,
   plus: `<svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>`,
   edit: `<svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>`,
@@ -147,6 +148,14 @@ let _expenseCache     = [];
 let _finDateFrom      = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
 let _finDateTo        = new Date().toISOString().slice(0, 10);
 let _routeHelpers     = null;
+let _orderFilters     = {
+  customerName: '',
+  productName: '',
+  date: '',
+  customerEmail: '',
+  order: '',
+  status: ''
+};
 
 // ── Main render ───────────────────────────────────────────
 export async function render(state) {
@@ -1025,7 +1034,7 @@ TAB.orders = async () => {
   const adminView = isAdmin();
   const supportView = isSupportAgent();
   try {
-    const res = await ApiService.getOrders({ page:0, size:50 });
+    const res = await ApiService.getOrders({ page:0, size:50, ..._orderFilters });
     orders = extractList(res);
     total  = extractTotal(res, orders);
   } catch(_){}
@@ -1100,13 +1109,17 @@ TAB.orders = async () => {
       <span class="dash-tcard-title">All Orders</span>
       <span class="dash-tcard-count">${total}</span>
       <div class="dash-tcard-acts">
-        <input class="dash-inp" placeholder="Search orders…" id="order-search" style="width:180px">
+        <input class="dash-inp" placeholder="Customer name" id="order-customer-name-filter" value="${escAttr(_orderFilters.customerName)}" style="width:150px">
+        <input class="dash-inp" placeholder="Product name" id="order-product-name-filter" value="${escAttr(_orderFilters.productName)}" style="width:150px">
+        <input class="dash-inp" placeholder="Customer email" id="order-customer-email-filter" value="${escAttr(_orderFilters.customerEmail)}" style="width:180px">
+        <input class="dash-inp" placeholder="Order #" id="order-search" value="${escAttr(_orderFilters.order)}" style="width:130px">
+        <input class="dash-inp" type="date" id="order-date-filter" value="${escAttr(_orderFilters.date)}" style="width:140px">
         <select class="dash-sel" id="order-status-filter">
-          <option value="">All Statuses</option>
-          <option>PENDING</option><option>PROCESSING</option><option>PAID</option><option>FULFILLED</option>
-          <option>DELIVERED</option><option>CANCELLED</option><option>REFUNDED</option>
+          ${['', 'PENDING', 'CREATED', 'PROCESSING', 'PAID', 'FULFILLED', 'SHIPPED', 'DELIVERED', 'CANCELLED', 'RETURN_REQUESTED', 'RETURNED', 'REFUNDED']
+            .map(s => `<option value="${s}" ${_orderFilters.status === s ? 'selected' : ''}>${s || 'All Statuses'}</option>`).join('')}
         </select>
         <button class="btn-d btn-d-sec btn-d-sm" id="btn-filter-orders">${I.search} Filter</button>
+        <button class="btn-d btn-d-sec btn-d-sm" id="btn-clear-order-filters">${I.x} Clear</button>
       </div>
     </div>
     <table class="dt">
@@ -6217,6 +6230,38 @@ function bindSystemTab() {
 
 // ── Orders tab (includes Communication Templates) ────────
 function bindOrdersTab() {
+  const readOrderFilters = () => ({
+    customerName: document.getElementById('order-customer-name-filter')?.value.trim() || '',
+    productName: document.getElementById('order-product-name-filter')?.value.trim() || '',
+    date: document.getElementById('order-date-filter')?.value || '',
+    customerEmail: document.getElementById('order-customer-email-filter')?.value.trim() || '',
+    order: document.getElementById('order-search')?.value.trim() || '',
+    status: document.getElementById('order-status-filter')?.value || ''
+  });
+
+  const applyOrderFilters = () => {
+    _orderFilters = readOrderFilters();
+    loadTab('orders');
+  };
+
+  document.getElementById('btn-filter-orders')?.addEventListener('click', applyOrderFilters);
+  document.getElementById('btn-clear-order-filters')?.addEventListener('click', () => {
+    _orderFilters = { customerName: '', productName: '', date: '', customerEmail: '', order: '', status: '' };
+    loadTab('orders');
+  });
+  [
+    'order-customer-name-filter',
+    'order-product-name-filter',
+    'order-customer-email-filter',
+    'order-search',
+    'order-date-filter',
+    'order-status-filter'
+  ].forEach(id => {
+    document.getElementById(id)?.addEventListener('keydown', e => {
+      if (e.key === 'Enter') applyOrderFilters();
+    });
+  });
+
   async function loadTemplatesGrid() {
     const grid = document.getElementById('comm-templates-grid');
     if (!grid) return;

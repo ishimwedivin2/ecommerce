@@ -25,6 +25,9 @@ export async function render() {
 
   const itemsHtml = cart.items.map(item => {
     const price = Number(item.unitPrice ?? item.productPrice ?? 0);
+    const originalPrice = Number(item.originalUnitPrice ?? price);
+    const hasDiscount = originalPrice > price;
+    const saved = Number(item.discountAmount || 0) * 1.18;
     const src = itemImg(item);
     return `
     <div class="cart-item" data-id="${item.productId}">
@@ -35,7 +38,11 @@ export async function render() {
         }
       </div>
       <div class="cart-item-name">${item.productName}</div>
-      <div class="cart-item-price">RWF ${Math.round(price * 1.18).toLocaleString('en-US')}</div>
+      <div class="cart-item-price">
+        ${hasDiscount ? `<span style="display:block;color:#94a3b8;text-decoration:line-through;font-size:12px;">RWF ${Math.round(originalPrice * 1.18).toLocaleString('en-US')}</span>` : ''}
+        <span>RWF ${Math.round(price * 1.18).toLocaleString('en-US')}</span>
+        ${hasDiscount ? `<small style="display:block;color:#10b981;font-size:11px;">Saved RWF ${Math.round(saved).toLocaleString('en-US')}</small>` : ''}
+      </div>
       <div class="quantity-control" style="transform:scale(0.9);">
         <button class="quantity-btn" data-action="cart-qty-minus" data-id="${item.productId}">-</button>
         <input type="text" class="quantity-value" value="${item.quantity}">
@@ -49,6 +56,7 @@ export async function render() {
   }).join('');
 
   const subtotal = Number(cart.totalPrice ?? cart.totalAmount ?? 0);
+  const productDiscount = (cart.items || []).reduce((sum, item) => sum + Number(item.discountAmount || 0), 0);
   const TAX_RATE = 0.18;
   const taxAmt   = subtotal * TAX_RATE;
   const total    = subtotal + taxAmt;
@@ -62,6 +70,7 @@ export async function render() {
       <div class="cart-items-container">${itemsHtml}</div>
       <div class="cart-summary">
         <h3>Order Summary</h3>
+        ${productDiscount > 0 ? `<div class="summary-row" style="color:#10b981;"><span>Product Discounts</span><span>-RWF ${Math.round(productDiscount * 1.18).toLocaleString('en-US')}</span></div>` : ''}
         <div class="summary-row"><span>Items (${cart.totalItems})</span><span>RWF ${Math.round(total).toLocaleString('en-US')}</span></div>
         <div class="summary-row"><span>Shipping</span><span style="color:var(--success);font-weight:600;">FREE</span></div>
         <div class="summary-row total" style="border-top:2px solid var(--border);padding-top:12px;margin-top:4px;">

@@ -2,15 +2,95 @@ import './style.css';
 import { ApiService } from '../../api.js';
 import { appState, setState } from '../../store.js';
 
+const BACKEND_URL = 'http://localhost:8080';
+
 function renderStars(rating) {
   return '★'.repeat(Math.floor(rating)) + '☆'.repeat(5 - Math.floor(rating));
 }
 
+function getPrimaryImage(product) {
+  if (!product) return '';
+  if (Array.isArray(product.images) && product.images.length > 0) {
+    const primary = product.images.find(i => i.isPrimary || i.primary) || product.images[0];
+    const url = primary?.url || '';
+    return url.startsWith('/uploads/') ? `${BACKEND_URL}${url}` : url;
+  }
+  const url = product.image || '';
+  return url.startsWith('/uploads/') ? `${BACKEND_URL}${url}` : url;
+}
+
+function renderRecommendationCard(product) {
+  const image = getPrimaryImage(product);
+  const price = Math.round((parseFloat(product.price) || 0) * 1.18);
+  const category = product.category?.name || product.categoryName || '';
+  const fallback = 'https://images.unsplash.com/photo-1542751371-adc38448a05e?w=400&q=80';
+
+  return `
+    <article class="detail-rec-card">
+      <button class="detail-rec-image" data-action="view-rec-detail" data-id="${product.id}">
+        <img src="${image || fallback}" alt="${product.name}" onerror="this.onerror=null;this.src='${fallback}'">
+      </button>
+      <div class="detail-rec-body">
+        ${category ? `<span class="detail-rec-category">${category}</span>` : ''}
+        <button class="detail-rec-title" data-action="view-rec-detail" data-id="${product.id}">${product.name}</button>
+        <div class="product-rating">${renderStars(product.averageRating || product.rating || 4.5)} <span>(${product.reviewsCount || 0})</span></div>
+        <div class="detail-rec-footer">
+          <span class="detail-rec-price">RWF ${price.toLocaleString('en-US')}</span>
+          <button class="detail-rec-cart" data-action="add-rec-cart" data-id="${product.id}">Add</button>
+        </div>
+      </div>
+    </article>
+  `;
+}
+
 export async function render(state) {
-  const productRes = await ApiService.products.getById(state.selectedProductId);
-  const reviewsRes = await ApiService.reviews.getByProduct(state.selectedProductId);
+  if (!state.selectedProductId) {
+    return `
+      <div class="detail-empty-state">
+        <h2>Product not selected</h2>
+        <p>Choose a product from the shop to view its details.</p>
+        <button class="btn-primary" id="btn-detail-back-shop">Browse Products</button>
+      </div>
+    `;
+  }
+
+  const recommendationRequest = ApiService.getCurrentUser()
+    ? ApiService.wishlist.getRecommendations(8).catch(() => ({ data: [] }))
+    : Promise.resolve({ data: [] });
+
+  let productRes;
+  let reviewsRes;
+  let recsRes;
+  try {
+    [productRes, reviewsRes, recsRes] = await Promise.all([
+      ApiService.products.getById(state.selectedProductId),
+      ApiService.reviews.getByProduct(state.selectedProductId).catch(() => ({ data: [] })),
+      recommendationRequest,
+    ]);
+  } catch (error) {
+    return `
+      <div class="detail-empty-state">
+        <h2>Product unavailable</h2>
+        <p>${error.message || 'This product could not be loaded right now.'}</p>
+        <button class="btn-primary" id="btn-detail-back-shop">Back to Shop</button>
+      </div>
+    `;
+  }
+
   const p = productRes.data;
+  if (!p) {
+    return `
+      <div class="detail-empty-state">
+        <h2>Product unavailable</h2>
+        <p>This product could not be found.</p>
+        <button class="btn-primary" id="btn-detail-back-shop">Back to Shop</button>
+      </div>
+    `;
+  }
   const reviews = reviewsRes.data || [];
+  const recommendations = (Array.isArray(recsRes.data) ? recsRes.data : [])
+    .filter(item => item.id !== p.id)
+    .slice(0, 4);
 
   const reviewsHtml = reviews.length > 0 ? reviews.map(r => `
     <div class="review-card">
@@ -26,7 +106,7 @@ export async function render(state) {
   return `
     <div class="detail-layout">
       <div class="detail-img-container">
-        <img src="${p.image}" alt="${p.name}" class="detail-img" onerror="this.src='https://images.unsplash.com/photo-1542751371-adc38448a05e?w=400&q=80'">
+        <img src="${getPrimaryImage(p)}" alt="${p.name}" class="detail-img" onerror="this.src='https://images.unsplash.com/photo-1542751371-adc38448a05e?w=400&q=80'">
       </div>
       <div class="detail-info">
         <div class="detail-sku-rating">
@@ -87,11 +167,27 @@ export async function render(state) {
         </div>
       </div>
     </div>
+
+    ${recommendations.length ? `
+      <section class="detail-recommendations">
+        <div class="detail-rec-header">
+          <div>
+            <h2>You might also like</h2>
+            <p>Personalized picks from your wishlist and order interests</p>
+          </div>
+        </div>
+        <div class="detail-rec-grid">${recommendations.map(renderRecommendationCard).join('')}</div>
+      </section>
+    ` : ''}
   `;
 }
 
 export function bindEvents(state, helpers) {
-  const { renderHeader, refresh, toast, openCartDrawer } = helpers;
+  const { renderHeader, refresh, toast, openCartDrawer, navigate } = helpers;
+
+  document.getElementById('btn-detail-back-shop')?.addEventListener('click', () => {
+    navigate('shop');
+  });
 
   function checkAuth(cb) {
     if (!ApiService.getCurrentUser()) {
@@ -119,6 +215,56 @@ export function bindEvents(state, helpers) {
       toast('Product added to cart!');
       renderHeader();
       openCartDrawer?.();
+    });
+  });
+
+  document.getElementById('btn-detail-wishlist')?.addEventListener('click', () => {
+    const pid = document.getElementById('btn-detail-wishlist').getAttribute('data-id');
+    checkAuth(async () => {
+      try {
+        const isWishRes = await ApiService.wishlist.check(pid);
+        if (isWishRes.data) {
+          await ApiService.wishlist.remove(pid);
+          document.getElementById('btn-detail-wishlist')?.classList.remove('active');
+          toast('Removed from Wishlist');
+        } else {
+          await ApiService.wishlist.add(pid);
+          document.getElementById('btn-detail-wishlist')?.classList.add('active');
+          toast('Added to Wishlist!');
+        }
+        renderHeader();
+      } catch (err) {
+        toast(err.message || 'Wishlist error');
+      }
+    });
+  });
+
+  if (ApiService.getCurrentUser()) {
+    const wishBtn = document.getElementById('btn-detail-wishlist');
+    const pid = wishBtn?.getAttribute('data-id');
+    if (pid) {
+      ApiService.wishlist.check(pid)
+        .then(res => { if (res.data) wishBtn.classList.add('active'); })
+        .catch(() => {});
+    }
+  }
+
+  document.querySelectorAll('[data-action="view-rec-detail"]').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      navigate('product-detail', { selectedProductId: btn.getAttribute('data-id') });
+    });
+  });
+
+  document.querySelectorAll('[data-action="add-rec-cart"]').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      checkAuth(async () => {
+        await ApiService.cart.addItem(btn.getAttribute('data-id'), 1);
+        toast('Product added to cart!');
+        renderHeader();
+        openCartDrawer?.();
+      });
     });
   });
 

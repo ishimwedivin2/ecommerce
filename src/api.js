@@ -222,8 +222,8 @@ export const ApiService = {
     async check(productId) {
       return await request(`/api/wishlist/check/${productId}`);
     },
-    async getRecommendations() {
-      return await request('/api/wishlist/recommendations?limit=10');
+    async getRecommendations(limit = 10) {
+      return await request(`/api/wishlist/recommendations?limit=${limit}`);
     }
   },
 
@@ -566,6 +566,29 @@ export const ApiService = {
     },
     async getSupport() {
       return await request('/api/analytics/support');
+    },
+    async getTopProducts({ startDate, endDate } = {}) {
+      const end   = endDate   || new Date().toISOString().slice(0, 10);
+      const start = startDate || new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+      return await request(`/api/analytics/top-products?startDate=${start}&endDate=${end}`);
+    },
+    async getRevenueByMonth({ startDate, endDate } = {}) {
+      const end   = endDate   || new Date().toISOString().slice(0, 10);
+      const start = startDate || new Date(Date.now() - 365 * 86400000).toISOString().slice(0, 10);
+      return await request(`/api/analytics/revenue/monthly?startDate=${start}&endDate=${end}`);
+    },
+    async getOrdersByStatus({ startDate, endDate } = {}) {
+      const end   = endDate   || new Date().toISOString().slice(0, 10);
+      const start = startDate || new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+      return await request(`/api/analytics/orders/by-status?startDate=${start}&endDate=${end}`);
+    },
+    async getTotalRevenue({ startDate, endDate } = {}) {
+      const end   = endDate   || new Date().toISOString().slice(0, 10);
+      const start = startDate || new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+      return await request(`/api/analytics/revenue?startDate=${start}&endDate=${end}`);
+    },
+    async getFullDashboard() {
+      return await request('/api/analytics/dashboard');
     }
   },
 
@@ -1169,8 +1192,24 @@ export const ApiService = {
   async updateOrderStatus(id, { status } = {}) {
     return await request(`/api/orders/${id}/status?status=${encodeURIComponent(status)}`, { method: 'PATCH' });
   },
-  async getOrders({ page = 0, size = 20, status = '' } = {}) {
-    return await request(`/api/orders?page=${page}&size=${size}${status ? '&status=' + status : ''}`);
+  async getOrders({
+    page = 0,
+    size = 20,
+    status = '',
+    customerName = '',
+    productName = '',
+    customerEmail = '',
+    order = '',
+    date = ''
+  } = {}) {
+    const params = new URLSearchParams({ page, size });
+    if (status) params.set('status', status);
+    if (customerName) params.set('customerName', customerName);
+    if (productName) params.set('productName', productName);
+    if (customerEmail) params.set('customerEmail', customerEmail);
+    if (order) params.set('order', order);
+    if (date) params.set('date', date);
+    return await request(`/api/orders?${params}`);
   },
 
   // ── Categories (flat) ────────────────────────────────────
