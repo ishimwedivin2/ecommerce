@@ -363,6 +363,14 @@ const fmt = {
 function esc(s) { return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 function escAttr(s) { return String(s).replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
 
+function dateInputValue(v) {
+  return v ? String(v).slice(0, 10) : '';
+}
+
+function endOfDayDateTime(v) {
+  return v ? `${String(v).slice(0, 10)}T23:59:59` : null;
+}
+
 function statusBdg(status) {
   const map = {
     ACTIVE:'green',APPROVED:'green',PAID:'green',DELIVERED:'green',FULFILLED:'green',RESOLVED:'green',CLOSED:'green',COMPLETED:'green',
@@ -3588,7 +3596,7 @@ function drawerBody(type, data) {
   if (type === 'coupon') return `
     <div class="f-row"><div class="f-field"><label class="f-lbl">Coupon Code *</label><input class="f-inp" id="d-coup-code" value="${data?.code||''}" style="text-transform:uppercase"></div><div class="f-field"><label class="f-lbl">Discount Type</label><select class="f-sel" id="d-coup-type"><option value="PERCENTAGE" ${data?.discountType==='PERCENTAGE'?'selected':''}>Percentage</option><option value="FIXED" ${data?.discountType==='FIXED'?'selected':''}>Fixed Amount</option></select></div></div>
     <div class="f-row"><div class="f-field"><label class="f-lbl">Discount Value *</label><input class="f-inp" type="number" id="d-coup-val" value="${data?.discountValue||''}"></div><div class="f-field"><label class="f-lbl">Min. Purchase</label><input class="f-inp" type="number" id="d-coup-min" value="${data?.minimumPurchase||''}"></div></div>
-    <div class="f-row"><div class="f-field"><label class="f-lbl">Usage Limit</label><input class="f-inp" type="number" id="d-coup-limit" value="${data?.usageLimit||''}"></div><div class="f-field"><label class="f-lbl">Expiry Date</label><input class="f-inp" type="date" id="d-coup-exp" value="${data?.expiryDate||''}"></div></div>`;
+    <div class="f-row"><div class="f-field"><label class="f-lbl">Usage Limit</label><input class="f-inp" type="number" id="d-coup-limit" value="${data?.usageLimit||''}"></div><div class="f-field"><label class="f-lbl">Expiry Date</label><input class="f-inp" type="date" id="d-coup-exp" value="${dateInputValue(data?.expiryDate)}"></div></div>`;
 
   if (type === 'banner') {
     const existingImg = data?.imageUrl
@@ -4019,7 +4027,7 @@ async function saveDrawer(type, data) {
         discountValue:   parseFloat(document.getElementById('d-coup-val')?.value)||0,
         minimumPurchase: parseFloat(document.getElementById('d-coup-min')?.value)||null,
         usageLimit:      parseInt(document.getElementById('d-coup-limit')?.value)||null,
-        expiryDate:      document.getElementById('d-coup-exp')?.value||null,
+        expiryDate:      endOfDayDateTime(document.getElementById('d-coup-exp')?.value),
       };
       if (data?.id) {
         await ApiService.updateCoupon(data.id, payload);

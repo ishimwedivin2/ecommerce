@@ -99,8 +99,8 @@ export function bindEvents(state, helpers) {
   document.getElementById('btn-clear-cart')?.addEventListener('click', async () => {
     await ApiService.cart.clear();
     toast('Cart cleared');
-    refresh();
     renderHeader();
+    navigate('shop');
   });
 
   const container = document.getElementById('app-view-container');

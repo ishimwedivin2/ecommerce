@@ -191,8 +191,9 @@ export function bindEvents(helpers) {
     try {
       await ApiService.cart.clear();
       toast('Cart cleared');
-      await renderCartDrawer();
       await renderHeader();
+      closeDrawer(renderCartDrawer);
+      navigate('shop');
     } catch (err) {
       toast(err.message || 'Failed to clear cart', 'error');
     }
