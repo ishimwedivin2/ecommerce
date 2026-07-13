@@ -186,9 +186,9 @@ function buildOrderCard(o) {
       <img class="ord-item-img" src="${resolveImg(item.imageUrl)}" alt="${escHtml(item.productName || '')}" onerror="this.style.display='none'">
       <div class="ord-item-info">
         <div class="ord-item-name">${escHtml(item.productName || '—')}</div>
-        <div class="ord-item-meta">Qty ${item.quantity} × ${fmtMoney(Number(item.unitPrice || 0) * 1.18)}</div>
+        <div class="ord-item-meta">Qty ${item.quantity} × ${fmtMoney(Number(item.unitPriceIncludingTax ?? item.unitPrice ?? 0))}</div>
       </div>
-      <div class="ord-item-sub">${fmtMoney(Number(item.subTotal || 0) * 1.18)}</div>
+      <div class="ord-item-sub">${fmtMoney(Number(item.lineTotalIncludingTax ?? item.subTotal ?? 0))}</div>
     </div>`).join('');
 
   const pipelineHtml = !cancelled ? `
@@ -529,13 +529,10 @@ function buildTrackingPanel(data) {
 }
 
 function showReceiptModal(r, orderId) {
-  const taxRate = Number(r.taxRate || 0);
   const subtotalWithTax = Number(r.subTotalAmount || 0) + Number(r.taxAmount || 0);
   const itemsHtml = (r.items || []).map(item => {
-    const unitPrice = Number(item.unitPrice || 0);
-    const unitWithTax = unitPrice * (1 + taxRate);
-    const subTotal = Number(item.subTotal || 0);
-    const totalWithTax = subTotal * (1 + taxRate);
+    const unitWithTax = Number(item.unitPriceIncludingTax ?? item.unitPrice ?? 0);
+    const totalWithTax = Number(item.lineTotalIncludingTax ?? item.subTotal ?? 0);
     return `
     <tr>
       <td>${escHtml(item.productName || '—')}</td>
@@ -575,7 +572,7 @@ function showReceiptModal(r, orderId) {
       <div class="rcpt-totals">
         <div class="rcpt-trow"><span>Subtotal (tax incl.)</span><span>${fmtMoney(subtotalWithTax)}</span></div>
         <div class="rcpt-trow rcpt-grand"><span>Total Paid</span><span>${fmtMoney(r.totalAmount)}</span></div>
-        <div class="rcpt-trow" style="font-size:12px;color:#94a3b8"><span>Tax (${Number((r.taxRate || 0) * 100).toFixed(0)}%) included</span><span>${fmtMoney(r.taxAmount)}</span></div>
+        <div class="rcpt-trow" style="font-size:12px;color:#94a3b8"><span>Tax included</span><span>${fmtMoney(r.taxAmount)}</span></div>
       </div>
       <div class="rcpt-thanks">Thank you for shopping at Luz Technology!</div>
     </div>

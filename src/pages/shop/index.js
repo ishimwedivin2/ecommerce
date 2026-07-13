@@ -32,8 +32,10 @@ function renderCard(p) {
   const price = parseFloat(p.price) || 0;
   const baseDiscounted = p.discountPercentage
     ? price * (1 - parseFloat(p.discountPercentage) / 100) : null;
-  const vatPrice = Math.round(price * 1.18);
-  const vatDiscounted = baseDiscounted ? Math.round(baseDiscounted * 1.18) : null;
+  const vatPrice = Math.round(Number(p.priceIncludingTax ?? price));
+  const vatDiscounted = Math.round(Number(p.discountedPriceIncludingTax ?? baseDiscounted ?? vatPrice));
+  const hasDiscount = !!baseDiscounted;
+  const taxBadge = Number(p.taxRate || 0) > 0 ? `<div style="color:#10b981;font-size:11px;font-weight:700;margin-top:4px;">✓ VAT Included</div>` : '';
 
   return `
     <div class="sp-card" data-id="${p.id}">
@@ -50,10 +52,11 @@ function renderCard(p) {
         <h3 class="sp-card-name" data-action="shop-detail" data-id="${p.id}">${p.name}</h3>
         <div class="sp-card-rating">${renderStars(p.averageRating || 0)} ${p.reviewsCount > 0 ? `<span>(${p.reviewsCount})</span>` : ''}</div>
         <div class="sp-card-price-row">
-          ${vatDiscounted
+          ${hasDiscount
             ? `<span class="sp-price-orig">RWF ${vatPrice.toLocaleString('en-US')}</span><span class="sp-price-now">RWF ${vatDiscounted.toLocaleString('en-US')}</span>`
             : `<span class="sp-price-now">RWF ${vatPrice.toLocaleString('en-US')}</span>`}
         </div>
+        ${taxBadge}
       </div>
       <div class="sp-card-footer">
         ${(() => {

@@ -143,6 +143,7 @@ let _movementCache    = [];
 let _lowStockCache    = [];
 let _invRefreshTimer  = null;
 let _discountCache    = [];
+let _taxRateCache     = [];
 let _finSubTab        = 'overview';
 let _expenseCache     = [];
 let _finDateFrom      = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
@@ -303,13 +304,56 @@ function openDrawer(type, data) {
   bindDrawerEvents(type, data);
   if (type === 'product') {
     const selectedCatId = data?.categoryId || data?.category?.id || null;
+    const selectedTaxId = data?.taxRateId || data?.taxRate?.id || null;
     loadCategories(selectedCatId);
+    loadTaxRates(selectedTaxId);
   }
 }
 function closeDrawer() {
   document.getElementById('d-overlay').classList.remove('open');
   document.getElementById('d-drawer').classList.remove('open');
   drawerOpen = false;
+}
+
+// ── Profit Preview (Product Form) ──────────────────────────
+function updateProfitPreview() {
+  const costEl   = document.getElementById('d-prod-cost');
+  const priceEl  = document.getElementById('d-prod-price');
+  const preview  = document.getElementById('d-prod-profit-preview');
+  const profitEl = document.getElementById('d-profit-val');
+  const marginEl = document.getElementById('d-margin-val');
+  if (!costEl || !priceEl || !preview) return;
+
+  const cost  = parseFloat(costEl.value)  || 0;
+  const price = parseFloat(priceEl.value) || 0;
+
+  if (cost > 0 || price > 0) {
+    const profit = price - cost;
+    const margin = price > 0 ? ((profit / price) * 100).toFixed(1) : null;
+    const color  = profit >= 0 ? '#15803d' : '#dc2626';
+
+    if (profitEl) {
+      profitEl.textContent = (profit >= 0 ? '+' : '') +
+        new Intl.NumberFormat('en-RW', { minimumFractionDigits: 0 }).format(profit) + ' RWF';
+      profitEl.style.color = color;
+    }
+    if (marginEl) {
+      marginEl.textContent = margin !== null ? margin + '%' : '—';
+      marginEl.style.color = color;
+    }
+
+    // Update preview banner color based on profitability
+    if (profit >= 0) {
+      preview.style.background = 'linear-gradient(135deg,#f0fdf4,#dcfce7)';
+      preview.style.borderColor = '#86efac';
+    } else {
+      preview.style.background = 'linear-gradient(135deg,#fef2f2,#fee2e2)';
+      preview.style.borderColor = '#fca5a5';
+    }
+    preview.style.display = 'flex';
+  } else {
+    preview.style.display = 'none';
+  }
 }
 
 // ── Tab loader ─────────────────────────────────────────────
@@ -1321,11 +1365,22 @@ const buildProductRows = (list) => list.length ? list.map(p => {
   const discountBadge = p.discountName
     ? `<span class="bdg bdg-purple" style="font-size:10px" title="${p.discountName}">-${p.discountPercentage||0}%</span>`
     : '';
+  const costPr   = Number(p.costPrice || 0);
+  const sellPr   = Number(p.discountedPrice || p.price || 0);
+  const profitPu = sellPr - costPr;
+  const margin   = sellPr > 0 ? ((profitPu / sellPr) * 100).toFixed(1) : null;
+  const profitColor = profitPu >= 0 ? '#10b981' : '#ef4444';
   return `
   <tr>
     <td class="td-b">${p.name||p.productName||'—'} ${discountBadge}</td>
     <td>${p.categoryName||p.category?.name||'—'}</td>
-    <td>${fmt.money(p.price||0)}</td>
+    <td><div>${fmt.money(p.discountedPriceIncludingTax||p.priceIncludingTax||p.price||0)}</div><div style="font-size:10px;color:#64748b">Base: ${fmt.money(sellPr)}</div></td>
+    <td style="color:#64748b;font-size:12px">${costPr > 0 ? fmt.money(costPr) : '<span style="color:#cbd5e1">—</span>'}</td>
+    <td style="font-size:12px">
+      <span style="color:${profitColor};font-weight:600">${fmt.money(profitPu)}</span>
+      <div style="font-size:10px;color:#94a3b8">${margin !== null ? margin + '%' : '—'}</div>
+    </td>
+    <td>${p.taxName||'No VAT'}</td>
     <td>
       <select class="dash-sel prod-status-sel" data-id="${p.id}" style="font-size:11px;padding:2px 4px;height:26px">
         <option value="ACTIVE"   ${(p.status||'ACTIVE')==='ACTIVE'   ?'selected':''}>Active</option>
@@ -1342,20 +1397,23 @@ const buildProductRows = (list) => list.length ? list.map(p => {
     </td>
   </tr>`;
 }).join('') :
-  `<tr><td colspan="6"><div class="d-empty"><div class="d-empty-ico">📦</div><div class="d-empty-ttl">No products found</div><div class="d-empty-txt">Try adjusting your filters.</div></div></td></tr>`;
+  `<tr><td colspan="9"><div class="d-empty"><div class="d-empty-ico">📦</div><div class="d-empty-ttl">No products found</div><div class="d-empty-txt">Try adjusting your filters.</div></div></td></tr>`;
+
 
 TAB.products = async () => {
   let products = []; let total = 0;
   try {
-    const [prodRes, catRes, discRes] = await Promise.all([
+    const [prodRes, catRes, discRes, taxRes] = await Promise.all([
       ApiService.products.search({ page:0, size:200 }),
       ApiService.products.getCategories().catch(()=>({data:[]})),
       ApiService.getDiscounts().catch(()=>({data:[]})),
+      ApiService.getTaxRates(true).catch(()=>({data:[]})),
     ]);
     products = extractList(prodRes);
     total    = extractTotal(prodRes, products);
     _categoryCache = extractList(catRes);
     _discountCache = extractList(discRes);
+    _taxRateCache = extractList(taxRes);
   } catch(_){}
   _productCache = products;
 
@@ -1393,7 +1451,7 @@ TAB.products = async () => {
       </div>
     </div>
     <table class="dt">
-      <thead><tr><th>Name</th><th>Category</th><th>Price</th><th>Status</th><th>Featured</th><th>Actions</th></tr></thead>
+      <thead><tr><th>Name</th><th>Category</th><th>Selling Price</th><th>Cost Price</th><th>Profit / Margin</th><th>Tax</th><th>Status</th><th>Featured</th><th>Actions</th></tr></thead>
       <tbody id="products-tbody">${buildProductRows(products)}</tbody>
     </table>
   </div>
@@ -2604,14 +2662,16 @@ async function finExpenses() {
 
 // ── Finance: Taxes ────────────────────────────────────────
 async function finTaxes() {
-  let records = []; let summary = {};
+  let records = []; let summary = {}; let taxRates = [];
   try {
-    const [rr, rs] = await Promise.all([
+    const [rr, rs, tr] = await Promise.all([
       ApiService.getTaxRecords({ startDate: _finDateFrom, endDate: _finDateTo }),
       ApiService.getTaxSummary({ startDate: _finDateFrom, endDate: _finDateTo }),
+      ApiService.getTaxRates(false).catch(()=>({data:[]})),
     ]);
     records = extractList(rr);
     summary = rs.data || rs || {};
+    taxRates = extractList(tr);
   } catch(_){}
 
   const rows = records.length ? records.map(t => `
@@ -2621,11 +2681,20 @@ async function finTaxes() {
       <td>${t.orderNumber||t.orderId||'—'}</td>
       <td>${fmt.money(t.taxableAmount||0)}</td>
       <td>${fmt.money(t.amount||0)}</td>
-      <td>${t.taxRate!=null?Number(t.taxRate).toFixed(2)+'%':'—'}</td>
+      <td>${t.taxRate!=null?Math.round(Number(t.taxRate)*100)+'%':'—'}</td>
       <td>${statusBdg(t.status||'PENDING')}</td>
     </tr>`) .join('') :
     `<tr><td colspan="7"><div class="d-empty"><div class="d-empty-ico">🧾</div><div class="d-empty-ttl">No tax records found</div></div></td></tr>`;
 
+  const rateRows = taxRates.length ? taxRates.map(t => `
+    <tr>
+      <td class="td-b">${esc(t.name||'Tax rate')}</td>
+      <td><code>${esc(t.code||'')}</code></td>
+      <td>${Math.round(Number(t.rate||0)*100)}%</td>
+      <td>${t.active ? statusBdg('ACTIVE') : statusBdg('INACTIVE')}</td>
+      <td><button class="btn-d btn-d-sec btn-d-sm tax-rate-toggle" data-id="${t.id}" data-active="${!t.active}">${t.active ? 'Disable' : 'Enable'}</button></td>
+    </tr>`).join('') :
+    `<tr><td colspan="5"><div class="d-empty"><div class="d-empty-ico">%</div><div class="d-empty-ttl">No tax rates found</div></div></td></tr>`;
   return `
   <div class="dash-stats" style="margin-bottom:16px">
     <div class="dash-stat"><div class="dash-stat-ico ico-green">${I.dollar}</div><div class="dash-stat-lbl">Taxable Sales</div><div class="dash-stat-val">${fmt.money(summary.taxableSales||0)}</div></div>
@@ -2633,6 +2702,20 @@ async function finTaxes() {
     <div class="dash-stat"><div class="dash-stat-ico ico-blue">${I.bar}</div><div class="dash-stat-lbl">Total Records</div><div class="dash-stat-val">${fmt.num(summary.totalRecords||records.length)}</div></div>
   </div>
   <div class="dash-tcard">
+    <div class="dash-tcard-hd">
+      <span class="dash-tcard-title">Tax Rates</span>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 120px auto;gap:8px;margin-bottom:12px">
+      <input class="dash-inp" id="tax-rate-name" placeholder="Name e.g. VAT 18%">
+      <input class="dash-inp" id="tax-rate-code" placeholder="Code e.g. VAT_18">
+      <input class="dash-inp" id="tax-rate-percent" type="number" step="0.01" min="0" placeholder="%">
+      <button class="btn-d btn-d-primary btn-d-sm" id="btn-create-tax-rate">Add Rate</button>
+    </div>
+    <table class="dt" style="margin-bottom:18px">
+      <thead><tr><th>Name</th><th>Code</th><th>Rate</th><th>Status</th><th>Actions</th></tr></thead>
+      <tbody>${rateRows}</tbody>
+    </table>
+  </div>  <div class="dash-tcard">
     <div class="dash-tcard-hd">
       <span class="dash-tcard-title">Tax Records</span>
       <div class="dash-tcard-acts" style="display:flex;gap:8px;align-items:center">
@@ -2650,6 +2733,7 @@ async function finTaxes() {
       <tbody>${rows}</tbody>
     </table>
   </div>`;
+
 }
 
 // ── Finance: P&L ──────────────────────────────────────────
@@ -2662,16 +2746,18 @@ async function finPL() {
     <div style="font-size:12px;font-weight:700;color:#94A3B8;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Revenue</div>
     ${finMetric('Sales Revenue', pl.salesRevenue||0, 'pos')}
     ${finMetric('Refunds', pl.refunds||0, 'neg')}
-    ${finMetric('Net Sales', pl.netSales||0, 'pos')}
-    <div style="font-size:12px;font-weight:700;color:#94A3B8;text-transform:uppercase;letter-spacing:.5px;margin:16px 0 8px">Costs</div>
-    ${finMetric('Operating Expenses', pl.operatingExpenses||0, 'neg')}
-    ${finMetric('Tax Collected', pl.taxCollected||0)}
+    ${finMetric('Net Sales (Net Revenue)', pl.netSales||0, 'pos')}
+    <div style="font-size:12px;font-weight:700;color:#94A3B8;text-transform:uppercase;letter-spacing:.5px;margin:16px 0 8px">Cost of Goods Sold (COGS)</div>
+    ${finMetric('COGS — Product Cost', pl.cogs||0, 'neg')}
     <div class="fin-metric" style="border-top:2px solid #E8ECF0;margin-top:8px;padding-top:12px">
-      <span class="fin-metric-lbl" style="font-weight:700">Gross Profit</span>
+      <span class="fin-metric-lbl" style="font-weight:700">Gross Profit <small style="color:#94a3b8;font-weight:400">(Net Revenue − COGS)</small></span>
       <span class="fin-metric-val ${(pl.grossProfit||0)>=0?'pos':'neg'}" style="font-size:15px">${fmt.money(pl.grossProfit||0)}</span>
     </div>
-    <div class="fin-metric" style="margin-top:4px">
-      <span class="fin-metric-lbl" style="font-weight:700">Net Profit</span>
+    <div style="font-size:12px;font-weight:700;color:#94A3B8;text-transform:uppercase;letter-spacing:.5px;margin:16px 0 8px">Operating Expenses</div>
+    ${finMetric('Operating Expenses', pl.operatingExpenses||0, 'neg')}
+    <div style="font-size:11px;color:#78716c;margin:6px 0 8px;padding:6px 8px;background:#fefce8;border-radius:6px;border:1px solid #fde68a">📌 <strong>Tax Collected:</strong> ${fmt.money(pl.taxCollected||0)} — recorded as a liability, not deducted from profit</div>
+    <div class="fin-metric" style="border-top:2px solid #E8ECF0;margin-top:8px;padding-top:12px">
+      <span class="fin-metric-lbl" style="font-weight:700">Net Profit <small style="color:#94a3b8;font-weight:400">(Gross Profit − Expenses)</small></span>
       <span class="fin-metric-val ${(pl.netProfit||0)>=0?'pos':'neg'}" style="font-size:16px">${fmt.money(pl.netProfit||0)}</span>
     </div>
     ${finMetricPct('Profit Margin', pl.profitMarginPercent||0)}
@@ -2705,6 +2791,7 @@ async function finMgmt() {
     </div>
     <div class="dash-chart-card">
       <div class="dash-chart-hd">Profitability</div>
+      ${finMetric('COGS (Cost of Goods Sold)', m.cogs||0, 'neg')}
       ${finMetric('Gross Profit', m.grossProfit||0, (m.grossProfit||0)>=0?'pos':'neg')}
       ${finMetric('Net Profit', m.netProfit||0, (m.netProfit||0)>=0?'pos':'neg')}
     </div>
@@ -3434,10 +3521,10 @@ TAB.pos = async () => {
   } catch(_){}
 
   const prodHtml = products.length ? products.map(p => `
-    <div class="pos-prod" data-pos-id="${p.id}" data-pos-name="${escAttr(p.name||p.productName||'')}" data-pos-price="${p.price||0}">
+    <div class="pos-prod" data-pos-id="${p.id}" data-pos-name="${escAttr(p.name||p.productName||'')}" data-pos-price="${p.discountedPriceIncludingTax||p.priceIncludingTax||p.price||0}" data-pos-tax="${p.taxAmount||0}">
       <img class="pos-prod-img" src="${p.imageUrl||p.thumbnailUrl||'data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2256%22 height=%2256%22><rect width=%2256%22 height=%2256%22 fill=%22%23f1f5f9%22/><text x=%2228%22 y=%2234%22 text-anchor=%22middle%22 font-size=%2220%22>📦</text></svg>'}" alt="">
       <div class="pos-prod-name">${p.name||p.productName||'Product'}</div>
-      <div class="pos-prod-price">${fmt.money(p.price||0)}</div>
+      <div class="pos-prod-price">${fmt.money(p.discountedPriceIncludingTax||p.priceIncludingTax||p.price||0)}</div>
     </div>`).join('') :
     `<div style="grid-column:1/-1;text-align:center;color:#94A3B8;padding:32px">No active products</div>`;
 
@@ -3556,7 +3643,15 @@ function drawerBody(type, data) {
     <hr style="border:none;border-top:1px dashed #e2e8f0;margin-bottom:14px;">
     <div class="f-row"><div class="f-field"><label class="f-lbl">Product Name *</label><input class="f-inp" id="d-prod-name" value="${data?.name||''}"></div><div class="f-field"><label class="f-lbl">SKU</label><input class="f-inp" id="d-prod-sku" value="${data?.sku||''}"></div></div>
     <div class="f-field"><label class="f-lbl">Description</label><textarea class="f-ta" id="d-prod-desc">${data?.description||''}</textarea></div>
-    <div class="f-row"><div class="f-field"><label class="f-lbl">Price *</label><input class="f-inp" type="number" id="d-prod-price" value="${data?.price||''}"></div><div class="f-field"><label class="f-lbl">Compare Price</label><input class="f-inp" type="number" id="d-prod-compare" value="${data?.comparePrice||''}"></div></div>
+    <div class="f-row">
+      <div class="f-field"><label class="f-lbl" style="color:#64748b">💼 Cost Price (RWF) <small style="color:#94A3B8;font-weight:400">what you paid — internal only</small></label><input class="f-inp" type="number" min="0" step="0.01" id="d-prod-cost" value="${data?.costPrice||''}" oninput="updateProfitPreview()"></div>
+      <div class="f-field"><label class="f-lbl">🏷️ Selling Price (RWF) *<small style="color:#94A3B8;font-weight:400"> before tax</small></label><input class="f-inp" type="number" min="0" step="0.01" id="d-prod-price" value="${data?.price||''}" oninput="updateProfitPreview()"></div>
+    </div>
+    <div id="d-prod-profit-preview" style="background:linear-gradient(135deg,#f0fdf4,#dcfce7);border:1px solid #86efac;border-radius:8px;padding:10px 14px;margin-bottom:4px;display:${(data?.costPrice||data?.price)?'flex':'none'};align-items:center;gap:18px;font-size:13px">
+      <span>💰 <strong>Profit/unit:</strong> <span id="d-profit-val" style="color:#15803d;font-weight:700">—</span></span>
+      <span>📊 <strong>Margin:</strong> <span id="d-margin-val" style="color:#15803d;font-weight:700">—</span></span>
+    </div>
+    <div class="f-row"><div class="f-field"><label class="f-lbl">Compare Price</label><input class="f-inp" type="number" id="d-prod-compare" value="${data?.comparePrice||''}"></div></div>
     <div class="f-row">
       <div class="f-field"><label class="f-lbl">Stock Quantity</label><input class="f-inp" type="number" id="d-prod-stock" value="${data?.stock||0}"></div>
       <div class="f-field">
@@ -3572,6 +3667,7 @@ function drawerBody(type, data) {
         </div>
       </div>
     </div>
+    <div class="f-field"><label class="f-lbl">Tax Rule</label><select class="f-sel" id="d-prod-tax"><option value="">No VAT / Tax exempt</option></select></div>
     <div class="f-field">
       <label class="f-lbl">Product Image</label>
       <div id="d-prod-img-wrap" style="border:2px dashed #e2e8f0;border-radius:10px;padding:16px;text-align:center;cursor:pointer;background:#fafafa;transition:border-color .2s;" onclick="document.getElementById('d-prod-img-file').click()">
@@ -3693,7 +3789,8 @@ function drawerBody(type, data) {
 
   if (type === 'procurement') {
     const supplierOpts = _supplierCache.map(s=>`<option value="${s.id}" ${data?.supplier?.id===s.id?'selected':''}>${s.name}</option>`).join('');
-    const itemOpts     = _invCache.map(i=>`<option value="${i.id}" ${data?.inventoryItem?.id===i.id?'selected':''}>${i.productName||i.name||i.sku}</option>`).join('');
+    const itemOpts     = _invCache.map(i=>{ const price = i.unitCost || i.price || i.product?.price || 0; return `<option value="${i.id}" data-price="${price}" ${data?.inventoryItem?.id===i.id?'selected':''}>${i.productName||i.name||i.sku}</option>`; }).join('');
+    const existingPrice = data?.unitPrice || data?.inventoryItem?.unitCost || data?.inventoryItem?.product?.price || '';
     return `
     <div class="f-field"><label class="f-lbl">Supplier *</label>
       <select class="f-inp" id="d-po-supplier"><option value="">Select supplier…</option>${supplierOpts}</select>
@@ -3701,9 +3798,17 @@ function drawerBody(type, data) {
     <div class="f-field"><label class="f-lbl">Inventory Item *</label>
       <select class="f-inp" id="d-po-item"><option value="">Select item…</option>${itemOpts}</select>
     </div>
+    <div class="f-field">
+      <label class="f-lbl">💼 Unit Cost (RWF) <small id="d-po-price-status" style="font-weight:400;color:#94A3B8">— auto-filled from product cost price (editable to override)</small></label>
+      <div style="position:relative">
+        <input class="f-inp" type="number" min="0" step="0.01" id="d-po-unit-price" value="${existingPrice}"
+          style="color:#1e293b;font-weight:600;padding-right:80px;" placeholder="Select an item above or enter manually…">
+        <span style="position:absolute;right:12px;top:50%;transform:translateY(-50%);font-size:12px;color:#94a3b8;pointer-events:none">RWF / unit</span>
+      </div>
+    </div>
     <div class="f-row">
       <div class="f-field"><label class="f-lbl">Quantity Ordered *</label><input class="f-inp" type="number" min="1" id="d-po-qty" value="${data?.quantityOrdered||''}"></div>
-      <div class="f-field"><label class="f-lbl">Total Cost (RWF)</label><input class="f-inp" type="number" min="0" id="d-po-cost" value="${data?.totalCost||''}"></div>
+      <div class="f-field"><label class="f-lbl">Total Cost (RWF) <small style="color:#94A3B8;font-weight:400">unit cost × qty — auto-calculated</small></label><input class="f-inp" type="number" min="0" id="d-po-cost" value="${data?.totalCost||''}" readonly style="background:#f8fafc"></div>
     </div>
     <div class="f-field"><label class="f-lbl">Expected Delivery Date</label><input class="f-inp" type="date" id="d-po-eta" value="${data?.expectedDeliveryDate||''}"></div>`;
   }
@@ -3797,8 +3902,10 @@ function bindDrawerEvents(type, data) {
       set('d-prod-name',    p.name);
       set('d-prod-sku',     p.sku);
       set('d-prod-desc',    p.description);
+      set('d-prod-cost',    p.costPrice || '');
       set('d-prod-price',   p.price);
       set('d-prod-compare', p.comparePrice || '');
+      updateProfitPreview();
       set('d-prod-stock',   p.stock ?? 0);
       const statusEl = document.getElementById('d-prod-status');
       if (statusEl) statusEl.value = p.status || 'ACTIVE';
@@ -3810,6 +3917,8 @@ function bindDrawerEvents(type, data) {
         const catSel = document.getElementById('d-prod-cat');
         if (catSel) catSel.value = p.categoryId || p.category?.id || '';
       }
+      const taxSel = document.getElementById('d-prod-tax');
+      if (taxSel) taxSel.value = p.taxRateId || p.taxRate?.id || '';
 
       // Fill image preview
       const imgUrl = p.imageUrl || p.images?.[0]?.url || '';
@@ -3945,6 +4054,73 @@ function bindDrawerEvents(type, data) {
       saveBtn.disabled = false; saveBtn.textContent = 'Save Category';
     });
   }
+
+  if (type === 'procurement') {
+    const itemSel    = document.getElementById('d-po-item');
+    const qtyInp     = document.getElementById('d-po-qty');
+    const costInp    = document.getElementById('d-po-cost');
+    const priceInp   = document.getElementById('d-po-unit-price');
+    const priceStatus = document.getElementById('d-po-price-status');
+
+    let _unitPrice = 0;
+
+    const setPrice = (price, note) => {
+      _unitPrice = parseFloat(price) || 0;
+      priceInp.value = _unitPrice > 0 ? _unitPrice : '';
+      if (priceStatus) priceStatus.textContent = note || (_unitPrice > 0 ? '— auto-fetched from product' : '— no price found');
+      recalcTotal();
+    };
+
+    const recalcTotal = () => {
+      const qty = parseFloat(qtyInp?.value) || 0;
+      if (_unitPrice > 0 && qty > 0) {
+        costInp.value = (_unitPrice * qty).toFixed(2);
+      } else if (qty === 0 || !qtyInp?.value) {
+        costInp.value = '';
+      }
+    };
+
+    const loadPriceForItem = async (itemId) => {
+      if (!itemId) { setPrice(0, '— select an item'); return; }
+
+      // 1. Try from option data-price
+      const opt = itemSel?.options[itemSel.selectedIndex];
+      let price = opt ? parseFloat(opt.dataset.price || '0') : 0;
+
+      // 2. Try cross-referencing product cache by name
+      if (!price) {
+        const itemName = (opt?.textContent || '').trim().toLowerCase();
+        const matched = _productCache.find(p =>
+          (p.name||'').toLowerCase() === itemName ||
+          (p.sku||'').toLowerCase() === itemName
+        );
+        if (matched) price = matched.price || matched.priceIncludingTax || 0;
+      }
+
+      // 3. Fetch from API as fallback
+      if (!price) {
+        if (priceStatus) priceStatus.textContent = '— fetching price…';
+        try {
+          const res = await ApiService.inventory.getItem(itemId);
+          const item = res?.data || res;
+          price = item?.unitCost || item?.price || item?.product?.price || 0;
+          // Also try product cache via product id
+          if (!price && item?.product?.id) {
+            const p = _productCache.find(x => x.id === item.product.id);
+            if (p) price = p.price || p.priceIncludingTax || 0;
+          }
+        } catch(_) {}
+      }
+
+      setPrice(price, price > 0 ? '— auto-fetched from product' : '— no price on record');
+    };
+
+    itemSel?.addEventListener('change', () => loadPriceForItem(itemSel.value));
+    qtyInp?.addEventListener('input', recalcTotal);
+
+    // Trigger on load if item already selected (edit mode)
+    if (itemSel?.value) loadPriceForItem(itemSel.value);
+  }
 }
 
 async function saveDrawer(type, data) {
@@ -3955,20 +4131,23 @@ async function saveDrawer(type, data) {
       const fileInput  = document.getElementById('d-prod-img-file');
       const file       = fileInput?.files?.[0];
       const categoryId = document.getElementById('d-prod-cat')?.value || null;
+      const taxRateId  = document.getElementById('d-prod-tax')?.value || null;
       const status     = document.getElementById('d-prod-status')?.value || 'ACTIVE';
       const name       = document.getElementById('d-prod-name')?.value || '';
       const sku        = document.getElementById('d-prod-sku')?.value || '';
       const desc       = document.getElementById('d-prod-desc')?.value || '';
       const price      = parseFloat(document.getElementById('d-prod-price')?.value) || 0;
+      const costPrice  = parseFloat(document.getElementById('d-prod-cost')?.value) || 0;
       const compare    = parseFloat(document.getElementById('d-prod-compare')?.value) || null;
       const stock      = parseInt(document.getElementById('d-prod-stock')?.value) || 0;
       const featured   = document.getElementById('d-prod-featured')?.checked;
 
       const payload = {
-        name, sku, description: desc, price, stock,
+        name, sku, description: desc, price, costPrice, stock,
         imageUrl: document.getElementById('d-prod-img-url')?.value,
         status, featured,
-        category: categoryId ? { id: categoryId } : null
+        category: categoryId ? { id: categoryId } : null,
+        taxRate: taxRateId ? { id: taxRateId } : null
       };
 
       if (data) {
@@ -3995,8 +4174,10 @@ async function saveDrawer(type, data) {
           fd.append('sku', sku);
           fd.append('description', desc);
           fd.append('price', price);
+          if (costPrice > 0) fd.append('costPrice', costPrice);
           fd.append('status', status);
           if (categoryId) fd.append('categoryId', categoryId);
+          if (taxRateId) fd.append('taxRateId', taxRateId);
           const res = await fetch('http://localhost:8080/api/products/upload', {
             method: 'POST',
             headers: { 'Authorization': 'Bearer ' + localStorage.getItem('luz_jwt') },
@@ -4135,12 +4316,13 @@ async function saveDrawer(type, data) {
       const supplierId = document.getElementById('d-po-supplier')?.value;
       const itemId     = document.getElementById('d-po-item')?.value;
       const qty        = parseInt(document.getElementById('d-po-qty')?.value) || 0;
-      const cost       = parseFloat(document.getElementById('d-po-cost')?.value) || null;
+      const unitCostVal = parseFloat(document.getElementById('d-po-unit-price')?.value) || null;
+      const cost       = unitCostVal && qty ? parseFloat((unitCostVal * qty).toFixed(2)) : (parseFloat(document.getElementById('d-po-cost')?.value) || null);
       const eta        = document.getElementById('d-po-eta')?.value || null;
       if (!supplierId) throw new Error('Please select a supplier');
       if (!itemId)     throw new Error('Please select an inventory item');
       if (qty < 1)     throw new Error('Quantity must be at least 1');
-      await ApiService.procurement.create({ supplierId, inventoryItemId: itemId, quantityOrdered: qty, totalCost: cost, expectedDeliveryDate: eta });
+      await ApiService.procurement.create({ supplierId, inventoryItemId: itemId, quantityOrdered: qty, unitCost: unitCostVal, totalCost: cost, expectedDeliveryDate: eta });
       closeDrawer(); showToast('Procurement order created', 'success');
       setTimeout(() => loadTab('procurement'), 300);
       return;
@@ -5741,6 +5923,30 @@ async function loadCategories(selectedId) {
   } catch(_){}
 }
 
+async function loadTaxRates(selectedId) {
+  const populateSel = (list) => {
+    const sel = document.getElementById('d-prod-tax');
+    if (!sel) return;
+    const existing = new Set([...sel.options].map(o => o.value));
+    list.forEach(t => {
+      if (!existing.has(String(t.id))) {
+        const o = document.createElement('option');
+        o.value = t.id;
+        o.textContent = `${t.name} (${Math.round(Number(t.rate || 0) * 100)}%)`;
+        sel.appendChild(o);
+      }
+    });
+    if (selectedId) sel.value = selectedId;
+  };
+
+  if (_taxRateCache.length) populateSel(_taxRateCache);
+  try {
+    const res = await ApiService.getTaxRates(true);
+    const list = extractList(res);
+    if (list.length) { _taxRateCache = list; populateSel(list); }
+  } catch(_){}
+}
+
 async function viewOrderDetail(id) {
   let order = {}, shipment = null;
   try {
@@ -5774,14 +5980,14 @@ async function viewOrderDetail(id) {
   const itemsList = (order.items||order.orderItems||[]).map(i=>`
     <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #F1F5F9;font-size:13px">
       <span>${esc(i.productName||i.name||'Item')}</span>
-      <span style="white-space:nowrap">× ${i.quantity} <b style="margin-left:8px">${fmt.money((i.unitPrice||i.price||0)*(i.quantity||1))}</b></span>
+      <span style="white-space:nowrap">× ${i.quantity} <b style="margin-left:8px">${fmt.money(i.lineTotalIncludingTax ?? ((i.unitPriceIncludingTax||i.unitPrice||i.price||0)*(i.quantity||1)))}</b></span>
     </div>`).join('') || '<div style="color:#94a3b8;font-size:13px;padding:8px 0">No items</div>';
 
   /* ── Totals block ── */
   const totalsBlock = adminView ? `
     <div style="margin-top:4px;padding-top:4px">
       ${order.subTotalAmount ? `<div style="display:flex;justify-content:space-between;font-size:13px;color:#64748b;padding:3px 0"><span>Subtotal</span><span>${fmt.money(order.subTotalAmount)}</span></div>` : ''}
-      ${order.taxAmount ? `<div style="display:flex;justify-content:space-between;font-size:13px;color:#64748b;padding:3px 0"><span>VAT (${Math.round((order.taxRate||0.18)*100)}%)</span><span>${fmt.money(order.taxAmount)}</span></div>` : ''}
+      ${order.taxAmount ? `<div style="display:flex;justify-content:space-between;font-size:13px;color:#64748b;padding:3px 0"><span>Tax included</span><span>${fmt.money(order.taxAmount)}</span></div>` : ''}
       <div style="display:flex;justify-content:space-between;font-weight:700;font-size:14px;padding:10px 0 0"><span>Total Paid</span><span style="color:#FF6B00">${fmt.money(order.totalAmount||order.total||0)}</span></div>
     </div>` : `
     <div style="display:flex;justify-content:space-between;font-weight:700;font-size:14px;padding:10px 0 0"><span>Total Paid</span><span>${fmt.money(order.totalAmount||order.total||0)}</span></div>`;
@@ -6787,8 +6993,8 @@ function posTotal() { return posCart.reduce((a,b)=>a+b.price*b.qty,0); }
 function renderCart() {
   const items = document.getElementById('pos-cart-items');
   const sub   = posTotal();
-  const tax   = sub * 0.18; // matches backend app.tax.sales-rate
-  const total = sub + tax;
+  const tax   = 0;
+  const total = sub;
   if (!posCart.length) {
     if (items) items.innerHTML = `<div class="d-empty" style="padding:32px 16px"><div class="d-empty-ico" style="font-size:28px">🛒</div><div class="d-empty-ttl" style="font-size:13px">Cart is empty</div></div>`;
   } else {
@@ -6798,7 +7004,7 @@ function renderCart() {
         <button class="pos-qty-btn" data-pos-minus="${item.id}">−</button>
         <span style="font-size:13px;font-weight:700;min-width:20px;text-align:center">${item.qty}</span>
         <button class="pos-qty-btn" data-pos-plus="${item.id}">+</button>
-        <span class="pos-item-price">${fmt.money(item.price*item.qty*1.18)}</span>
+        <span class="pos-item-price">${fmt.money(item.price*item.qty)}</span>
       </div>`).join('');
   }
   const taxEl = document.getElementById('pos-tax');
@@ -6814,7 +7020,6 @@ function showPOSReceipt(receipt) {
   const items    = receipt.items || [];
   const orderId  = receipt.orderId || receipt.id || '';
   const orderNum = receipt.orderNumber || orderId;
-  const taxRate  = Number(receipt.taxRate ?? 0.18);
   const subtotal = Number(receipt.subTotalAmount || receipt.subtotal || 0);
   const taxAmt   = Number(receipt.taxAmount || 0);
   const subtotalWithTax = subtotal + taxAmt;
@@ -6854,8 +7059,8 @@ function showPOSReceipt(receipt) {
             <tr>
               <td style="font-size:12px;padding:7px 4px;border-bottom:1px solid #F1F5F9;">${i.productName||'Product'}</td>
               <td style="font-size:12px;padding:7px 4px;border-bottom:1px solid #F1F5F9;text-align:right;">${i.quantity}</td>
-              <td style="font-size:12px;padding:7px 4px;border-bottom:1px solid #F1F5F9;text-align:right;">${fmt.money(Number(i.unitPrice || 0) * (1 + taxRate))}</td>
-              <td style="font-size:12px;padding:7px 4px;border-bottom:1px solid #F1F5F9;text-align:right;font-weight:600;">${fmt.money(Number(i.subTotal || ((i.unitPrice||0)*(i.quantity||1))) * (1 + taxRate))}</td>
+              <td style="font-size:12px;padding:7px 4px;border-bottom:1px solid #F1F5F9;text-align:right;">${fmt.money(Number(i.unitPriceIncludingTax ?? i.unitPrice ?? 0))}</td>
+              <td style="font-size:12px;padding:7px 4px;border-bottom:1px solid #F1F5F9;text-align:right;font-weight:600;">${fmt.money(Number(i.lineTotalIncludingTax ?? i.subTotal ?? ((i.unitPrice||0)*(i.quantity||1))))}</td>
             </tr>`).join('') :
             '<tr><td colspan="4" style="font-size:13px;color:#94A3B8;text-align:center;padding:12px 4px;">Items processed successfully.</td></tr>'}
           </tbody>
@@ -6868,7 +7073,7 @@ function showPOSReceipt(receipt) {
         <div style="display:flex;justify-content:space-between;font-size:16px;font-weight:800;padding-top:8px;border-top:2px solid #F1F5F9;margin-top:4px;">
           <span>Total Paid</span><span style="color:#0F172A;">${fmt.money(total)}</span>
         </div>
-        ${taxAmt ? `<div style="display:flex;justify-content:space-between;font-size:11px;color:#94A3B8;margin-top:4px;"><span>Tax (${Math.round(taxRate * 100)}%) included</span><span>${fmt.money(taxAmt)}</span></div>` : ''}
+        ${taxAmt ? `<div style="display:flex;justify-content:space-between;font-size:11px;color:#94A3B8;margin-top:4px;"><span>Tax included</span><span>${fmt.money(taxAmt)}</span></div>` : ''}
 
         <!-- Meta -->
         <div style="margin-top:12px;padding:10px;background:#F8FAFC;border-radius:8px;font-size:12px;color:#64748B;line-height:1.8;">
@@ -6946,11 +7151,11 @@ function showPOSReceipt(receipt) {
       <div class="meta">${new Date().toLocaleString('en-GB',{dateStyle:'medium',timeStyle:'short'})}</div>
       <table class="items">
         <thead><tr><th>Item</th><th>Qty</th><th>Unit Price</th><th>Subtotal</th></tr></thead>
-        <tbody>${items.map(i=>`<tr><td>${i.productName||'Product'}</td><td>${i.quantity}</td><td>${fmt.money(Number(i.unitPrice || 0) * (1 + taxRate))}</td><td>${fmt.money(Number(i.subTotal || ((i.unitPrice||0)*(i.quantity||1))) * (1 + taxRate))}</td></tr>`).join('')}</tbody>
+        <tbody>${items.map(i=>`<tr><td>${i.productName||'Product'}</td><td>${i.quantity}</td><td>${fmt.money(Number(i.unitPriceIncludingTax ?? i.unitPrice ?? 0))}</td><td>${fmt.money(Number(i.lineTotalIncludingTax ?? i.subTotal ?? ((i.unitPrice||0)*(i.quantity||1))))}</td></tr>`).join('')}</tbody>
       </table>
       <div class="tot-row"><span>Subtotal (tax incl.)</span><span>${fmt.money(subtotalWithTax)}</span></div>
       <div class="grand"><span>Total Paid</span><span>${fmt.money(total)}</span></div>
-      ${taxAmt ? `<div class="tot-row" style="font-size:11px;color:#94a3b8;margin-top:4px;"><span>Tax (${Math.round(taxRate * 100)}%) included</span><span>${fmt.money(taxAmt)}</span></div>` : ''}
+      ${taxAmt ? `<div class="tot-row" style="font-size:11px;color:#94a3b8;margin-top:4px;"><span>Tax included</span><span>${fmt.money(taxAmt)}</span></div>` : ''}
       <div class="info">
         <div><strong>Payment:</strong> ${(receipt.paymentMethod||'—').replace(/_/g,' ')}</div>
         ${receipt.paymentReference ? `<div><strong>Reference:</strong> ${receipt.paymentReference}</div>` : ''}
@@ -7060,6 +7265,47 @@ function bindFinanceTab() {
   });
   document.getElementById('tax-order-id')?.addEventListener('keydown', e => {
     if (e.key === 'Enter') document.getElementById('btn-do-record-tax')?.click();
+  });
+
+  // -- Tax Rate Manager: Create
+  document.getElementById('btn-create-tax-rate')?.addEventListener('click', async () => {
+    const nameEl = document.getElementById('tax-rate-name');
+    const codeEl = document.getElementById('tax-rate-code');
+    const pctEl  = document.getElementById('tax-rate-percent');
+    const name   = nameEl?.value.trim();
+    const code   = codeEl?.value.trim().toUpperCase().replace(/\s+/g, '_');
+    const pctRaw = parseFloat(pctEl?.value);
+    if (!name)                        return showToast('Name is required', 'error');
+    if (!code)                        return showToast('Code is required', 'error');
+    if (isNaN(pctRaw) || pctRaw < 0)  return showToast('Enter a valid rate (0 or above)', 'error');
+    const btn = document.getElementById('btn-create-tax-rate');
+    btn.disabled = true; btn.textContent = '...';
+    try {
+      await ApiService.createTaxRate({ name, code, rate: pctRaw / 100, active: true });
+      if (nameEl) nameEl.value = '';
+      if (codeEl) codeEl.value = '';
+      if (pctEl)  pctEl.value  = '';
+      showToast(`Tax rate "${name}" created`, 'success');
+      loadTab('finance');
+    } catch(e) { showToast(e.message || 'Failed to create tax rate', 'error'); }
+    finally { btn.disabled = false; btn.textContent = 'Add Rate'; }
+  });
+
+  // -- Tax Rate Manager: Enable / Disable
+  document.querySelectorAll('.tax-rate-toggle').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const id     = btn.dataset.id;
+      const active = btn.dataset.active === 'true';
+      btn.disabled = true; btn.textContent = '...';
+      try {
+        await ApiService.setTaxRateActive(id, active);
+        showToast(active ? 'Tax rate enabled' : 'Tax rate disabled', 'success');
+        loadTab('finance');
+      } catch(e) {
+        showToast(e.message || 'Failed to update tax rate', 'error');
+        btn.disabled = false; btn.textContent = active ? 'Enable' : 'Disable';
+      }
+    });
   });
 
   document.getElementById('btn-export-fin-mgmt')?.addEventListener('click', async () => {
@@ -7284,3 +7530,5 @@ function showToast(msg, type='info') {
   document.body.appendChild(el);
   setTimeout(() => el.remove(), 3500);
 }
+
+

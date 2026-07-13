@@ -21,7 +21,7 @@ function getPrimaryImage(product) {
 
 function renderRecommendationCard(product) {
   const image = getPrimaryImage(product);
-  const price = Math.round((parseFloat(product.price) || 0) * 1.18);
+  const price = Math.round(Number(product.discountedPriceIncludingTax ?? product.priceIncludingTax ?? product.price ?? 0));
   const category = product.category?.name || product.categoryName || '';
   const fallback = 'https://images.unsplash.com/photo-1542751371-adc38448a05e?w=400&q=80';
 
@@ -116,7 +116,8 @@ export async function render(state) {
         <h1 class="detail-title">${p.name}</h1>
         <p class="detail-desc">${p.description}</p>
         <div class="detail-price-box">
-          <span class="price-current" style="font-size:32px;">RWF ${Math.round((parseFloat(p.price)||0) * 1.18).toLocaleString('en-US')}</span>
+          <span class="price-current" style="font-size:32px;">RWF ${Math.round(Number(p.discountedPriceIncludingTax ?? p.priceIncludingTax ?? p.price ?? 0)).toLocaleString('en-US')}</span>
+          ${Number(p.taxRate || 0) > 0 ? `<div style="color:#10b981;font-size:13px;font-weight:700;margin-top:6px;">✓ VAT Included</div>` : ''}
         </div>
         <div class="detail-actions">
           <div class="quantity-control">

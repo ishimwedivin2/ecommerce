@@ -36,7 +36,7 @@ function renderStars(rating) {
 }
 
 function renderSlide(banner, product) {
-  const rawPrice = product ? Math.round((parseFloat(product.price)||0) * 1.18) : 0;
+  const rawPrice = product ? Math.round(Number(product.discountedPriceIncludingTax ?? product.priceIncludingTax ?? product.price ?? 0)) : 0;
   const price = product ? `<div class="hero-price">RWF ${rawPrice.toLocaleString('en-US')}<span>incl. tax</span></div>` : '';
   const tag = banner.tagLabel || (product ? 'Featured Product' : 'New Arrival');
   const badge = `<span class="hero-tag">${tag}</span>`;
@@ -123,8 +123,9 @@ function renderProductCard(p) {
   const price = parseFloat(p.price) || 0;
   const baseDiscounted = p.discountPercentage
     ? price * (1 - parseFloat(p.discountPercentage) / 100) : null;
-  const vatPrice = Math.round(price * 1.18);
-  const vatDiscounted = baseDiscounted ? Math.round(baseDiscounted * 1.18) : null;
+  const vatPrice = Math.round(Number(p.priceIncludingTax ?? price));
+  const vatDiscounted = Math.round(Number(p.discountedPriceIncludingTax ?? baseDiscounted ?? vatPrice));
+  const hasDiscount = !!baseDiscounted;
   const categoryName = p.category?.name || p.categoryName || '';
   const FALLBACK = 'https://images.unsplash.com/photo-1542751371-adc38448a05e?w=400&q=80';
 
@@ -143,10 +144,11 @@ function renderProductCard(p) {
         <h3 class="sp-card-name" data-action="view-details" data-id="${p.id}">${p.name}</h3>
         <div class="sp-card-rating">${renderStars(p.averageRating || p.rating || 4.5)} ${p.reviewsCount > 0 ? `<span>(${p.reviewsCount})</span>` : ''}</div>
         <div class="sp-card-price-row">
-          ${vatDiscounted
+          ${hasDiscount
             ? `<span class="sp-price-orig">RWF ${vatPrice.toLocaleString('en-US')}</span><span class="sp-price-now">RWF ${vatDiscounted.toLocaleString('en-US')}</span>`
             : `<span class="sp-price-now">RWF ${vatPrice.toLocaleString('en-US')}</span>`}
         </div>
+        ${Number(p.taxRate || 0) > 0 ? `<div style="color:#10b981;font-size:11px;font-weight:700;margin-top:4px;">✓ VAT Included</div>` : ''}
       </div>
       <div class="sp-card-footer">
         ${(() => {
@@ -168,7 +170,7 @@ function renderProductCard(p) {
 function renderRecommendationCard(p) {
   const image = getPrimaryImage(p);
   const price = parseFloat(p.price) || 0;
-  const vatPrice = Math.round(price * 1.18);
+  const vatPrice = Math.round(Number(p.discountedPriceIncludingTax ?? p.priceIncludingTax ?? price));
   const categoryName = p.category?.name || p.categoryName || '';
   const FALLBACK = 'https://images.unsplash.com/photo-1542751371-adc38448a05e?w=400&q=80';
 

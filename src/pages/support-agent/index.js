@@ -809,7 +809,7 @@ async function openCustomerPanel(customerId) {
     document.getElementById('sa-cp-orders').innerHTML = `<p style="color:#94a3b8;font-size:12px;">No orders found</p>`;
   } else {
     document.getElementById('sa-cp-orders').innerHTML = orders.map(o => {
-      const total = o.totalAmount ? `RM ${(o.totalAmount * 1.18).toFixed(2)}` : '—';
+      const total = o.totalAmount ? `RWF ${Number(o.totalAmount).toLocaleString('en-US')}` : '—';
       const statusColor = { PENDING:'#f59e0b', PROCESSING:'#3b82f6', SHIPPED:'#8b5cf6', DELIVERED:'#10b981', CANCELLED:'#ef4444' }[o.status] || '#6b7280';
       return `
         <div class="sa-cp-order-row" data-order-id="${o.id}">
@@ -917,7 +917,7 @@ function openCreateReturnModal(orders, customerId, parentOverlay) {
           <select class="sa-cp-select" id="sa-crm-order-select">
             <option value="">— choose order —</option>
             ${orders.filter(o => o.status !== 'CANCELLED').map(o =>
-              `<option value="${o.id}">#${(o.orderNumber || o.id).toString().slice(0,8)} — ${o.status} — RM ${o.totalAmount ? (o.totalAmount*1.18).toFixed(2) : '—'}</option>`
+              `<option value="${o.id}">#${(o.orderNumber || o.id).toString().slice(0,8)} — ${o.status} — RWF ${o.totalAmount ? Number(o.totalAmount).toLocaleString('en-US') : '—'}</option>`
             ).join('')}
           </select>
         </div>

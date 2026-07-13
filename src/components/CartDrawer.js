@@ -66,11 +66,10 @@ export async function render() {
   }
 
   const items = cart.items || [];
-  const productTotal = Number(cart.totalAmount ?? cart.totalPrice ?? 0);
-  const total = productTotal * 1.18;
+  const total = Number(cart.totalAmount ?? cart.totalPrice ?? 0);
 
   const bodyHtml = items.length ? items.map(item => {
-    const price = Number(item.unitPrice ?? item.productPrice ?? 0) * 1.18;
+    const price = Number(item.unitPriceIncludingTax ?? item.productPriceIncludingTax ?? item.unitPrice ?? item.productPrice ?? 0);
     const src = itemImg(item);
     return `
       <div class="cart-drawer-item" data-id="${item.productId}">

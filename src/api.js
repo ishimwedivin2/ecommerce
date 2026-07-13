@@ -1282,6 +1282,18 @@ export const ApiService = {
   async recordOrderTax(orderId) {
     return await request(`/api/finance/taxes/orders/${orderId}/record`, { method: 'POST' });
   },
+  async getTaxRates(activeOnly = false) {
+    return await request(`/api/finance/tax-rates?activeOnly=${activeOnly}`);
+  },
+  async createTaxRate(data) {
+    return await request('/api/finance/tax-rates', { method: 'POST', body: JSON.stringify(data) });
+  },
+  async updateTaxRate(id, data) {
+    return await request(`/api/finance/tax-rates/${id}`, { method: 'PUT', body: JSON.stringify(data) });
+  },
+  async setTaxRateActive(id, active) {
+    return await request(`/api/finance/tax-rates/${id}/active?active=${active}`, { method: 'PATCH' });
+  },
 
   // ── Finance reports ──────────────────────────────────────
   async getProfitLoss({ startDate, endDate } = {}) {
