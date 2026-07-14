@@ -2554,9 +2554,12 @@ function finDateBar(subTab) {
 async function finOverview() {
   let s = {};
   try { const r = await ApiService.getFinanceStats({ startDate: _finDateFrom, endDate: _finDateTo }); s = r.data || r || {}; } catch(_){}
-  const rev = s.revenue || s.netRevenue || 0;
+  const grossRev = s.grossRevenue || s.revenue || 0;
+  const rev = s.netRevenue || 0;
   const exp = s.expenses || 0;
-  const profit = s.netProfit || (rev - exp);
+  const cogs = s.cogs || 0;
+  const tax = s.taxCollected || 0;
+  const profit = s.netProfit || 0;
   const margin = rev ? (profit / rev * 100) : 0;
   return `
   <div class="dash-stats">
@@ -2568,10 +2571,11 @@ async function finOverview() {
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
     <div class="dash-chart-card">
       <div class="dash-chart-hd">Finance Summary</div>
-      ${finMetric('Gross Revenue', s.grossRevenue||rev, 'pos')}
+      ${finMetric('Gross Revenue', grossRev, 'pos')}
       ${finMetric('Refunds', s.refunds||0, 'neg')}
       ${finMetric('Net Revenue', rev, 'pos')}
       ${finMetric('Operating Expenses', exp, 'neg')}
+      ${finMetric('Cost of Product', cogs, 'neg')}
       ${finMetric('Tax Collected', s.taxCollected||0)}
       <div class="fin-metric" style="border-top:2px solid #E8ECF0;margin-top:8px;padding-top:12px">
         <span class="fin-metric-lbl" style="font-weight:700">Net Profit</span>
