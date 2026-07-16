@@ -36,7 +36,12 @@ function renderRecommendationCard(product) {
         <div class="product-rating">${renderStars(product.averageRating || product.rating || 4.5)} <span>(${product.reviewsCount || 0})</span></div>
         <div class="detail-rec-footer">
           <span class="detail-rec-price">RWF ${price.toLocaleString('en-US')}</span>
-          <button class="detail-rec-cart" data-action="add-rec-cart" data-id="${product.id}">Add</button>
+          ${(() => {
+            const _u2 = ApiService.getCurrentUser();
+            const _r2 = (_u2?.roles || []);
+            const _so = _r2.some(r => { const n=(typeof r==='string'?r:r.name||r.authority||'').toUpperCase(); return n.includes('ADMIN')||n.includes('EMPLOYEE')||n.includes('SUPPORT'); }) && !_r2.some(r=>(typeof r==='string'?r:r.name||r.authority||'').toUpperCase().includes('CUSTOMER'));
+            return _so ? '' : `<button class="detail-rec-cart" data-action="add-rec-cart" data-id="${product.id}">Add</button>`;
+          })()}
         </div>
       </div>
     </article>
@@ -92,6 +97,16 @@ export async function render(state) {
     .filter(item => item.id !== p.id)
     .slice(0, 4);
 
+  // Determine staff-only once for the whole page
+  const _cu = ApiService.getCurrentUser();
+  const _cr = (_cu?.roles || []);
+  const _isStaffOnly = _cr.some(r => {
+    const n = (typeof r === 'string' ? r : r.name || r.authority || '').toUpperCase();
+    return n.includes('ADMIN') || n.includes('EMPLOYEE') || n.includes('SUPPORT');
+  }) && !_cr.some(r =>
+    (typeof r === 'string' ? r : r.name || r.authority || '').toUpperCase().includes('CUSTOMER')
+  );
+
   const reviewsHtml = reviews.length > 0 ? reviews.map(r => `
     <div class="review-card">
       <div class="review-header">
@@ -125,16 +140,17 @@ export async function render(state) {
             <input type="text" class="quantity-value" id="qty-input" value="1">
             <button class="quantity-btn" id="qty-plus">+</button>
           </div>
-          ${(() => {
+          ${_isStaffOnly ? '' : (() => {
             const qty = p.inventoryItem?.quantity ?? p.stock ?? null;
             const outOfStock = qty !== null && qty <= 0;
             return outOfStock
               ? `<button class="btn-primary" disabled style="flex:1;justify-content:center;height:42px;opacity:.5;cursor:not-allowed;">Out of Stock</button>`
               : `<button class="btn-primary" id="btn-detail-add" data-id="${p.id}" style="flex:1;justify-content:center;height:42px;">Add to Cart</button>`;
           })()}
+          ${_isStaffOnly ? '' : `
           <button class="wishlist-toggle" id="btn-detail-wishlist" data-id="${p.id}" style="position:static;box-shadow:none;border:1px solid var(--border);">
             <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"></path></svg>
-          </button>
+          </button>`}
         </div>
       </div>
     </div>
@@ -192,7 +208,7 @@ export function bindEvents(state, helpers) {
 
   function checkAuth(cb) {
     if (!ApiService.getCurrentUser()) {
-      toast('Please sign in to proceed');
+      toast('Sign in to continue', 'info');
       setState({ authModalMode: 'login' });
       helpers.renderAuthModal();
       return;

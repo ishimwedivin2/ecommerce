@@ -113,8 +113,13 @@ export function bindEvents(state, helpers) {
     }
   });
 
-  document.getElementById('btn-close-ticket')?.addEventListener('click', async () => {
-    if (confirm('Close this support ticket?')) {
+  document.getElementById('btn-close-ticket')?.addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    if (btn.dataset.confirming === 'true') {
+      btn.dataset.confirming = 'false';
+      clearTimeout(btn._confirmTimer);
+      btn.disabled = true;
+      btn.textContent = '…';
       try {
         await ApiService.support.closeTicket(state.selectedTicketId);
         unsubscribeWS('/topic/tickets/' + state.selectedTicketId);
@@ -122,7 +127,22 @@ export function bindEvents(state, helpers) {
         refresh();
       } catch (err) {
         toast((err && err.message) || 'Failed to close ticket', 'error');
+        btn.disabled = false;
+        btn.textContent = 'Close Ticket';
       }
+    } else {
+      btn.dataset.confirming = 'true';
+      btn.textContent = 'Confirm close?';
+      btn.style.background = '#fef2f2';
+      btn.style.borderColor = '#dc2626';
+      btn.style.color = '#dc2626';
+      btn._confirmTimer = setTimeout(() => {
+        btn.dataset.confirming = 'false';
+        btn.textContent = 'Close Ticket';
+        btn.style.background = '';
+        btn.style.borderColor = 'var(--danger)';
+        btn.style.color = 'var(--danger)';
+      }, 4000);
     }
   });
 

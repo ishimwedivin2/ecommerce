@@ -1,4 +1,4 @@
-import './style.css';
+﻿import './style.css';
 import '../shop/style.css';
 import { ApiService } from '../../api.js';
 import { setState } from '../../store.js';
@@ -56,15 +56,14 @@ function renderSlide(banner, product) {
         <p class="hero-desc">${banner.subtitle || ''}</p>
         ${price}
         <div class="hero-buttons">
-          ${productId ? `
-            <button class="btn-primary" data-action="add-to-cart" data-id="${productId}">
-              <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
-              ${banner.buttonText || 'Add to Cart'}
-            </button>
-            <button class="btn-secondary" data-action="view-details" data-id="${productId}">View details</button>
-          ` : `
-            <button class="btn-primary" data-action="go-shop">${banner.buttonText || 'Shop Now'}</button>
-          `}
+          ${(() => {
+            const _su = ApiService.getCurrentUser();
+            const _sr = (_su?.roles || []);
+            const _slStaff = _sr.some(r => { const n=(typeof r==='string'?r:r.name||r.authority||'').toUpperCase(); return n.includes('ADMIN')||n.includes('EMPLOYEE')||n.includes('SUPPORT'); }) && !_sr.some(r=>(typeof r==='string'?r:r.name||r.authority||'').toUpperCase().includes('CUSTOMER'));
+            if (productId && !_slStaff) return `<button class="btn-primary" data-action="add-to-cart" data-id="${productId}"><svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>${banner.buttonText || 'Add to Cart'}</button><button class="btn-secondary" data-action="view-details" data-id="${productId}">View details</button>`;
+            if (productId && _slStaff) return `<button class="btn-secondary" data-action="view-details" data-id="${productId}">View details</button>`;
+            return `<button class="btn-primary" data-action="go-shop">${banner.buttonText || 'Shop Now'}</button>`;
+          })()} 
         </div>
         <div class="hero-stats">
           <div class="hero-stat-item"><span class="hero-stat-value">10K+</span><span class="hero-stat-label">Products</span></div>
@@ -129,15 +128,19 @@ function renderProductCard(p) {
   const categoryName = p.category?.name || p.categoryName || '';
   const FALLBACK = 'https://images.unsplash.com/photo-1542751371-adc38448a05e?w=400&q=80';
 
+  const _u = ApiService.getCurrentUser();
+  const _r = (_u?.roles || []);
+  const _isStaffOnly = _r.some(r => { const n=(typeof r==='string'?r:r.name||r.authority||'').toUpperCase(); return n.includes('ADMIN')||n.includes('EMPLOYEE')||n.includes('SUPPORT'); }) && !_r.some(r=>(typeof r==='string'?r:r.name||r.authority||'').toUpperCase().includes('CUSTOMER'));
+
   return `
     <div class="sp-card" data-id="${p.id}">
       <div class="sp-card-img-wrap" data-action="view-details" data-id="${p.id}">
         <img src="${image || FALLBACK}" alt="${p.name}" class="sp-card-img"
           onerror="this.onerror=null;this.src='${FALLBACK}'">
         ${p.discountPercentage ? `<span class="sp-card-badge">-${p.discountPercentage}% OFF</span>` : ''}
-        <button class="sp-card-wish" data-action="toggle-wishlist" data-id="${p.id}" title="Add to wishlist">
+        ${_isStaffOnly ? '' : `<button class="sp-card-wish" data-action="toggle-wishlist" data-id="${p.id}" title="Add to wishlist">
           <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78L12 21.23l8.84-8.84a5.5 5.5 0 000-7.78z"></path></svg>
-        </button>
+        </button>`}
       </div>
       <div class="sp-card-body">
         ${categoryName ? `<span class="sp-card-cat">${categoryName}</span>` : ''}
@@ -151,16 +154,19 @@ function renderProductCard(p) {
         ${Number(p.taxRate || 0) > 0 ? `<div style="color:#10b981;font-size:11px;font-weight:700;margin-top:4px;">✓ VAT Included</div>` : ''}
       </div>
       <div class="sp-card-footer">
-        ${(() => {
-          const qty = p.inventoryItem?.quantity ?? p.stock ?? null;
-          const outOfStock = qty !== null && qty <= 0;
-          return outOfStock
-            ? `<button class="sp-btn-cart" disabled style="opacity:.5;cursor:not-allowed">Out of Stock</button>`
-            : `<button class="sp-btn-cart" data-action="add-to-cart" data-id="${p.id}">
-                <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
-                Add to Cart
-               </button>`;
-        })()}
+        ${_isStaffOnly
+          ? `<button class="sp-btn-detail" data-action="view-details" data-id="${p.id}" style="flex:1;">View Details</button>`
+          : (() => {
+              const qty = p.inventoryItem?.quantity ?? p.stock ?? null;
+              const outOfStock = qty !== null && qty <= 0;
+              return outOfStock
+                ? `<button class="sp-btn-cart" disabled style="opacity:.5;cursor:not-allowed">Out of Stock</button>`
+                : `<button class="sp-btn-cart" data-action="add-to-cart" data-id="${p.id}">
+                    <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
+                    Add to Cart
+                   </button>`;
+            })()
+        }
         <button class="sp-btn-detail" data-action="view-details" data-id="${p.id}">View</button>
       </div>
     </div>
@@ -203,7 +209,10 @@ export async function render(state) {
   // clear any stale search/category state so returning home always shows all products
   setState({ searchQuery: '', activeCategory: null });
 
-  const recommendationRequest = ApiService.getCurrentUser()
+  const _homeUser  = ApiService.getCurrentUser();
+  const _homeRoles = (_homeUser?.roles || []);
+  const _homeIsStaff = _homeRoles.some(r => { const n=(typeof r==='string'?r:r.name||r.authority||'').toUpperCase(); return n.includes('ADMIN')||n.includes('EMPLOYEE')||n.includes('SUPPORT'); }) && !_homeRoles.some(r=>(typeof r==='string'?r:r.name||r.authority||'').toUpperCase().includes('CUSTOMER'));
+  const recommendationRequest = (_homeUser && !_homeIsStaff)
     ? ApiService.wishlist.getRecommendations(8).catch(() => ({ data: [] }))
     : Promise.resolve({ data: [] });
 
@@ -256,7 +265,7 @@ export async function render(state) {
     ${heroBannerHtml}
     ${trustBadgesHtml}
 
-    ${recommendations.length ? `
+    ${(recommendations.length && !_homeIsStaff) ? `
       <section class="recommendation-section animate-fade-up">
         <div class="section-header">
           <div>
@@ -507,7 +516,7 @@ function bindCardEvents(container, helpers) {
   function checkAuth(cb) {
     const user = ApiService.getCurrentUser();
     if (!user) {
-      toast('Please sign in to add items');
+      toast('Sign in to add items to your cart', 'info');
       setState({ authModalMode: 'login' });
       helpers.renderAuthModal();
       return;
@@ -519,7 +528,8 @@ function bindCardEvents(container, helpers) {
     });
     const isCustomerOnly = roles.some(r => (typeof r === 'string' ? r : r.name || r.authority || '').toUpperCase().includes('CUSTOMER'));
     if (isStaff && !isCustomerOnly) {
-      toast('Cart is not available for staff accounts');
+      // belt-and-suspenders: hide the button if it slipped through
+      if (btn) btn.style.display = 'none';
       return;
     }
     cb();

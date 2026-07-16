@@ -87,7 +87,7 @@ export function bindEvents(state, helpers) {
 
   function checkAuth(cb) {
     if (!ApiService.getCurrentUser()) {
-      toast('Please sign in to proceed');
+      toast('Sign in to manage your wishlist', 'info');
       setState({ authModalMode: 'login' });
       helpers.renderAuthModal();
       return;

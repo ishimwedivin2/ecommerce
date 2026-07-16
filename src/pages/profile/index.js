@@ -587,7 +587,13 @@ function showReceiptModal(r, orderId) {
     try {
       await ApiService.receipts.downloadPdf(orderId, r.orderNumber || orderId);
     } catch (err) {
-      alert('PDF error: ' + err.message);
+      // show error inline next to the button instead of alert()
+      const dlBtn = document.getElementById('rcpt-dl-btn');
+      const errSpan = document.createElement('span');
+      errSpan.style.cssText = 'font-size:11px;color:#dc2626;margin-left:8px;';
+      errSpan.textContent = 'PDF failed: ' + (err.message || 'unknown error');
+      dlBtn?.parentNode?.appendChild(errSpan);
+      setTimeout(() => errSpan.remove(), 5000);
     } finally {
       this.textContent = '⬇ PDF';
       this.disabled = false;
@@ -750,34 +756,81 @@ function bindOrders(helpers) {
     }
 
     if (action === 'cancel-order') {
-      if (!confirm('Cancel this order?')) return;
-      btn.disabled = true;
-      btn.textContent = '…';
-      try {
-        await ApiService.orders.cancel(oid);
-        toast('Order cancelled');
-        refresh();
-      } catch (err) {
-        toast(err.message || 'Could not cancel', 'error');
-        btn.disabled = false;
-        btn.textContent = '✗ Cancel';
+      if (btn.dataset.confirming === 'true') {
+        btn.dataset.confirming = 'false';
+        clearTimeout(btn._confirmTimer);
+        btn.disabled = true;
+        btn.textContent = '…';
+        try {
+          await ApiService.orders.cancel(oid);
+          toast('Order cancelled');
+          refresh();
+        } catch (err) {
+          toast(err.message || 'Could not cancel', 'error');
+          btn.disabled = false;
+          btn.textContent = '✗ Cancel';
+        }
+      } else {
+        btn.dataset.confirming = 'true';
+        btn.textContent = 'Confirm cancel?';
+        btn.style.background = '#fef2f2';
+        btn.style.color = '#dc2626';
+        btn.style.borderColor = '#dc2626';
+        btn._confirmTimer = setTimeout(() => {
+          btn.dataset.confirming = 'false';
+          btn.textContent = '✗ Cancel';
+          btn.style.background = '';
+          btn.style.color = '';
+          btn.style.borderColor = '';
+        }, 4000);
       }
     }
 
     if (action === 'request-return') {
-      const reason = prompt('Please describe the reason for your return:');
-      if (!reason?.trim()) return;
-      btn.disabled = true;
-      btn.textContent = '…';
-      try {
-        await ApiService.returns.create(oid, reason.trim());
-        toast('Return request submitted — we will review it shortly.');
-        refresh();
-      } catch (err) {
-        toast(err.message || 'Could not submit return', 'error');
-        btn.disabled = false;
-        btn.textContent = '↩ Return';
-      }
+      // Show inline return reason form inside the order card footer
+      const existingForm = document.getElementById(`return-form-${oid}`);
+      if (existingForm) { existingForm.remove(); return; }
+
+      const footer = btn.closest('.ord-actions');
+      const form = document.createElement('div');
+      form.id = `return-form-${oid}`;
+      form.style.cssText = 'margin-top:10px;display:flex;flex-direction:column;gap:8px;width:100%;';
+      form.innerHTML = `
+        <textarea id="return-reason-${oid}" placeholder="Describe the reason for your return…"
+          style="width:100%;box-sizing:border-box;border:1.5px solid #e2e8f0;border-radius:8px;
+                 padding:8px 12px;font-size:13px;font-family:inherit;resize:none;height:72px;
+                 outline:none;" maxlength="500"></textarea>
+        <div style="display:flex;gap:8px;">
+          <button id="return-submit-${oid}" class="ord-btn ord-btn-warn" style="flex:1;">Submit Return</button>
+          <button id="return-cancel-${oid}" class="ord-btn" style="flex:0 0 auto;">Cancel</button>
+        </div>
+        <div id="return-err-${oid}" style="font-size:12px;color:#dc2626;display:none;"></div>
+      `;
+      footer.after(form);
+
+      document.getElementById(`return-reason-${oid}`)?.focus();
+
+      document.getElementById(`return-cancel-${oid}`)?.addEventListener('click', () => form.remove());
+
+      document.getElementById(`return-submit-${oid}`)?.addEventListener('click', async () => {
+        const reason = document.getElementById(`return-reason-${oid}`)?.value.trim();
+        const errEl  = document.getElementById(`return-err-${oid}`);
+        if (!reason) {
+          if (errEl) { errEl.textContent = 'Please describe the reason.'; errEl.style.display = ''; }
+          return;
+        }
+        const submitBtn = document.getElementById(`return-submit-${oid}`);
+        submitBtn.disabled = true; submitBtn.textContent = '…';
+        try {
+          await ApiService.returns.create(oid, reason);
+          toast('Return request submitted — we will review it shortly.');
+          form.remove();
+          refresh();
+        } catch (err) {
+          if (errEl) { errEl.textContent = err.message || 'Could not submit return'; errEl.style.display = ''; }
+          submitBtn.disabled = false; submitBtn.textContent = 'Submit Return';
+        }
+      });
     }
   });
 }
@@ -861,13 +914,27 @@ function bindAddresses(helpers) {
     }
 
     if (action === 'delete-address') {
-      if (!confirm('Delete this address?')) return;
-      try {
-        await ApiService.addresses.delete(id);
-        toast('Address deleted');
-        refresh();
-      } catch (err) {
-        toast(err.message || 'Could not delete address', 'error');
+      if (btn.dataset.confirming === 'true') {
+        btn.dataset.confirming = 'false';
+        clearTimeout(btn._confirmTimer);
+        try {
+          await ApiService.addresses.delete(id);
+          toast('Address deleted');
+          refresh();
+        } catch (err) {
+          toast(err.message || 'Could not delete address', 'error');
+        }
+      } else {
+        btn.dataset.confirming = 'true';
+        btn.textContent = 'Sure?';
+        btn.style.background = '#fef2f2';
+        btn.style.borderColor = '#dc2626';
+        btn._confirmTimer = setTimeout(() => {
+          btn.dataset.confirming = 'false';
+          btn.textContent = 'Delete';
+          btn.style.background = '';
+          btn.style.borderColor = '';
+        }, 4000);
       }
     }
   });

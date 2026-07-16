@@ -27,7 +27,7 @@ function renderStars(rating) {
   return '★'.repeat(Math.floor(r)) + '☆'.repeat(5 - Math.floor(r));
 }
 
-function renderCard(p) {
+function renderCard(p, hideCart = false) {
   const img = getPrimaryImage(p);
   const price = parseFloat(p.price) || 0;
   const baseDiscounted = p.discountPercentage
@@ -60,6 +60,7 @@ function renderCard(p) {
       </div>
       <div class="sp-card-footer">
         ${(() => {
+          if (hideCart) return `<button class="sp-btn-detail" data-action="shop-detail" data-id="${p.id}" style="flex:1;">View Details</button>`;
           const qty = p.inventoryItem?.quantity ?? p.stock ?? null;
           const outOfStock = qty !== null && qty <= 0;
           return outOfStock
@@ -127,7 +128,13 @@ function renderSidebar(cats, filters) {
 function renderGrid(products, loading = false) {
   if (loading) return `<div class="sp-loading"><div class="sp-spinner"></div></div>`;
   if (!products.length) return `<div class="sp-empty">No products found. Try different filters.</div>`;
-  return products.map(renderCard).join('');
+  const user = ApiService.getCurrentUser();
+  const roles = user?.roles || [];
+  const isStaffOnly = roles.some(r => {
+    const n = (typeof r === 'string' ? r : r.name || r.authority || '').toUpperCase();
+    return n.includes('ADMIN') || n.includes('EMPLOYEE') || n.includes('SUPPORT');
+  }) && !roles.some(r => (typeof r === 'string' ? r : r.name || r.authority || '').toUpperCase().includes('CUSTOMER'));
+  return products.map(p => renderCard(p, isStaffOnly)).join('');
 }
 
 export async function render(state) {
@@ -247,19 +254,20 @@ function bindCardActions() {
     el.addEventListener('click', async () => {
       const user = ApiService.getCurrentUser();
       if (!user) {
-        import('../../components/toast.js').then(m => m.showToast('Please sign in to add items', 'error'));
+        import('../../components/toast.js').then(m => m.showToast('Sign in to add items to your cart', 'info'));
+        import('../../router.js').then(m => { m.helpers.syncUrl({ authModalMode: 'login' }); m.renderAuthModal(); });
         return;
       }
       const roles = user.roles || [];
-      const isCustomerOnly = roles.some(r => (typeof r === 'string' ? r : r.name || r.authority || '').toUpperCase().includes('CUSTOMER'));
       const isStaff = roles.some(r => {
         const n = (typeof r === 'string' ? r : r.name || r.authority || '').toUpperCase();
         return n.includes('ADMIN') || n.includes('EMPLOYEE') || n.includes('SUPPORT');
       });
-      if (isStaff && !isCustomerOnly) {
-        import('../../components/toast.js').then(m => m.showToast('Cart is not available for staff accounts', 'info'));
-        return;
-      }
+      const isCustomerOnly = roles.some(r =>
+        (typeof r === 'string' ? r : r.name || r.authority || '').toUpperCase().includes('CUSTOMER')
+      );
+      // Staff-only accounts: button should not appear, but guard here too — silent return
+      if (isStaff && !isCustomerOnly) return;
       try {
         await ApiService.cart.addItem(el.dataset.id, 1);
         import('../../components/toast.js').then(m => m.showToast('Added to cart!', 'success'));
@@ -274,11 +282,17 @@ function bindCardActions() {
   });
   document.querySelectorAll('[data-action="shop-wish"]').forEach(el => {
     el.addEventListener('click', async () => {
+      const user = ApiService.getCurrentUser();
+      if (!user) {
+        import('../../components/toast.js').then(m => m.showToast('Sign in to save items to your wishlist', 'info'));
+        import('../../router.js').then(m => { m.helpers.syncUrl({ authModalMode: 'login' }); m.renderAuthModal(); });
+        return;
+      }
       try {
         await ApiService.wishlist.add(el.dataset.id);
         import('../../components/toast.js').then(m => m.showToast('Added to wishlist!', 'success'));
-      } catch {
-        import('../../components/toast.js').then(m => m.showToast('Please sign in first', 'error'));
+      } catch (err) {
+        import('../../components/toast.js').then(m => m.showToast(err.message || 'Failed to add to wishlist', 'error'));
       }
     });
   });

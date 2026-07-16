@@ -105,7 +105,7 @@ export async function render() {
       </nav>
 
       <div class="search-bar-container">
-        <input type="text" class="search-input" id="global-search-input" placeholder="Search a product, brand, category...">
+        <input type="text" class="search-input" id="global-search-input" placeholder="Search a product, brand, category..." value="${(appState.searchQuery || '').replace(/"/g, '&quot;')}">
         <button class="search-btn" id="global-search-btn">
           <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
         </button>
@@ -337,24 +337,263 @@ export function bindEvents(helpers) {
     });
   }
 
-  // Search
+  // ── Live Search ───────────────────────────────────────────
   const searchInput = document.getElementById('global-search-input');
-  const searchBtn = document.getElementById('global-search-btn');
-  const doSearch = () => {
-    const query = searchInput?.value.trim();
-    if (!query) return;
-    setState({ searchQuery: query });
-    navigate('shop');
-    if (searchInput) searchInput.value = '';
-  };
+  const searchBtn   = document.getElementById('global-search-btn');
+  const searchWrap  = searchInput?.closest('.search-bar-container');
 
-  if (searchInput) {
-    searchInput.value = '';
-    searchInput.addEventListener('keypress', (e) => {
-      if (e.key === 'Enter') doSearch();
+  const BACKEND_URL  = 'http://localhost:8080';
+  const FALLBACK_IMG = 'https://images.unsplash.com/photo-1542751371-adc38448a05e?w=80&q=60';
+
+  let _debounceTimer = null;
+  let _latestQuery   = '';
+  let _cachedCats    = null; // category list cached after first fetch
+
+  /* ── small helpers ── */
+  function getProductImg(p) {
+    if (Array.isArray(p.images) && p.images.length) {
+      const pri = p.images.find(i => i.isPrimary || i.primary);
+      const url = pri?.url || p.images[0]?.url || '';
+      return url.startsWith('/uploads/') ? `${BACKEND_URL}${url}` : url;
+    }
+    return p.image || '';
+  }
+
+  function escapeHtml(str) {
+    return String(str ?? '')
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  function highlight(text, query) {
+    const safe  = escapeHtml(text);
+    const regex = new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+    return safe.replace(regex, '<mark class="sd-highlight">$1</mark>');
+  }
+
+  function formatPrice(p) {
+    const v = Math.round(Number(p.priceIncludingTax ?? p.price ?? 0));
+    return 'RWF ' + v.toLocaleString('en-US');
+  }
+
+  /* ── dropdown DOM helpers ── */
+  function getOrCreateDropdown() {
+    let dd = document.getElementById('search-dropdown');
+    if (!dd) {
+      dd = document.createElement('div');
+      dd.id        = 'search-dropdown';
+      dd.className = 'search-dropdown';
+      searchWrap?.appendChild(dd);
+    }
+    return dd;
+  }
+
+  function closeDropdown() {
+    document.getElementById('search-dropdown')?.remove();
+  }
+
+  function showLoadingDropdown() {
+    const dd = getOrCreateDropdown();
+    dd.innerHTML = `<div class="sd-state"><div class="sd-spinner"></div>Searching…</div>`;
+  }
+
+  /* ── render dropdown ── */
+  function renderDropdown(query, matchedCats, products) {
+    const dd = getOrCreateDropdown();
+
+    if (!matchedCats.length && !products.length) {
+      dd.innerHTML = `<div class="sd-state">No results for "<strong>${escapeHtml(query)}</strong>"</div>`;
+      return;
+    }
+
+    let html = '';
+
+    // Category chips
+    if (matchedCats.length) {
+      html += `
+        <div class="sd-section-label">Categories</div>
+        <div class="sd-cats">
+          ${matchedCats.map(c => `
+            <button class="sd-cat-chip" data-cat-id="${c.id}">
+              <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h7"/>
+              </svg>
+              ${highlight(c.name, query)}
+            </button>`).join('')}
+        </div>`;
+    }
+
+    // Product rows (max 7 previewed)
+    if (products.length) {
+      const shown = products.slice(0, 7);
+      html += `
+        <div class="sd-section-label">Products</div>
+        <div class="sd-products">
+          ${shown.map(p => {
+            const img = getProductImg(p) || FALLBACK_IMG;
+            return `
+              <div class="sd-product-row" data-product-id="${p.id}">
+                <img class="sd-product-img"
+                  src="${escapeHtml(img)}"
+                  alt="${escapeHtml(p.name)}"
+                  onerror="this.onerror=null;this.src='${FALLBACK_IMG}'">
+                <div class="sd-product-info">
+                  <div class="sd-product-name">${highlight(p.name, query)}</div>
+                  <div class="sd-product-meta">
+                    ${p.categoryName ? `<span class="sd-cat-tag">${escapeHtml(p.categoryName)}</span>` : ''}
+                  </div>
+                </div>
+                <div class="sd-product-price">${formatPrice(p)}</div>
+              </div>`;
+          }).join('')}
+        </div>`;
+    }
+
+    // "See all" footer
+    const total = products.length;
+    html += `
+      <button class="sd-see-all" id="sd-see-all-btn">
+        See all results for "<strong>${escapeHtml(query)}</strong>"
+        ${total > 7 ? `&nbsp;·&nbsp; ${total} found` : ''}
+      </button>`;
+
+    dd.innerHTML = html;
+
+    // Bind category chips → filter shop by category
+    dd.querySelectorAll('.sd-cat-chip').forEach(btn => {
+      btn.addEventListener('mousedown', e => {
+        e.preventDefault();
+        const catId = btn.dataset.catId;
+        closeDropdown();
+        if (searchInput) searchInput.value = '';
+        setState({ searchQuery: '', activeCategory: catId });
+        navigate('shop');
+      });
+    });
+
+    // Bind product rows → go to product detail
+    dd.querySelectorAll('.sd-product-row').forEach(row => {
+      row.addEventListener('mousedown', e => {
+        e.preventDefault();
+        closeDropdown();
+        if (searchInput) searchInput.value = '';
+        navigate('product-detail', { selectedProductId: row.dataset.productId });
+      });
+    });
+
+    // Bind "see all" → full shop search
+    dd.querySelector('#sd-see-all-btn')?.addEventListener('mousedown', e => {
+      e.preventDefault();
+      doFullSearch(query);
     });
   }
-  searchBtn?.addEventListener('click', doSearch);
+
+  /* ── navigate to full shop results ── */
+  function doFullSearch(query = searchInput?.value.trim()) {
+    if (!query) return;
+    closeDropdown();
+    setState({ searchQuery: query, activeCategory: null });
+    navigate('shop');
+  }
+
+  /* ── fetch categories (cached per header mount) ── */
+  async function getCategories() {
+    if (_cachedCats) return _cachedCats;
+    try {
+      const res  = await ApiService.categories.getAll();
+      _cachedCats = Array.isArray(res.data) ? res.data : [];
+    } catch (_) {
+      _cachedCats = [];
+    }
+    return _cachedCats;
+  }
+
+  /* ── core live-search ── */
+  async function liveSearch(query) {
+    if (!query || query.length < 2) { closeDropdown(); return; }
+    _latestQuery = query;
+    showLoadingDropdown();
+
+    try {
+      // 1. Match categories client-side by name
+      const cats        = await getCategories();
+      const matchedCats = cats.filter(c =>
+        c.name.toLowerCase().includes(query.toLowerCase())
+      );
+
+      // 2. Fire searches in parallel:
+      //    a) products whose name matches the query
+      //    b) products in each matched category (up to 3 cats to keep requests low)
+      const nameSearch = ApiService.products
+        .search({ name: query, page: 0, size: 20, status: 'ACTIVE' })
+        .then(r => Array.isArray(r.data) ? r.data : (r.data?.content || []))
+        .catch(() => []);
+
+      const catSearches = matchedCats.slice(0, 3).map(cat =>
+        ApiService.products
+          .search({ categoryId: cat.id, page: 0, size: 20, status: 'ACTIVE' })
+          .then(r => Array.isArray(r.data) ? r.data : (r.data?.content || []))
+          .catch(() => [])
+      );
+
+      const [nameResults, ...catResults] = await Promise.all([nameSearch, ...catSearches]);
+
+      // Stale-query guard: a newer keystroke already fired, discard this result
+      if (_latestQuery !== query) return;
+
+      // 3. Flatten + deduplicate by product ID
+      //    Name matches come first so they rank higher visually
+      const seen     = new Set();
+      const products = [];
+      for (const list of [nameResults, ...catResults]) {
+        for (const p of list) {
+          if (!seen.has(p.id)) {
+            seen.add(p.id);
+            products.push(p);
+          }
+        }
+      }
+
+      renderDropdown(query, matchedCats, products);
+
+    } catch (_) {
+      if (_latestQuery !== query) return;
+      closeDropdown();
+    }
+  }
+
+  /* ── wire up events ── */
+  if (searchInput) {
+    // Debounced live search while typing
+    searchInput.addEventListener('input', () => {
+      const q = searchInput.value.trim();
+      clearTimeout(_debounceTimer);
+      if (!q || q.length < 2) { closeDropdown(); return; }
+      _debounceTimer = setTimeout(() => liveSearch(q), 300);
+    });
+
+    // Keyboard shortcuts
+    searchInput.addEventListener('keydown', e => {
+      if (e.key === 'Enter')  { clearTimeout(_debounceTimer); doFullSearch(); }
+      if (e.key === 'Escape') { closeDropdown(); searchInput.blur(); }
+    });
+
+    // Close when focus leaves both the input and the dropdown
+    searchInput.addEventListener('blur', () => {
+      setTimeout(closeDropdown, 180);
+    });
+
+    // Re-open dropdown on re-focus if there's already a typed query
+    searchInput.addEventListener('focus', () => {
+      const q = searchInput.value.trim();
+      if (q && q.length >= 2) liveSearch(q);
+    });
+  }
+
+  searchBtn?.addEventListener('click', () => {
+    clearTimeout(_debounceTimer);
+    doFullSearch();
+  });
 }
 
 function setBadge(id, count) {

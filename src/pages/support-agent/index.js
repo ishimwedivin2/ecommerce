@@ -1077,7 +1077,10 @@ function bindTicketRowActions() {
   document.querySelectorAll('[data-action="sa-assign-self"]').forEach(btn => {
     btn.addEventListener('click', async () => {
       const me = ApiService.getCurrentUser();
-      if (!me?.id) return alert('Cannot determine your user ID.');
+      if (!me?.id) {
+        import('../../components/toast.js').then(m => m.showToast('Could not determine your user ID. Please re-login.', 'error'));
+        return;
+      }
       btn.disabled = true;
       await api(`/api/support/tickets/${btn.dataset.id}/assign`, {
         method: 'PATCH',
@@ -1089,17 +1092,48 @@ function bindTicketRowActions() {
 
   document.querySelectorAll('[data-action="sa-resolve-ticket"]').forEach(btn => {
     btn.addEventListener('click', async () => {
-      if (!confirm('Mark this ticket as resolved?')) return;
-      await api(`/api/support/tickets/${btn.dataset.id}/resolve`, { method: 'PATCH' }).catch(console.error);
-      loadTab('tickets');
+      if (btn.dataset.confirming === 'true') {
+        btn.dataset.confirming = 'false';
+        clearTimeout(btn._confirmTimer);
+        await api(`/api/support/tickets/${btn.dataset.id}/resolve`, { method: 'PATCH' }).catch(console.error);
+        loadTab('tickets');
+      } else {
+        btn.dataset.confirming = 'true';
+        const orig = btn.textContent;
+        btn.textContent = 'Confirm resolve?';
+        btn.style.background = '#dcfce7';
+        btn.style.color = '#15803d';
+        btn.style.borderColor = '#15803d';
+        btn._confirmTimer = setTimeout(() => {
+          btn.dataset.confirming = 'false';
+          btn.textContent = orig;
+          btn.style.background = '';
+          btn.style.color = '';
+          btn.style.borderColor = '';
+        }, 4000);
+      }
     });
   });
 
   document.querySelectorAll('[data-action="sa-close-ticket"]').forEach(btn => {
     btn.addEventListener('click', async () => {
-      if (!confirm('Close this ticket?')) return;
-      await api(`/api/support/tickets/${btn.dataset.id}/close`, { method: 'PATCH' }).catch(console.error);
-      loadTab('tickets');
+      if (btn.dataset.confirming === 'true') {
+        btn.dataset.confirming = 'false';
+        clearTimeout(btn._confirmTimer);
+        await api(`/api/support/tickets/${btn.dataset.id}/close`, { method: 'PATCH' }).catch(console.error);
+        loadTab('tickets');
+      } else {
+        btn.dataset.confirming = 'true';
+        btn.textContent = 'Sure? Close';
+        btn.style.background = '#fef2f2';
+        btn.style.borderColor = '#ef4444';
+        btn._confirmTimer = setTimeout(() => {
+          btn.dataset.confirming = 'false';
+          btn.textContent = 'Close';
+          btn.style.background = '';
+          btn.style.borderColor = '';
+        }, 4000);
+      }
     });
   });
 }
@@ -1112,7 +1146,10 @@ function bindChatTabEvents() {
   document.querySelectorAll('[data-action="sa-assign-chat"]').forEach(btn => {
     btn.addEventListener('click', async () => {
       const me = ApiService.getCurrentUser();
-      if (!me?.id) return alert('Cannot determine your user ID.');
+      if (!me?.id) {
+        import('../../components/toast.js').then(m => m.showToast('Could not determine your user ID. Please re-login.', 'error'));
+        return;
+      }
       btn.disabled = true;
       await api(`/api/support/live-chat/sessions/${btn.dataset.id}/assign`, {
         method: 'POST',
@@ -1124,9 +1161,23 @@ function bindChatTabEvents() {
 
   document.querySelectorAll('[data-action="sa-close-chat"]').forEach(btn => {
     btn.addEventListener('click', async () => {
-      if (!confirm('Close this chat session?')) return;
-      await api(`/api/support/live-chat/sessions/${btn.dataset.id}/close`, { method: 'POST' }).catch(console.error);
-      loadTab('chat');
+      if (btn.dataset.confirming === 'true') {
+        btn.dataset.confirming = 'false';
+        clearTimeout(btn._confirmTimer);
+        await api(`/api/support/live-chat/sessions/${btn.dataset.id}/close`, { method: 'POST' }).catch(console.error);
+        loadTab('chat');
+      } else {
+        btn.dataset.confirming = 'true';
+        btn.textContent = 'Sure? Close';
+        btn.style.background = '#fef2f2';
+        btn.style.borderColor = '#ef4444';
+        btn._confirmTimer = setTimeout(() => {
+          btn.dataset.confirming = 'false';
+          btn.textContent = 'Close';
+          btn.style.background = '';
+          btn.style.borderColor = '';
+        }, 4000);
+      }
     });
   });
 }

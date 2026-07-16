@@ -428,7 +428,7 @@ function bindStatusSelects() {
         document.getElementById('emp-orders-tbody').innerHTML = buildOrderRows(_orderCache);
         bindStatusSelects();
       } catch (err) {
-        alert('Failed to update status');
+        import('../../components/toast.js').then(m => m.showToast(err.message || 'Failed to update status', 'error'));
       }
     });
   });

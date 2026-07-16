@@ -4054,7 +4054,7 @@ function bindDrawerEvents(type, data) {
         }
         newPanel.style.display = 'none';
         document.getElementById('d-prod-cat-name').value = '';
-      } catch(e) { alert('Failed to create category'); }
+      } catch(e) { showToast('Failed to create category: ' + (e.message || 'unknown error'), 'error'); }
       saveBtn.disabled = false; saveBtn.textContent = 'Save Category';
     });
   }
