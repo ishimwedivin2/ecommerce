@@ -218,8 +218,8 @@ export async function render() {
           </div>
           <div class="payment-method-card" data-method="STRIPE">
             <span class="payment-method-icon">💳</span>
-            <strong>Card (Stripe)</strong>
-            <span>Visa / Mastercard</span>
+            <strong>Credit / Debit Card</strong>
+            <span>Visa · Mastercard · Amex</span>
           </div>
         </div>
 
@@ -243,13 +243,32 @@ export async function render() {
           </div>
         </div>
 
-        <!-- Stripe Card fields -->
+        <!-- Card fields -->
         <div id="fields-STRIPE" class="pay-fields" style="display:none">
-          <h3 class="chk-sect-title">Card Payment (Stripe)</h3>
+          <h3 class="chk-sect-title">Credit / Debit Card</h3>
           <div class="chk-field">
-            <div id="stripe-card-element" style="border:1px solid #e2e8f0;padding:12px;border-radius:8px;background:#fff;min-height:42px"></div>
-            <div id="stripe-card-errors" style="color:#dc2626;font-size:12px;margin-top:6px"></div>
-            <small class="chk-hint">🔒 Your card is processed securely by Stripe. We never see your card number.</small>
+            <!-- Card network logos — grayed until brand detected -->
+            <div class="card-networks" id="card-networks">
+              <span class="cn-logo cn-visa"    id="cn-visa"    title="Visa">
+                <svg viewBox="0 0 50 16" xmlns="http://www.w3.org/2000/svg" aria-label="Visa"><text x="0" y="13" font-family="Arial,sans-serif" font-weight="700" font-size="14" fill="currentColor">VISA</text></svg>
+              </span>
+              <span class="cn-logo cn-mc"      id="cn-mastercard" title="Mastercard">
+                <svg viewBox="0 0 38 24" xmlns="http://www.w3.org/2000/svg" aria-label="Mastercard"><circle cx="14" cy="12" r="10" fill="#EB001B"/><circle cx="24" cy="12" r="10" fill="#F79E1B"/><path d="M19 5.6a10 10 0 0 1 0 12.8A10 10 0 0 1 19 5.6z" fill="#FF5F00"/></svg>
+              </span>
+              <span class="cn-logo cn-amex"    id="cn-amex"    title="American Express">
+                <svg viewBox="0 0 50 16" xmlns="http://www.w3.org/2000/svg" aria-label="Amex"><rect width="50" height="16" rx="3" fill="currentColor" opacity=".15"/><text x="3" y="12" font-family="Arial,sans-serif" font-weight="700" font-size="9" fill="currentColor">AMEX</text></svg>
+              </span>
+              <span class="cn-logo cn-discover" id="cn-discover" title="Discover">
+                <svg viewBox="0 0 60 18" xmlns="http://www.w3.org/2000/svg" aria-label="Discover"><text x="0" y="13" font-family="Arial,sans-serif" font-weight="700" font-size="10" fill="currentColor">DISCOVER</text></svg>
+              </span>
+            </div>
+            <!-- Stripe CardElement mount point -->
+            <div id="stripe-card-element" class="stripe-card-mount"></div>
+            <div id="stripe-card-errors" class="stripe-card-errors"></div>
+          </div>
+          <!-- Trust badge -->
+          <div class="card-trust-badge">
+            🔒 Secure, encrypted transaction
           </div>
         </div>
 
@@ -506,7 +525,7 @@ export function bindEvents(state, helpers) {
       }
       // update summary icon
       const icons = { MTN_MOMO: '📱', AIRTEL_MONEY: '📲', STRIPE: '💳' };
-      const names = { MTN_MOMO: 'MTN MoMo', AIRTEL_MONEY: 'Airtel Money', STRIPE: 'Card (Stripe)' };
+      const names = { MTN_MOMO: 'MTN MoMo', AIRTEL_MONEY: 'Airtel Money', STRIPE: 'Credit / Debit Card' };
       const ico  = document.getElementById('sum-method');
       const ico2 = ico?.querySelector('.chk-method-ico');
       const nm   = document.getElementById('sum-method-name');
@@ -739,24 +758,65 @@ function validatePaymentFields() {
 }
 
 // ── Stripe Elements mount ─────────────────────────────────
+// Maps Stripe's brand string → our logo element ID
+const STRIPE_BRAND_MAP = {
+  visa:             'cn-visa',
+  mastercard:       'cn-mastercard',
+  amex:             'cn-amex',
+  discover:         'cn-discover',
+  diners:           'cn-discover',   // show Discover slot for Diners
+  jcb:              null,
+  unionpay:         null,
+  unknown:          null,
+};
+
+function highlightCardBrand(brand) {
+  const activeId = STRIPE_BRAND_MAP[brand] ?? null;
+  const logos = document.querySelectorAll('.cn-logo');
+  logos.forEach(el => {
+    if (activeId === null) {
+      // No brand detected yet — reset all to neutral state
+      el.classList.remove('cn-active', 'cn-dim');
+    } else if (el.id === activeId) {
+      el.classList.add('cn-active');
+      el.classList.remove('cn-dim');
+    } else {
+      el.classList.add('cn-dim');
+      el.classList.remove('cn-active');
+    }
+  });
+}
+
 function mountStripeCard(publishableKey) {
   if (window._stripeCardElement) {
     try { window._stripeCardElement.unmount(); } catch (_) {}
     window._stripeCardElement = null;
   }
+  // Reset logos to neutral when re-mounting
+  highlightCardBrand('unknown');
+
   if (!window._stripe) window._stripe = window.Stripe(publishableKey);
   const elements = window._stripe.elements();
   window._stripeCardElement = elements.create('card', {
     style: {
-      base: { fontSize: '16px', color: '#0F172A', fontFamily: 'inherit',
-              '::placeholder': { color: '#94A3B8' } },
-      invalid: { color: '#dc2626' }
-    }
+      base: {
+        fontSize: '15px',
+        color: '#0F172A',
+        fontFamily: 'inherit',
+        fontSmoothing: 'antialiased',
+        '::placeholder': { color: '#94A3B8' }
+      },
+      invalid: { color: '#dc2626', iconColor: '#dc2626' }
+    },
+    hidePostalCode: true,
   });
   window._stripeCardElement.mount('#stripe-card-element');
   window._stripeCardElement.on('change', e => {
-    const el = document.getElementById('stripe-card-errors');
-    if (el) el.textContent = e.error ? e.error.message : '';
+    // Show validation errors
+    const errEl = document.getElementById('stripe-card-errors');
+    if (errEl) errEl.textContent = e.error ? e.error.message : '';
+    // Live brand detection — light up the matching network logo
+    highlightCardBrand(e.brand || 'unknown');
   });
 }
 
@@ -765,7 +825,7 @@ function showProcessingUI(method) {
   const msgs = {
     MTN_MOMO:     ['Waiting for MTN approval…', 'Check your phone for a payment prompt and enter your PIN to confirm.'],
     AIRTEL_MONEY: ['Contacting Airtel Money…',  'Check your phone for a payment prompt.'],
-    STRIPE:       ['Processing card payment…',  'Verifying your card securely with Stripe. Please do not close this page.'],
+    STRIPE:       ['Processing card payment…',  'Verifying your card details securely. Please do not close this page.'],
   };
   const [title, msg] = msgs[method] || ['Processing…', 'Please wait.'];
   const t = document.getElementById('proc-title');

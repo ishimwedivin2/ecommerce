@@ -852,6 +852,14 @@ export const ApiService = {
   },
 
   // ── Fulfillment ─────────────────────────────────────────
+  async getPendingFulfillments(params = {}) {
+    const q = new URLSearchParams({
+      page: params.page ?? 0,
+      size: params.size ?? 20,
+      ...(params.status ? { status: params.status } : {}),
+    }).toString();
+    return await request(`/api/fulfillment/orders?${q}`);
+  },
   async getFulfillment(orderId) {
     return await request(`/api/fulfillment/orders/${orderId}`);
   },

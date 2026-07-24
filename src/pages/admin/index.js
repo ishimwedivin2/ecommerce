@@ -1983,54 +1983,70 @@ TAB.shipments = async () => {
 TAB.fulfillment = async () => {
   let orders = [];
   try {
-    // Load orders that are fulfillable: PAID or PROCESSING
+    // Fetch PAID and PROCESSING orders — same calls the orders page uses
     const [paidRes, procRes] = await Promise.allSettled([
-      ApiService.getOrders({ page:0, size:50, status:'PAID' }),
-      ApiService.getOrders({ page:0, size:50, status:'PROCESSING' }),
+      ApiService.getOrders({ page:0, size:100, status:'PAID' }),
+      ApiService.getOrders({ page:0, size:100, status:'PROCESSING' }),
     ]);
     const paid = paidRes.status === 'fulfilled' ? extractList(paidRes.value) : [];
     const proc = procRes.status === 'fulfilled' ? extractList(procRes.value) : [];
-    // Deduplicate by id
     const seen = new Set();
     orders = [...paid, ...proc].filter(o => { if (seen.has(o.id)) return false; seen.add(o.id); return true; });
   } catch(_){}
 
-  const STEPS = ['PICKED','PACKED','DISPATCHED','COMPLETED'];
-  function stepIndex(status) { return STEPS.indexOf(status); }
+  const getName = o => o.customerName || o.userName
+    || ((o.customer?.firstName||'') + ' ' + (o.customer?.lastName||'')).trim()
+    || 'Customer';
 
   const rows = orders.length ? orders.map(o => `
-    <tr class="ful-row" data-order-id="${o.id}" style="cursor:pointer">
+    <tr class="ful-row" data-order-id="${o.id}" data-status="${esc(o.status||'')}" style="cursor:pointer">
       <td class="td-m">#${(o.orderNumber||o.id||'').toString().slice(-8)}</td>
-      <td class="td-b">${esc(o.customerName||o.userName||'Customer')}</td>
+      <td class="td-b">${esc(getName(o))}</td>
       <td>${fmt.money(o.totalAmount||0)}</td>
-      <td>${statusBdg(o.status)}</td>
+      <td class="ful-status-cell">${statusBdg(o.status)}</td>
       <td class="td-sm">${fmt.date(o.createdAt)}</td>
       <td>
-        <button class="btn-d btn-d-primary btn-d-sm" data-action="start-fulfillment" data-id="${o.id}">
+        <button class="btn-d btn-d-primary btn-d-sm" data-action="open-ful-panel" data-id="${o.id}">
           ${I.pkg} Fulfill
         </button>
       </td>
     </tr>`).join('') :
-    `<tr><td colspan="6"><div class="d-empty"><div class="d-empty-ico">✅</div><div class="d-empty-ttl">No orders awaiting fulfillment</div><div class="d-empty-txt">PAID and PROCESSING orders appear here.</div></div></td></tr>`;
+    `<tr><td colspan="6"><div class="d-empty">
+      <div class="d-empty-ico">✅</div>
+      <div class="d-empty-ttl">No orders awaiting fulfillment</div>
+      <div class="d-empty-txt">PAID and PROCESSING orders appear here.</div>
+    </div></td></tr>`;
 
   return `
   <div class="dash-page-hd">
-    <div><div class="dash-page-title">Fulfillment</div><div class="dash-page-sub">${orders.length} order${orders.length===1?'':'s'} awaiting fulfillment</div></div>
+    <div>
+      <div class="dash-page-title">Fulfillment</div>
+      <div class="dash-page-sub" id="ful-sub">${orders.length} order${orders.length===1?'':'s'} awaiting fulfillment</div>
+    </div>
+    <div class="dash-page-acts">
+      <button class="btn-d btn-d-sec" id="btn-ful-refresh">${I.refresh} Refresh</button>
+    </div>
   </div>
 
   <div style="display:grid;grid-template-columns:1fr 420px;gap:16px;align-items:start">
-    <!-- Order queue -->
+
+    <!-- Left: order queue -->
     <div class="dash-tcard">
-      <div class="dash-tcard-hd"><span class="dash-tcard-title">Orders to Fulfill</span><span class="dash-tcard-count">${orders.length}</span></div>
+      <div class="dash-tcard-hd">
+        <span class="dash-tcard-title">Orders to Fulfill</span>
+        <span class="dash-tcard-count" id="ful-count">${orders.length}</span>
+      </div>
       <table class="dt">
         <thead><tr><th>Order #</th><th>Customer</th><th>Total</th><th>Status</th><th>Date</th><th>Action</th></tr></thead>
         <tbody id="ful-tbody">${rows}</tbody>
       </table>
     </div>
 
-    <!-- Fulfillment workflow panel -->
-    <div id="ful-panel" class="dash-chart-card" style="padding:0;overflow:hidden">
-      <div style="padding:18px 20px;border-bottom:1px solid #F1F5F9;font-weight:700;font-size:14px;color:#0F172A">Fulfillment Workflow</div>
+    <!-- Right: detail + status update panel (same concept as order drawer but inline) -->
+    <div id="ful-panel" class="dash-chart-card" style="padding:0;overflow:hidden;position:sticky;top:16px">
+      <div style="padding:18px 20px;border-bottom:1px solid #F1F5F9;font-weight:700;font-size:14px;color:#0F172A">
+        Fulfillment Workflow
+      </div>
       <div id="ful-panel-body" style="padding:20px">
         <div style="text-align:center;color:#94A3B8;padding:40px 0">
           <div style="font-size:36px;margin-bottom:8px">📦</div>
@@ -2038,26 +2054,7 @@ TAB.fulfillment = async () => {
         </div>
       </div>
     </div>
-  </div>
 
-  <!-- Dispatch modal -->
-  <div id="dispatch-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1000;align-items:center;justify-content:center">
-    <div style="background:white;border-radius:16px;padding:28px;width:460px;max-width:95vw">
-      <div style="font-size:17px;font-weight:700;margin-bottom:20px">Dispatch Order</div>
-      <input type="hidden" id="dispatch-order-id">
-      <div class="f-field"><label class="f-lbl">Carrier *</label>
-        <select class="f-inp" id="dispatch-carrier">
-          <option value="">Select carrier…</option>
-          <option>DHL</option><option>FedEx</option><option>UPS</option><option>USPS</option><option>EMS</option><option>Local Courier</option><option>Other</option>
-        </select>
-      </div>
-      <div class="f-field"><label class="f-lbl">Tracking Number</label><input class="f-inp" id="dispatch-tracking" placeholder="Optional — auto-generated if blank"></div>
-      <div class="f-field"><label class="f-lbl">Est. Delivery Date</label><input class="f-inp" type="datetime-local" id="dispatch-eta"></div>
-      <div style="display:flex;gap:10px;margin-top:18px">
-        <button class="btn-d btn-d-sec" style="flex:1" id="dispatch-cancel">Cancel</button>
-        <button class="btn-d btn-d-primary" style="flex:2" id="dispatch-confirm">Dispatch</button>
-      </div>
-    </div>
   </div>`;
 };
 
@@ -4799,6 +4796,7 @@ function bindTab(tab) {
     }
     else if (action === 'download-report') { downloadReport(rtype, format, el); }
     else if (action === 'view-order')    { viewOrderDetail(id); }
+    else if (action === 'edit-order')    { viewOrderDetail(id); }
     else if (action === 'delivery-note') {
       try {
         await ApiService.downloadDeliveryNote(id);
@@ -5586,146 +5584,163 @@ function bindTab(tab) {
     });
   }
   if (tab === 'fulfillment') {
-    const STEPS = ['PICKED','PACKED','DISPATCHED','COMPLETED'];
-    const STEP_LABELS = { PICKED:'Picked', PACKED:'Packed', DISPATCHED:'Dispatched', COMPLETED:'Completed' };
-    const STEP_ICONS  = { PICKED:'🫳', PACKED:'📦', DISPATCHED:'🚚', COMPLETED:'✅' };
-    const STEP_COLORS = { PICKED:'#f59e0b', PACKED:'#3b82f6', DISPATCHED:'#8b5cf6', COMPLETED:'#10b981' };
-
-    function stepDot(step, fulfillmentStatus) {
-      const idx     = STEPS.indexOf(step);
-      const curIdx  = STEPS.indexOf(fulfillmentStatus);
-      const done    = curIdx >= idx;
-      const active  = curIdx === idx;
-      const clr     = done ? (STEP_COLORS[step]||'#10b981') : '#e2e8f0';
-      return `
-        <div style="display:flex;flex-direction:column;align-items:center;gap:4px;flex:1">
-          <div style="width:36px;height:36px;border-radius:50%;background:${clr};display:flex;align-items:center;justify-content:center;font-size:16px;box-shadow:${active?`0 0 0 3px ${clr}40`:'none'};transition:all .3s">${done?STEP_ICONS[step]:'○'}</div>
-          <div style="font-size:10px;font-weight:${active?'700':'500'};color:${done?'#0F172A':'#94A3B8'};text-align:center">${STEP_LABELS[step]}</div>
-        </div>`;
-    }
-
-    function buildFulPanel(orderId, f) {
-      const status = f?.fulfillmentStatus || null;
-      const curIdx = status ? STEPS.indexOf(status) : -1;
-
-      const nextStep    = STEPS[curIdx + 1];
-      const canPick     = !status;
-      const canPack     = status === 'PICKED';
-      const canDispatch = status === 'PACKED';
-      const canComplete = status === 'DISPATCHED';
-      const isDone      = status === 'COMPLETED';
-
-      const timelineHtml = `
-        <div style="display:flex;align-items:center;margin-bottom:24px">
-          ${STEPS.map((s, i) => `
-            ${stepDot(s, status||'')}
-            ${i < STEPS.length-1 ? `<div style="flex:0 0 20px;height:2px;background:${curIdx>i?'#10b981':'#e2e8f0'};margin-bottom:18px;transition:background .3s"></div>` : ''}
-          `).join('')}
-        </div>`;
-
-      const timestamps = status ? `
-        <div style="background:#F8FAFC;border-radius:10px;padding:14px 16px;margin-bottom:16px;font-size:12px">
-          ${f.pickedAt     ? `<div style="display:flex;justify-content:space-between;margin-bottom:4px"><span style="color:#64748B">Picked</span><span style="font-weight:600">${fmt.date(f.pickedAt)}</span></div>` : ''}
-          ${f.packedAt     ? `<div style="display:flex;justify-content:space-between;margin-bottom:4px"><span style="color:#64748B">Packed</span><span style="font-weight:600">${fmt.date(f.packedAt)}</span></div>` : ''}
-          ${f.dispatchedAt ? `<div style="display:flex;justify-content:space-between;margin-bottom:4px"><span style="color:#64748B">Dispatched</span><span style="font-weight:600">${fmt.date(f.dispatchedAt)}</span></div>` : ''}
-          ${f.completedAt  ? `<div style="display:flex;justify-content:space-between"><span style="color:#64748B">Completed</span><span style="font-weight:600;color:#10b981">${fmt.date(f.completedAt)}</span></div>` : ''}
-          ${f.trackingNumber ? `<div style="display:flex;justify-content:space-between;margin-top:8px;padding-top:8px;border-top:1px solid #E2E8F0"><span style="color:#64748B">Tracking</span><span style="font-weight:600;color:#3b82f6">${f.trackingNumber}</span></div>` : ''}
-          ${f.carrier ? `<div style="display:flex;justify-content:space-between;margin-top:4px"><span style="color:#64748B">Carrier</span><span style="font-weight:600">${f.carrier}</span></div>` : ''}
-        </div>` : '';
-
-      const actionBtn = isDone
-        ? `<div class="d-alert d-alert-ok" style="text-align:center">✅ Fulfillment complete</div>`
-        : canPick
-        ? `<button class="btn-d btn-d-primary" style="width:100%" id="ful-action-btn" data-action-type="pick" data-order-id="${orderId}">🫳 Mark as Picked</button>`
-        : canPack
-        ? `<button class="btn-d btn-d-primary" style="width:100%" id="ful-action-btn" data-action-type="pack" data-order-id="${orderId}">📦 Mark as Packed</button>`
-        : canDispatch
-        ? `<button class="btn-d btn-d-primary" style="width:100%;background:linear-gradient(90deg,#8b5cf6,#7c3aed)" id="ful-action-btn" data-action-type="dispatch" data-order-id="${orderId}">🚚 Dispatch Order…</button>`
-        : canComplete
-        ? `<button class="btn-d btn-d-success" style="width:100%" id="ful-action-btn" data-action-type="complete" data-order-id="${orderId}">✅ Mark as Delivered</button>`
-        : '';
-
-      return `
-        <div style="font-size:13px;font-weight:700;color:#0F172A;margin-bottom:16px">Order #${(f?.orderNumber||orderId||'').toString().slice(-8)}</div>
-        ${timelineHtml}
-        ${timestamps}
-        ${actionBtn}`;
-    }
-
-    async function loadFulPanel(orderId) {
+    // Build the detail panel — uses the same updateOrderStatus pattern as orders page
+    async function buildAndLoadPanel(orderId) {
       const panel = document.getElementById('ful-panel-body');
       if (!panel) return;
       panel.innerHTML = '<div style="text-align:center;padding:30px;color:#94A3B8">Loading…</div>';
+
+      let order = {};
       try {
-        const res = await ApiService.getFulfillment(orderId);
-        const f = res?.data || res;
-        panel.innerHTML = buildFulPanel(orderId, f);
+        // Fetch using the same getOrder call the orders page uses
+        const res = await ApiService.getOrder(orderId);
+        order = res?.data || res || {};
       } catch(e) {
-        // No fulfillment yet — show start panel
-        panel.innerHTML = buildFulPanel(orderId, null);
+        panel.innerHTML = `<div class="d-alert d-alert-err">${e.message || 'Failed to load order'}</div>`;
+        return;
       }
-      bindPanelBtn(orderId);
+
+      const orderNum = (order.orderNumber || orderId).toString().slice(-8);
+      const custName = order.customerName || order.userName
+        || ((order.customer?.firstName||'') + ' ' + (order.customer?.lastName||'')).trim()
+        || 'Customer';
+      const custEmail = order.email || order.customerEmail || order.customer?.email || '—';
+      const custPhone = order.phone || order.customerPhone || order.customer?.phoneNumber || '—';
+      const status = order.status || 'PENDING';
+
+      // Visual workflow timeline (PROCESSING → FULFILLED → SHIPPED → DELIVERED)
+      const STEPS = ['PROCESSING','FULFILLED','SHIPPED','DELIVERED'];
+      const STEP_ICONS = { PROCESSING:'⚙️', FULFILLED:'📦', SHIPPED:'🚚', DELIVERED:'✅' };
+      const STEP_COLORS = { PROCESSING:'#f59e0b', FULFILLED:'#3b82f6', SHIPPED:'#8b5cf6', DELIVERED:'#10b981' };
+      const curIdx = STEPS.indexOf(status);
+
+      const timeline = `
+        <div style="display:flex;align-items:center;margin-bottom:20px">
+          ${STEPS.map((s, i) => {
+            const done = curIdx >= i;
+            const active = curIdx === i;
+            const clr = done ? (STEP_COLORS[s] || '#10b981') : '#e2e8f0';
+            return `
+              <div style="display:flex;flex-direction:column;align-items:center;gap:4px;flex:1">
+                <div style="width:36px;height:36px;border-radius:50%;background:${clr};display:flex;align-items:center;justify-content:center;font-size:16px;box-shadow:${active?`0 0 0 3px ${clr}40`:'none'};transition:all .3s">
+                  ${done ? STEP_ICONS[s] : '○'}
+                </div>
+                <div style="font-size:10px;font-weight:${active?'700':'500'};color:${done?'#0F172A':'#94A3B8'};text-align:center">${s}</div>
+              </div>
+              ${i < STEPS.length-1 ? `<div style="flex:0 0 20px;height:2px;background:${curIdx>i?'#10b981':'#e2e8f0'};margin-bottom:18px;transition:background .3s"></div>` : ''}
+            `;
+          }).join('')}
+        </div>`;
+
+      const infoCard = `
+        <div style="background:#F8FAFC;border-radius:10px;padding:14px 16px;margin-bottom:16px;font-size:12px">
+          <div style="display:flex;justify-content:space-between;margin-bottom:6px">
+            <span style="color:#64748B">Customer</span>
+            <span style="font-weight:600">${esc(custName)}</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;margin-bottom:6px">
+            <span style="color:#64748B">Email</span>
+            <span style="font-weight:600;font-size:11px">${esc(custEmail)}</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;margin-bottom:6px">
+            <span style="color:#64748B">Phone</span>
+            <span style="font-weight:600">${esc(custPhone)}</span>
+          </div>
+          <div style="display:flex;justify-content:space-between">
+            <span style="color:#64748B">Total</span>
+            <span style="font-weight:700;color:#FF6B00">${fmt.money(order.totalAmount||0)}</span>
+          </div>
+        </div>`;
+
+      const isDone = status === 'DELIVERED' || status === 'CANCELLED';
+      const statusForm = isDone
+        ? `<div class="d-alert d-alert-${status==='DELIVERED'?'ok':'warn'}" style="text-align:center">
+             ${status==='DELIVERED'?'✅':'⚠️'} Order ${status.toLowerCase()}
+           </div>`
+        : `
+        <div class="f-field" style="margin-bottom:12px">
+          <label class="f-lbl">Update Status</label>
+          <select class="f-inp" id="ful-status-sel">
+            ${['PROCESSING','FULFILLED','SHIPPED','DELIVERED','CANCELLED']
+              .map(s=>`<option value="${s}" ${status===s?'selected':''}>${s}</option>`).join('')}
+          </select>
+        </div>
+        <button class="btn-d btn-d-primary" style="width:100%" id="ful-update-btn" data-order-id="${orderId}">
+          Update Status
+        </button>`;
+
+      panel.innerHTML = `
+        <div style="font-size:13px;font-weight:700;color:#0F172A;margin-bottom:14px">
+          Order #${orderNum}
+        </div>
+        ${timeline}
+        ${infoCard}
+        ${statusForm}`;
+
+      // Bind update button (same logic as orders page)
+      const updateBtn = document.getElementById('ful-update-btn');
+      if (updateBtn) {
+        updateBtn.addEventListener('click', async () => {
+          const newStatus = document.getElementById('ful-status-sel')?.value;
+          if (!newStatus) return;
+          updateBtn.disabled = true;
+          updateBtn.textContent = 'Updating…';
+          try {
+            // Use the EXACT same call the orders page uses
+            await ApiService.updateOrderStatus(orderId, { status: newStatus });
+            showToast('Order status updated!');
+            // Reload panel with fresh data
+            await buildAndLoadPanel(orderId);
+            // Update the table row
+            const row = document.querySelector(`.ful-row[data-order-id="${orderId}"]`);
+            if (row) {
+              row.dataset.status = newStatus;
+              const statusCell = row.querySelector('.ful-status-cell');
+              if (statusCell) statusCell.innerHTML = statusBdg(newStatus);
+              // Remove row if no longer PAID/PROCESSING
+              if (newStatus !== 'PAID' && newStatus !== 'PROCESSING') {
+                row.remove();
+                const remaining = document.querySelectorAll('.ful-row').length;
+                const countEl = document.getElementById('ful-count');
+                const subEl = document.getElementById('ful-sub');
+                if (countEl) countEl.textContent = remaining;
+                if (subEl) subEl.textContent = `${remaining} order${remaining===1?'':'s'} awaiting fulfillment`;
+                // Clear panel if no rows left
+                if (remaining === 0) {
+                  panel.innerHTML = `
+                    <div style="text-align:center;color:#94A3B8;padding:40px 0">
+                      <div style="font-size:36px;margin-bottom:8px">📦</div>
+                      <div style="font-weight:600">Select an order to start</div>
+                    </div>`;
+                }
+              }
+            }
+          } catch(e) {
+            showToast(e.message || 'Update failed', 'error');
+            updateBtn.disabled = false;
+            updateBtn.textContent = 'Update Status';
+          }
+        });
+      }
     }
 
-    function bindPanelBtn(orderId) {
-      const btn = document.getElementById('ful-action-btn');
-      if (!btn) return;
-      btn.addEventListener('click', async () => {
-        const type = btn.dataset.actionType;
-        if (type === 'dispatch') {
-          document.getElementById('dispatch-order-id').value = orderId;
-          document.getElementById('dispatch-modal').style.display = 'flex';
-          return;
-        }
-        btn.disabled = true; btn.textContent = 'Working…';
-        try {
-          if (type === 'pick')     await ApiService.pickOrder(orderId);
-          if (type === 'pack')     await ApiService.packOrder(orderId);
-          if (type === 'complete') await ApiService.completeOrder(orderId);
-          await loadFulPanel(orderId);
-          showToast(`Order ${type === 'complete' ? 'completed' : type + 'ed'}!`);
-          if (type === 'complete') loadTab('fulfillment');
-        } catch(e) { showToast(e.message || 'Action failed', 'error'); btn.disabled = false; }
-      });
-    }
-
-    // Row click + "Fulfill" button → load panel
+    // Row click or button click → load panel
     document.getElementById('ful-tbody')?.addEventListener('click', e => {
       const row = e.target.closest('.ful-row');
-      const btn = e.target.closest('[data-action="start-fulfillment"]');
-      const orderId = (row || btn)?.dataset?.orderId || (row || btn)?.dataset?.id;
+      const btn = e.target.closest('[data-action="open-ful-panel"]');
+      if (!row && !btn) return;
+      const targetRow = row || btn.closest('.ful-row');
+      const orderId = targetRow?.dataset?.orderId;
       if (!orderId) return;
+      // Highlight selected row
       document.querySelectorAll('.ful-row').forEach(r => r.style.background = '');
-      if (row) row.style.background = '#FFF7ED';
-      loadFulPanel(orderId);
+      if (targetRow) targetRow.style.background = '#FFF7ED';
+      buildAndLoadPanel(orderId);
     });
 
-    // Dispatch modal
-    document.getElementById('dispatch-cancel')?.addEventListener('click', () => {
-      document.getElementById('dispatch-modal').style.display = 'none';
-    });
-    document.getElementById('dispatch-modal')?.addEventListener('click', e => {
-      if (e.target === e.currentTarget) e.currentTarget.style.display = 'none';
-    });
-    document.getElementById('dispatch-confirm')?.addEventListener('click', async () => {
-      const orderId  = document.getElementById('dispatch-order-id')?.value;
-      const carrier  = document.getElementById('dispatch-carrier')?.value;
-      const tracking = document.getElementById('dispatch-tracking')?.value.trim() || undefined;
-      const eta      = document.getElementById('dispatch-eta')?.value || undefined;
-      if (!carrier) return showToast('Carrier is required', 'error');
-      const btn = document.getElementById('dispatch-confirm');
-      btn.disabled = true; btn.textContent = 'Dispatching…';
-      try {
-        await ApiService.dispatchOrder(orderId, {
-          carrier,
-          trackingNumber: tracking,
-          estimatedDeliveryDate: eta ? (eta.length === 16 ? eta + ':00' : eta) : undefined,
-        });
-        document.getElementById('dispatch-modal').style.display = 'none';
-        await loadFulPanel(orderId);
-        showToast('Order dispatched!');
-      } catch(e) { showToast(e.message || 'Dispatch failed', 'error'); }
-      finally { btn.disabled = false; btn.textContent = 'Dispatch'; }
+    // Refresh button
+    document.getElementById('btn-ful-refresh')?.addEventListener('click', () => {
+      loadTab('fulfillment');
     });
   }
 
