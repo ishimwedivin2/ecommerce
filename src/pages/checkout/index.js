@@ -223,24 +223,56 @@ export async function render() {
           </div>
         </div>
 
-        <!-- MTN MoMo fields -->
+        <!-- MTN MoMo & Airtel Money unified -->
         <div id="fields-MTN_MOMO" class="pay-fields">
-          <h3 class="chk-sect-title">MTN Mobile Money</h3>
+          <h3 class="chk-sect-title">Mobile Money</h3>
+          
+          <!-- Provider selection cards -->
+          <div class="momo-providers">
+            <div class="momo-provider-card active" id="momo-provider-mtn" data-provider="MTN">
+              <div class="momo-logo momo-logo-mtn">
+                <svg viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg" aria-label="MTN">
+                  <circle cx="60" cy="60" r="55" fill="#FFCB05"/>
+                  <path d="M35 45h10l10 20 10-20h10v35h-8V57l-12 23-12-23v23h-8V45z" fill="#000"/>
+                </svg>
+              </div>
+              <strong>MTN MoMo</strong>
+            </div>
+            <div class="momo-provider-card" id="momo-provider-airtel" data-provider="AIRTEL">
+              <div class="momo-logo momo-logo-airtel">
+                <svg viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg" aria-label="Airtel">
+                  <circle cx="60" cy="60" r="55" fill="#ED1C24"/>
+                  <path d="M40 70 L50 45 L60 70 L50 55 Z M70 45 h-8 l-8 25 h8 z M82 50 a15 15 0 0 1 0 15 h-8 a7 7 0 0 0 0-15 z" fill="#fff"/>
+                </svg>
+              </div>
+              <strong>Airtel Money</strong>
+            </div>
+          </div>
+
+          <!-- Unified phone input -->
           <div class="chk-field">
-            <label>MTN Phone Number <span class="req">*</span></label>
-            <input id="mtn-phone" type="tel" value="${user.phoneNumber || ''}" placeholder="e.g. 0788123456" required>
-            <small class="chk-hint">You will receive a payment prompt on this number</small>
+            <label>Phone Number <span class="req">*</span></label>
+            <div class="momo-phone-wrapper">
+              <span class="momo-country-code">+250</span>
+              <input 
+                id="momo-phone" 
+                type="tel" 
+                inputmode="numeric"
+                maxlength="12"
+                placeholder="078 812 3456" 
+                required>
+            </div>
+            <small class="chk-hint" id="momo-hint">You will receive a payment prompt on this number</small>
+          </div>
+
+          <!-- Trust badge -->
+          <div class="momo-trust-badge">
+            🔒 Secure, encrypted transaction
           </div>
         </div>
 
-        <!-- Airtel Money fields -->
         <div id="fields-AIRTEL_MONEY" class="pay-fields" style="display:none">
-          <h3 class="chk-sect-title">Airtel Money</h3>
-          <div class="chk-field">
-            <label>Airtel Phone Number <span class="req">*</span></label>
-            <input id="airtel-phone" type="tel" value="${user.phoneNumber || ''}" placeholder="e.g. 0730123456" required>
-            <small class="chk-hint">You will receive a payment prompt on this number</small>
-          </div>
+          <!-- Airtel shares the unified Mobile Money UI above -->
         </div>
 
         <!-- Card fields -->
@@ -501,29 +533,113 @@ export function bindEvents(state, helpers) {
     e.target.value = e.target.value.replace(/\D/g, '').slice(0, 10);
   });
 
+  // ── Mobile Money provider selection + auto-detection ──
+  const momoPhone = document.getElementById('momo-phone');
+  const momoMtnCard = document.getElementById('momo-provider-mtn');
+  const momoAirtelCard = document.getElementById('momo-provider-airtel');
+  const momoHint = document.getElementById('momo-hint');
+
+  function applyMomoAutoDetect(raw) {
+    // raw = digits only, up to 10
+    if (raw.startsWith('078') || raw.startsWith('079')) {
+      momoMtnCard?.classList.add('active');
+      momoAirtelCard?.classList.remove('active');
+      _paymentMethod = 'MTN_MOMO';
+      if (momoHint) momoHint.textContent = 'You will receive an MTN MoMo prompt on this number';
+      const ico = document.getElementById('sum-method');
+      const ico2 = ico?.querySelector('.chk-method-ico');
+      const nm = document.getElementById('sum-method-name');
+      if (ico2) ico2.textContent = '📱';
+      if (nm) nm.textContent = 'MTN MoMo';
+    } else if (raw.startsWith('073')) {
+      momoAirtelCard?.classList.add('active');
+      momoMtnCard?.classList.remove('active');
+      _paymentMethod = 'AIRTEL_MONEY';
+      if (momoHint) momoHint.textContent = 'You will receive an Airtel Money prompt on this number';
+      const ico = document.getElementById('sum-method');
+      const ico2 = ico?.querySelector('.chk-method-ico');
+      const nm = document.getElementById('sum-method-name');
+      if (ico2) ico2.textContent = '📲';
+      if (nm) nm.textContent = 'Airtel Money';
+    }
+  }
+
+  momoPhone?.addEventListener('input', e => {
+    // Strip everything non-digit, cap at 10
+    const raw = e.target.value.replace(/\D/g, '').slice(0, 10);
+    // Format: 078 812 3456 (space after 3rd and 6th digit)
+    let formatted = raw;
+    if (raw.length > 6)      formatted = raw.slice(0, 3) + ' ' + raw.slice(3, 6) + ' ' + raw.slice(6);
+    else if (raw.length > 3) formatted = raw.slice(0, 3) + ' ' + raw.slice(3);
+    e.target.value = formatted;
+    // Clear any stale error as the user types
+    showError('step2-err', '');
+    // Auto-detect network from prefix
+    applyMomoAutoDetect(raw);
+  });
+
+  // Manual provider selection (overrides auto-detection)
+  momoMtnCard?.addEventListener('click', () => {
+    momoMtnCard.classList.add('active');
+    momoAirtelCard?.classList.remove('active');
+    _paymentMethod = 'MTN_MOMO';
+    if (momoHint) momoHint.textContent = 'You will receive an MTN MoMo prompt on this number';
+    const ico2 = document.querySelector('#sum-method .chk-method-ico');
+    const nm   = document.getElementById('sum-method-name');
+    if (ico2) ico2.textContent = '📱';
+    if (nm)   nm.textContent  = 'MTN MoMo';
+    showError('step2-err', '');
+  });
+
+  momoAirtelCard?.addEventListener('click', () => {
+    momoAirtelCard.classList.add('active');
+    momoMtnCard?.classList.remove('active');
+    _paymentMethod = 'AIRTEL_MONEY';
+    if (momoHint) momoHint.textContent = 'You will receive an Airtel Money prompt on this number';
+    const ico2 = document.querySelector('#sum-method .chk-method-ico');
+    const nm   = document.getElementById('sum-method-name');
+    if (ico2) ico2.textContent = '📲';
+    if (nm)   nm.textContent  = 'Airtel Money';
+    showError('step2-err', '');
+  });
+
   // ── Payment method selection ──
   document.querySelectorAll('.payment-method-card').forEach(card => {
     card.addEventListener('click', () => {
       document.querySelectorAll('.payment-method-card').forEach(c => c.classList.remove('active'));
       card.classList.add('active');
       _paymentMethod = card.dataset.method;
-      // show matching fields
+
+      // MTN and Airtel both share the unified Mobile Money section
       document.querySelectorAll('.pay-fields').forEach(f => f.style.display = 'none');
-      const fields = document.getElementById('fields-' + _paymentMethod);
-      if (fields) fields.style.display = '';
-      // Initialise Stripe Elements when Stripe tab is selected
-      if (_paymentMethod === 'STRIPE') {
-        const STRIPE_PK = 'pk_test_51TmMXjDaKj9gog2tfPZFR36HRUQwHVpsG8GhoKdmnRz3r9Rnv2cPlC7KqJrS7scBK845ggW2ESH7Gkb8iYFA69KY00yLaZLIyW';
-        if (!window.Stripe) {
-          const s = document.createElement('script');
-          s.src = 'https://js.stripe.com/v3/';
-          s.onload = () => mountStripeCard(STRIPE_PK);
-          document.head.appendChild(s);
+      if (_paymentMethod === 'MTN_MOMO' || _paymentMethod === 'AIRTEL_MONEY') {
+        document.getElementById('fields-MTN_MOMO').style.display = '';
+        // Activate the matching inner provider card
+        if (_paymentMethod === 'MTN_MOMO') {
+          document.getElementById('momo-provider-mtn')?.classList.add('active');
+          document.getElementById('momo-provider-airtel')?.classList.remove('active');
         } else {
-          mountStripeCard(STRIPE_PK);
+          document.getElementById('momo-provider-airtel')?.classList.add('active');
+          document.getElementById('momo-provider-mtn')?.classList.remove('active');
+        }
+      } else {
+        const fields = document.getElementById('fields-' + _paymentMethod);
+        if (fields) fields.style.display = '';
+        // Initialise Stripe Elements when card tab is selected
+        if (_paymentMethod === 'STRIPE') {
+          const STRIPE_PK = 'pk_test_51TmMXjDaKj9gog2tfPZFR36HRUQwHVpsG8GhoKdmnRz3r9Rnv2cPlC7KqJrS7scBK845ggW2ESH7Gkb8iYFA69KY00yLaZLIyW';
+          if (!window.Stripe) {
+            const s = document.createElement('script');
+            s.src = 'https://js.stripe.com/v3/';
+            s.onload = () => mountStripeCard(STRIPE_PK);
+            document.head.appendChild(s);
+          } else {
+            mountStripeCard(STRIPE_PK);
+          }
         }
       }
-      // update summary icon
+
+      // Update order summary sidebar
       const icons = { MTN_MOMO: '📱', AIRTEL_MONEY: '📲', STRIPE: '💳' };
       const names = { MTN_MOMO: 'MTN MoMo', AIRTEL_MONEY: 'Airtel Money', STRIPE: 'Credit / Debit Card' };
       const ico  = document.getElementById('sum-method');
@@ -737,15 +853,15 @@ export function bindEvents(state, helpers) {
 // ── validate payment fields ──────────────────────────────
 function validatePaymentFields() {
   if (_paymentMethod === 'MTN_MOMO') {
-    const phone = document.getElementById('mtn-phone')?.value?.replace(/\s/g, '');
+    const phone = document.getElementById('momo-phone')?.value?.replace(/\D/g, '');
     if (!phone || !/^07[89]\d{7}$/.test(phone)) {
       showError('step2-err', 'MTN number must be 10 digits and start with 078 or 079.');
       return false;
     }
   } else if (_paymentMethod === 'AIRTEL_MONEY') {
-    const phone = document.getElementById('airtel-phone')?.value?.replace(/\s/g, '').replace(/^\+/, '');
-    if (!phone || phone.length < 9) {
-      showError('step2-err', 'Please enter a valid Airtel phone number.');
+    const phone = document.getElementById('momo-phone')?.value?.replace(/\D/g, '');
+    if (!phone || !/^073\d{7}$/.test(phone)) {
+      showError('step2-err', 'Airtel number must be 10 digits and start with 073.');
       return false;
     }
   } else if (_paymentMethod === 'STRIPE') {
