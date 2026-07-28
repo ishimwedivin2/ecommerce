@@ -691,6 +691,13 @@
   justify-content: center;
   flex-shrink: 0;
 }
+
+/* icon + title on the same row */
+.about-card-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
 .about-card--mission .about-card-icon { background: #fff4ec; color: #FF6B00; }
 .about-card--vision  .about-card-icon { background: #eef2ff; color: #6366f1; }
 .about-card--ops     .about-card-icon { background: #e0f2fe; color: #0ea5e9; }
