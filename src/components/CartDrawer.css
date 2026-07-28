@@ -1,6 +1,9 @@
 .cart-drawer-overlay {
   position: fixed;
-  inset: 0;
+  top: var(--cart-header-h, 0px);
+  bottom: var(--cart-footer-h, 0px);
+  left: 0;
+  right: 0;
   z-index: 2600;
   background: rgba(15, 23, 42, 0.42);
   display: flex;

@@ -284,6 +284,7 @@ export async function renderChatWidget(options = {}) {
 export async function renderCartDrawer() {
   const container = document.getElementById('cart-drawer-mount');
   if (!container) return;
+  updateCartBounds();
   container.innerHTML = await CartDrawer.render();
   CartDrawer.bindEvents(helpers);
   translateHtml(container);
@@ -346,10 +347,22 @@ function updateAdminHeaderHeight() {
   }
 }
 
+function updateCartBounds() {
+  const headerEl = document.getElementById('app-header-container');
+  const footerEl = document.getElementById('app-footer-container');
+  const headerH = headerEl ? Math.ceil(headerEl.getBoundingClientRect().height) : 0;
+  const footerH = footerEl ? Math.ceil(footerEl.getBoundingClientRect().height) : 0;
+  document.documentElement.style.setProperty('--cart-header-h', `${headerH}px`);
+  document.documentElement.style.setProperty('--cart-footer-h', `${footerH}px`);
+}
+
 function bindHeaderHeightEvents(container) {
   const closeBtn = container.querySelector('.promo-banner-close');
   closeBtn?.addEventListener('click', () => {
-    requestAnimationFrame(updateAdminHeaderHeight);
+    requestAnimationFrame(() => {
+      updateAdminHeaderHeight();
+      updateCartBounds();
+    });
   });
 }
 

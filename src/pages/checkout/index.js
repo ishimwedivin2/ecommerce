@@ -225,27 +225,29 @@ export async function render() {
 
         <!-- MTN MoMo & Airtel Money unified -->
         <div id="fields-MTN_MOMO" class="pay-fields">
-          <h3 class="chk-sect-title">Mobile Money</h3>
-          
+          <div class="momo-section-header">
+            <h3>Mobile Money</h3>
+          </div>
+
           <!-- Provider selection cards -->
           <div class="momo-providers">
             <div class="momo-provider-card active" id="momo-provider-mtn" data-provider="MTN">
               <div class="momo-logo momo-logo-mtn">
-                <svg viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg" aria-label="MTN">
-                  <circle cx="60" cy="60" r="55" fill="#FFCB05"/>
-                  <path d="M35 45h10l10 20 10-20h10v35h-8V57l-12 23-12-23v23h-8V45z" fill="#000"/>
-                </svg>
+                <img src="/src/assets/mtn-logo.jfif" alt="MTN MoMo">
               </div>
-              <strong>MTN MoMo</strong>
+              <div class="momo-provider-info">
+                <strong>MTN MoMo</strong>
+                <span>078 / 079</span>
+              </div>
             </div>
             <div class="momo-provider-card" id="momo-provider-airtel" data-provider="AIRTEL">
               <div class="momo-logo momo-logo-airtel">
-                <svg viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg" aria-label="Airtel">
-                  <circle cx="60" cy="60" r="55" fill="#ED1C24"/>
-                  <path d="M40 70 L50 45 L60 70 L50 55 Z M70 45 h-8 l-8 25 h8 z M82 50 a15 15 0 0 1 0 15 h-8 a7 7 0 0 0 0-15 z" fill="#fff"/>
-                </svg>
+                <img src="/src/assets/airtel-logo.jpg" alt="Airtel Money">
               </div>
-              <strong>Airtel Money</strong>
+              <div class="momo-provider-info">
+                <strong>Airtel Money</strong>
+                <span>073</span>
+              </div>
             </div>
           </div>
 
@@ -254,12 +256,12 @@ export async function render() {
             <label>Phone Number <span class="req">*</span></label>
             <div class="momo-phone-wrapper">
               <span class="momo-country-code">+250</span>
-              <input 
-                id="momo-phone" 
-                type="tel" 
+              <input
+                id="momo-phone"
+                type="tel"
                 inputmode="numeric"
                 maxlength="12"
-                placeholder="078 812 3456" 
+                placeholder="078 812 3456"
                 required>
             </div>
             <small class="chk-hint" id="momo-hint">You will receive a payment prompt on this number</small>
@@ -269,10 +271,6 @@ export async function render() {
           <div class="momo-trust-badge">
             🔒 Secure, encrypted transaction
           </div>
-        </div>
-
-        <div id="fields-AIRTEL_MONEY" class="pay-fields" style="display:none">
-          <!-- Airtel shares the unified Mobile Money UI above -->
         </div>
 
         <!-- Card fields -->
@@ -578,8 +576,9 @@ export function bindEvents(state, helpers) {
     applyMomoAutoDetect(raw);
   });
 
-  // Manual provider selection (overrides auto-detection)
-  momoMtnCard?.addEventListener('click', () => {
+  // Manual provider selection — stopPropagation so click doesn't bubble to .payment-method-card
+  momoMtnCard?.addEventListener('click', (e) => {
+    e.stopPropagation();
     momoMtnCard.classList.add('active');
     momoAirtelCard?.classList.remove('active');
     _paymentMethod = 'MTN_MOMO';
@@ -591,7 +590,8 @@ export function bindEvents(state, helpers) {
     showError('step2-err', '');
   });
 
-  momoAirtelCard?.addEventListener('click', () => {
+  momoAirtelCard?.addEventListener('click', (e) => {
+    e.stopPropagation();
     momoAirtelCard.classList.add('active');
     momoMtnCard?.classList.remove('active');
     _paymentMethod = 'AIRTEL_MONEY';
@@ -768,8 +768,14 @@ export function bindEvents(state, helpers) {
       }
     } catch (err) {
       setStep(2);
-      showError('step2-err', err.message || 'Payment failed. Please try again.');
+      // Detect the duplicate-order guard message from the backend and show a
+      // clearer explanation with the order number so the user knows what to do.
+      const isDuplicate = err.message && err.message.includes('active order');
+      showError('step2-err', isDuplicate
+        ? err.message + ' If you want to pay for it, refresh the page.'
+        : (err.message || 'Payment failed. Please try again.'));
       _isPlacingOrder = false;
+      _order = null;   // discard any partially-created order so retry starts fresh
       btn.disabled = false;
       const subtotal = Number(_cart?.totalAmount || 0);
       btn.textContent = 'Pay ' + fmtMoney(subtotal);
@@ -970,7 +976,7 @@ function startPolling(orderId) {
     if (_pollCount >= MAX_POLLS) {
       clearInterval(_pollTimer);
       _pollTimer = null;
-      handlePaymentTimeout();
+      await handlePaymentTimeout();
       return;
     }
 
@@ -1001,13 +1007,88 @@ async function handlePaymentConfirmed() {
 }
 
 // ── timeout ──────────────────────────────────────────────
-function handlePaymentTimeout() {
-  const title = document.getElementById('proc-title');
-  const msg   = document.getElementById('proc-msg');
-  if (title) title.textContent = 'Payment Timed Out';
-  if (msg)   msg.textContent   = 'We did not receive payment confirmation within 2 minutes. If your card was charged, please contact support with your order number.';
+async function handlePaymentTimeout() {
+  // Stop the spinner visually
   const spinner = document.querySelector('.chk-spinner');
   if (spinner) { spinner.style.borderTopColor = '#EF4444'; spinner.style.animationDuration = '0s'; }
+
+  // Cancel the order on the backend so it doesn't sit as PROCESSING forever.
+  // This also restores inventory automatically via the existing cancelOrder path.
+  if (_order?.id) {
+    try {
+      await ApiService.orders.cancel(_order.id);
+    } catch (_) {
+      // If cancel fails (already cancelled, network issue) — swallow silently.
+      // The order is still orphaned in that case but we don't block the UI.
+    }
+  }
+
+  // Reset placing-order flag so the retry button works
+  _isPlacingOrder = false;
+
+  // Show timeout message + retry button on the processing screen
+  const title   = document.getElementById('proc-title');
+  const msg     = document.getElementById('proc-msg');
+  const pollEl  = document.getElementById('proc-poll');
+  const procBox = document.querySelector('.chk-processing');
+
+  if (title)   title.textContent = 'Payment Timed Out';
+  if (msg)     msg.textContent   = 'We did not receive confirmation within 2 minutes. Your order has been cancelled and no charge was made.';
+  if (pollEl)  pollEl.style.display = 'none';
+
+  // Remove any existing retry button before adding a new one
+  document.getElementById('proc-retry-btn')?.remove();
+  document.getElementById('proc-cancel-btn')?.remove();
+
+  if (procBox) {
+    const btnRow = document.createElement('div');
+    btnRow.style.cssText = 'display:flex;gap:12px;margin-top:8px;flex-wrap:wrap;justify-content:center;';
+
+    const retryBtn = document.createElement('button');
+    retryBtn.id        = 'proc-retry-btn';
+    retryBtn.className = 'btn-primary';
+    retryBtn.textContent = '↩ Try Again';
+    retryBtn.style.minWidth = '140px';
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.id        = 'proc-cancel-btn';
+    cancelBtn.className = 'btn-secondary';
+    cancelBtn.textContent = 'Back to Payment';
+    cancelBtn.style.minWidth = '140px';
+
+    btnRow.appendChild(retryBtn);
+    btnRow.appendChild(cancelBtn);
+    procBox.appendChild(btnRow);
+
+    // Retry: clear the old order reference so the next Pay click creates a fresh order
+    retryBtn.addEventListener('click', () => {
+      _order = null;
+      // Re-enable Pay button and restore its label
+      const payBtn = document.getElementById('btn-step2-pay');
+      if (payBtn) {
+        const subtotal = Number(_cart?.totalAmount || 0);
+        payBtn.disabled    = false;
+        payBtn.textContent = 'Pay ' + fmtMoney(subtotal);
+      }
+      showError('step2-err', '');
+      setStep(2);
+      btnRow.remove();
+    });
+
+    // Back: same as retry — just return to payment step
+    cancelBtn.addEventListener('click', () => {
+      _order = null;
+      const payBtn = document.getElementById('btn-step2-pay');
+      if (payBtn) {
+        const subtotal = Number(_cart?.totalAmount || 0);
+        payBtn.disabled    = false;
+        payBtn.textContent = 'Pay ' + fmtMoney(subtotal);
+      }
+      showError('step2-err', '');
+      setStep(2);
+      btnRow.remove();
+    });
+  }
 }
 
 // ── receipt block ────────────────────────────────────────
