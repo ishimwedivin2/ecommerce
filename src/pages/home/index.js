@@ -151,7 +151,7 @@ function renderProductCard(p) {
             ? `<span class="sp-price-orig">RWF ${vatPrice.toLocaleString('en-US')}</span><span class="sp-price-now">RWF ${vatDiscounted.toLocaleString('en-US')}</span>`
             : `<span class="sp-price-now">RWF ${vatPrice.toLocaleString('en-US')}</span>`}
         </div>
-        ${Number(p.taxRate || 0) > 0 ? `<div style="color:#10b981;font-size:11px;font-weight:700;margin-top:4px;">✓ VAT Included</div>` : ''}
+        ${Number(p.taxRate || 0) > 0 ? `<div style="color:#94A3B8;font-size:11px;font-weight:600;margin-top:4px;">✓ VAT Included</div>` : ''}
       </div>
       <div class="sp-card-footer">
         ${_isStaffOnly

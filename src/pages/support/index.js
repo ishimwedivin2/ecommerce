@@ -18,7 +18,7 @@ export async function render() {
       <p style="font-size:13px;color:var(--text-medium);">${t.description}</p>
       <div style="font-size:11px;color:var(--text-light);display:flex;justify-content:space-between;margin-top:8px;">
         <span>Priority: <strong>${t.priority}</strong></span>
-        <span>Opened: ${t.createdAt ? new Date(t.createdAt).toLocaleDateString('en-GB', { day:'numeric', month:'short', year:'numeric' }) : '—'}</span>
+        <span>Opened: ${t.createdAt ? new Date(t.createdAt).toLocaleString('en-GB', { day:'numeric', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:false }) : '—'}</span>
       </div>
     </div>
   `).join('') : '<p style="color:var(--text-light);">No active support tickets.</p>';

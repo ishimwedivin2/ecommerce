@@ -4,8 +4,8 @@ import { ApiService } from '../../api.js';
 const BACKEND_URL = 'http://localhost:8080';
 
 const fmtMoney = v => 'RWF ' + Number(v || 0).toLocaleString();
-const fmtDate = v => v ? new Date(v).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' }) : '—';
-const fmtDateShort = v => v ? new Date(v).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
+const fmtDate = v => v ? new Date(v).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'medium' }) : '—';
+const fmtDateShort = v => v ? new Date(v).toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }) : '—';
 
 const PROFILE_SECTIONS = new Set(['profile', 'orders', 'addresses', 'password', 'returns', 'logout']);
 

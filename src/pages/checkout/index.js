@@ -31,7 +31,7 @@ const MAX_POLLS    = 40;     // 40 × 3 s = 2 min timeout
 
 // ── helpers ──────────────────────────────────────────────
 const fmtMoney = v => 'RWF ' + Number(v || 0).toLocaleString(undefined, { minimumFractionDigits: 0 });
-const fmtDate  = v => v ? new Date(v).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' }) : '—';
+const fmtDate  = v => v ? new Date(v).toLocaleString('en-GB', { day:'numeric', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:false }) : '—';
 const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
 const escVal = v => esc(v).replace(/`/g, '&#96;');
 
@@ -837,7 +837,7 @@ export function bindEvents(state, helpers) {
         <div><span>Customer</span><span>${r.customerName||'—'}</span></div>
         <div><span>Payment</span><span>${(r.paymentMethod||'—').replace(/_/g,' ')}</span></div>
         <div><span>Reference</span><span>${r.paymentReference||'—'}</span></div>
-        <div><span>Date</span><span>${r.issuedAt ? new Date(r.issuedAt).toLocaleString('en-GB',{dateStyle:'medium',timeStyle:'short'}) : '—'}</span></div>
+        <div><span>Date</span><span>${r.issuedAt ? new Date(r.issuedAt).toLocaleString('en-GB',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}) : '—'}</span></div>
       </div>
       <table class="items"><thead><tr><th>Item</th><th>Qty</th><th>Unit Price</th><th>Subtotal</th></tr></thead><tbody>${itemsHtml}</tbody></table>
       <div class="tot-r"><span>Subtotal (tax incl.)</span><span>${fmtMoney(receiptSubtotalWithTax)}</span></div>

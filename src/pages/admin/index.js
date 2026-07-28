@@ -400,8 +400,8 @@ async function loadBadges() {
 const fmt = {
   money: v => 'RWF ' + Math.round(Number(v||0)).toLocaleString('en-US'),
   num:   v => Number(v||0).toLocaleString(),
-  date:  v => v ? new Date(v).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '—',
-  ago:   v => { if(!v) return '—'; const s=(Date.now()-new Date(v))/1000; if(s<60) return 'just now'; if(s<3600) return Math.floor(s/60)+'m ago'; if(s<86400) return Math.floor(s/3600)+'h ago'; return Math.floor(s/86400)+'d ago'; },
+  date:  v => v ? new Date(v).toLocaleString('en-GB',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}) : '—',
+  ago:   v => { if(!v) return '—'; const d=new Date(v); const s=(Date.now()-d)/1000; const clock=d.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}); if(s<10) return `just now · ${clock}`; if(s<60) return `${Math.floor(s)}s ago · ${clock}`; if(s<3600) return `${Math.floor(s/60)}m ago · ${clock}`; if(s<86400) return `${Math.floor(s/3600)}h ago · ${clock}`; return new Date(v).toLocaleString('en-GB',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}); },
 };
 
 function esc(s) { return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
@@ -4369,7 +4369,7 @@ TAB.myprofile = async () => {
   const roleLabel = isAdmin() ? 'Administrator' : isSupportAgent() ? 'Support Agent' : 'Employee';
   const colorCls  = isAdmin() ? '' : isSupportAgent() ? 'purple' : 'blue';
   const initials  = `${(u.firstName||'A')[0]}${(u.lastName||'D')[0]}`.toUpperCase();
-  const fmtD = v => v ? new Date(v).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'}) : '—';
+  const fmtD = v => v ? new Date(v).toLocaleString('en-GB',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}) : '—';
   const ev = s => String(s==null?'':s).replace(/"/g,'&quot;');
 
   return `
@@ -5493,7 +5493,7 @@ function bindTab(tab) {
         (u.roles||[]).map(roleLabel).join('; '),
         userStatus(u),
         u.phoneNumber||'',
-        u.createdAt ? new Date(u.createdAt).toLocaleDateString() : ''
+        u.createdAt ? new Date(u.createdAt).toLocaleString('en-GB',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}) : ''
       ])];
       const csv = csvRows.map(r => r.map(v => '"' + String(v).replace(/"/g,'""') + '"').join(',')).join('\n');
       const blob = new Blob([csv], { type: 'text/csv' });
@@ -7058,7 +7058,7 @@ function showPOSReceipt(receipt) {
         <div style="width:48px;height:48px;background:#F1F5F9;border-radius:50%;margin:0 auto 8px;display:flex;align-items:center;justify-content:center;font-size:22px;">🧾</div>
         <div style="font-size:16px;font-weight:800;">Sale Complete</div>
         <div style="font-size:12px;color:#64748B;margin-top:2px;">Order #${orderNum}</div>
-        <div style="font-size:11px;color:#94A3B8;">${new Date().toLocaleString('en-GB',{dateStyle:'medium',timeStyle:'short'})}</div>
+        <div style="font-size:11px;color:#94A3B8;">${new Date().toLocaleString('en-GB',{dateStyle:'medium',timeStyle:'medium'})}</div>
       </div>
 
       <!-- Receipt printable body -->
@@ -7167,7 +7167,7 @@ function showPOSReceipt(receipt) {
       <div class="brand">Luz Technology</div>
       <div class="sub">Official Receipt</div>
       <div class="title">Sale Complete — #${orderNum}</div>
-      <div class="meta">${new Date().toLocaleString('en-GB',{dateStyle:'medium',timeStyle:'short'})}</div>
+      <div class="meta">${new Date().toLocaleString('en-GB',{dateStyle:'medium',timeStyle:'medium'})}</div>
       <table class="items">
         <thead><tr><th>Item</th><th>Qty</th><th>Unit Price</th><th>Subtotal</th></tr></thead>
         <tbody>${items.map(i=>`<tr><td>${i.productName||'Product'}</td><td>${i.quantity}</td><td>${fmt.money(Number(i.unitPriceIncludingTax ?? i.unitPrice ?? 0))}</td><td>${fmt.money(Number(i.lineTotalIncludingTax ?? i.subTotal ?? ((i.unitPrice||0)*(i.quantity||1))))}</td></tr>`).join('')}</tbody>

@@ -134,14 +134,8 @@ export async function render() {
           <button class="header-action-btn badge-btn" id="btn-notifications" title="Notifications">
             <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"></path></svg>
             <div class="badge" id="notif-badge" style="display:none">0</div>
+            <span class="nd-bell-dot" id="nd-bell-dot" style="display:none"></span>
           </button>
-          <div id="notifications-panel" class="notifications-panel" style="display:none;">
-            <div class="notif-panel-header">
-              <span style="font-weight:700;font-size:14px;">Notifications</span>
-              <button id="btn-mark-all-read" style="font-size:12px;font-weight:600;color:var(--primary);background:none;border:none;cursor:pointer;">Mark all read</button>
-            </div>
-            <div id="notif-list"><div style="padding:24px;text-align:center;color:var(--text-light);font-size:13px;">Loading...</div></div>
-          </div>
         </div>
         ` : ''}
 
@@ -155,7 +149,7 @@ export async function render() {
 }
 
 export function bindEvents(helpers) {
-  const { navigate, renderAuthModal, renderHeader, renderView, openCartDrawer, syncUrl } = helpers;
+  const { navigate, renderAuthModal, renderHeader, renderView, openCartDrawer, openNotifDrawer, syncUrl } = helpers;
 
   document.getElementById('locale-select')?.addEventListener('change', (e) => {
     setLocale(e.target.value);
@@ -228,114 +222,11 @@ export function bindEvents(helpers) {
     navigate('home', { activeCategory: null, isUserDropdownOpen: false });
   });
 
-  // Notification bell — hover open/close
-  const notifBtn     = document.getElementById('btn-notifications');
-  const notifWrapper = document.getElementById('notif-bell-wrapper');
-  const notifPanel   = document.getElementById('notifications-panel');
-  if (notifBtn && notifPanel && notifWrapper) {
-    let notifCloseTimer  = null;
-    let notifLoaded      = false;
-
-    const openNotif = async () => {
-      clearTimeout(notifCloseTimer);
-      if (notifPanel.classList.contains('open')) return;
-      notifPanel.classList.add('open');
-      setState({ isNotifPanelOpen: true });
-
-      if (notifLoaded) return;
-      notifLoaded = true;
-        const user = ApiService.getCurrentUser();
-        const roles = (user?.roles||[]).map(r=>(r?.name||r||'').toString());
-        const isStaff = roles.some(r=>r==='ROLE_ADMIN'||r==='ROLE_EMPLOYEE');
-
-        // Load regular notifications + low-stock alerts for staff
-        const [notifRes, lowStockRes] = await Promise.allSettled([
-          ApiService.notifications.getAll(),
-          isStaff ? ApiService.inventory.getLowStock() : Promise.resolve(null),
-        ]);
-
-        const items     = notifRes.status==='fulfilled' ? (notifRes.value?.data || []) : [];
-        const lowStock  = (lowStockRes.status==='fulfilled' && lowStockRes.value)
-          ? (Array.isArray(lowStockRes.value) ? lowStockRes.value : (lowStockRes.value?.data||lowStockRes.value?.content||[]))
-          : [];
-
-        // Update badge to include low-stock count for staff
-        const badge = document.getElementById('notif-badge');
-        const totalAlerts = items.filter(n=>!n.read).length + lowStock.length;
-        if (badge) {
-          badge.textContent = totalAlerts;
-          badge.style.display = totalAlerts > 0 ? 'flex' : 'none';
-        }
-
-        const listEl = document.getElementById('notif-list');
-        if (listEl) {
-          const lowStockHtml = lowStock.length ? `
-            <div style="padding:10px 14px 4px;font-size:11px;font-weight:700;color:#F59E0B;text-transform:uppercase;letter-spacing:.05em;border-top:1px solid var(--border);">
-              ⚠ Low Stock Alerts (${lowStock.length})
-            </div>
-            ${lowStock.map(i=>`
-              <div class="notif-item unread" style="border-left:3px solid #F59E0B;padding-left:11px;">
-                <div class="notif-item-title">${i.productName||i.name||'—'}</div>
-                <div class="notif-item-msg">Only ${i.quantity} units left — reorder threshold: ${i.lowStockThreshold||10}</div>
-                <div class="notif-item-time">SKU: ${i.sku||'—'}</div>
-              </div>`).join('')}` : '';
-
-          listEl.innerHTML = items.length === 0 && !lowStockHtml
-            ? `<div style="padding:24px;text-align:center;color:var(--text-light);font-size:13px;">You're all caught up!</div>`
-            : (items.length > 0 ? items.map(n => `
-              <div class="notif-item ${n.read ? '' : 'unread'}" data-notif-id="${n.id}">
-                <div class="notif-item-title">${n.title}</div>
-                <div class="notif-item-msg">${n.message}</div>
-                <div class="notif-item-time">${n.createdAt ? new Date(n.createdAt).toLocaleDateString() : ''}</div>
-              </div>
-            `).join('') : '') + lowStockHtml;
-
-          listEl.querySelectorAll('.notif-item').forEach(item => {
-            item.addEventListener('click', async () => {
-              const nid = item.getAttribute('data-notif-id');
-              await ApiService.notifications.markRead(nid);
-              item.classList.remove('unread');
-              const badge = document.getElementById('notif-badge');
-              const cur = parseInt(badge?.textContent || '0') - 1;
-              if (badge) { badge.textContent = Math.max(0, cur); badge.style.display = cur <= 0 ? 'none' : 'flex'; }
-            });
-          });
-        }
-    };
-
-    const closeNotif = () => {
-      notifCloseTimer = setTimeout(() => {
-        notifPanel.classList.remove('open');
-        setState({ isNotifPanelOpen: false });
-      }, 150);
-    };
-
-    notifWrapper.addEventListener('mouseenter', openNotif);
-    notifWrapper.addEventListener('mouseleave', closeNotif);
-    notifPanel.addEventListener('mouseenter', () => clearTimeout(notifCloseTimer));
-    notifPanel.addEventListener('mouseleave', closeNotif);
-    // click as fallback for touch/keyboard
-    notifBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      notifPanel.classList.contains('open') ? closeNotif() : openNotif();
-    });
-
-    document.getElementById('btn-mark-all-read')?.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      await ApiService.notifications.markAllRead();
-      const badge = document.getElementById('notif-badge');
-      if (badge) { badge.textContent = '0'; badge.style.display = 'none'; }
-      document.querySelectorAll('.notif-item').forEach(i => i.classList.remove('unread'));
-      showToast('All notifications marked as read');
-    });
-
-    document.addEventListener('click', (e) => {
-      if (!notifWrapper.contains(e.target)) {
-        notifPanel.classList.remove('open');
-        setState({ isNotifPanelOpen: false });
-      }
-    });
-  }
+  // Notification bell — click opens the drawer
+  document.getElementById('btn-notifications')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    openNotifDrawer?.();
+  });
 
   // ── Live Search ───────────────────────────────────────────
   const searchInput = document.getElementById('global-search-input');
@@ -609,17 +500,12 @@ async function refreshHeaderBadges() {
   if (!user) {
     setBadge('cart-badge', 0);
     setBadge('wishlist-badge', 0);
-    setBadge('notif-badge', 0);
     return;
   }
 
-  const roles = (user?.roles || []).map(r => (r?.name || r || '').toString());
-  const isStaff = roles.some(r => r === 'ROLE_ADMIN' || r === 'ROLE_EMPLOYEE');
-  const [cartRes, wishRes, notifRes, lowStockRes] = await Promise.allSettled([
+  const [cartRes, wishRes] = await Promise.allSettled([
     ApiService.cart.get(),
     ApiService.wishlist.get(),
-    ApiService.notifications.getUnreadCount(),
-    isStaff ? ApiService.inventory.getLowStock() : Promise.resolve(null),
   ]);
 
   if (cartRes.status === 'fulfilled') {
@@ -628,11 +514,6 @@ async function refreshHeaderBadges() {
   if (wishRes.status === 'fulfilled') {
     setBadge('wishlist-badge', wishRes.value?.data?.length || 0);
   }
-  let notifCount = notifRes.status === 'fulfilled' ? (notifRes.value?.data || 0) : 0;
-  if (lowStockRes.status === 'fulfilled' && lowStockRes.value) {
-    const ls = lowStockRes.value;
-    const lsItems = ls ? (Array.isArray(ls) ? ls : (ls?.data || ls?.content || [])) : [];
-    notifCount += lsItems.length;
-  }
-  setBadge('notif-badge', notifCount);
+  // Notification bell dot is managed entirely by NotifDrawer.syncBellDot()
+  // called from router._syncNotifBell() — no badge logic needed here.
 }

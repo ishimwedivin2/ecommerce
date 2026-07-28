@@ -176,7 +176,7 @@ function _fmt(ts) {
   if (!ts) return '';
   const d = new Date(ts);
   if (isNaN(d)) return ts;
-  return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return d.toLocaleString('en-GB', { day:'numeric', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:false });
 }
 
 function _esc(s) {

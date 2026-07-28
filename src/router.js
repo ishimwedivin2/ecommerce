@@ -7,6 +7,7 @@ import * as CategoryNav from './components/CategoryNav.js';
 import * as AuthModal from './components/AuthModal.js';
 import * as ChatWidget from './components/ChatWidget.js';
 import * as CartDrawer from './components/CartDrawer.js';
+import * as NotifDrawer from './components/NotifDrawer.js';
 import * as Footer from './components/Footer.js';
 import { translateHtml, t } from './i18n/index.js';
 
@@ -193,6 +194,8 @@ export const helpers = {
   renderChatWidget,
   renderCartDrawer,
   openCartDrawer,
+  renderNotifDrawer,
+  openNotifDrawer,
   renderAll,
   toast: showToast,
 };
@@ -290,6 +293,62 @@ export async function renderCartDrawer() {
   translateHtml(container);
 }
 
+// ── Notification Drawer ───────────────────────────────────
+
+/** Re-render the notification drawer. Pass open=true to keep it open, false to close. */
+export async function renderNotifDrawer(open = true) {
+  const container = document.getElementById('notif-drawer-mount');
+  if (!container) return;
+
+  if (!open) {
+    NotifDrawer.close();
+    container.innerHTML = '';
+    updateCartBounds(); // footer offset may shift
+    return;
+  }
+
+  // Render skeleton immediately so the drawer opens instantly
+  container.innerHTML = await NotifDrawer.open(helpers.navigate);
+  NotifDrawer.bindEvents(renderNotifDrawer);
+
+  // Then fetch data and re-render with real content
+  await NotifDrawer.load();
+  container.innerHTML = NotifDrawer.render();
+  NotifDrawer.bindEvents(renderNotifDrawer);
+  translateHtml(container);
+
+  // Sync bell dot after data is loaded
+  _syncNotifBell();
+}
+
+export async function openNotifDrawer() {
+  // Close cart drawer if it was open
+  if (appState.isCartDrawerOpen) {
+    setState({ isCartDrawerOpen: false });
+    await renderCartDrawer();
+  }
+  await renderNotifDrawer(true);
+}
+
+/** Sync the bell dot in the header with the current unread count. */
+async function _syncNotifBell() {
+  const user   = ApiService.getCurrentUser();
+  if (!user) return;
+  const roles  = (user.roles || []).map(r => (r?.name || r || '').toString());
+  const isStaff = roles.some(r => r === 'ROLE_ADMIN' || r === 'ROLE_EMPLOYEE');
+
+  const [notifRes, lsRes] = await Promise.allSettled([
+    ApiService.notifications.getAll(),
+    isStaff ? ApiService.inventory.getLowStock() : Promise.resolve(null),
+  ]);
+  const items    = notifRes.status === 'fulfilled' ? (notifRes.value?.data || []) : [];
+  const lowStock = (lsRes.status === 'fulfilled' && lsRes.value)
+    ? (Array.isArray(lsRes.value) ? lsRes.value : (lsRes.value?.data || lsRes.value?.content || []))
+    : [];
+
+  NotifDrawer.syncBellDot(items, lowStock);
+}
+
 export async function renderFooter() {
   const container = document.getElementById('app-footer-container');
   if (!container) return;
@@ -335,6 +394,8 @@ export async function renderAll(options = {}) {
   await Promise.all(tasks);
   translateHtml(document.body);
   updateAdminHeaderHeight();
+  // Sync notification bell dot without blocking render
+  _syncNotifBell().catch(() => {});
 }
 
 function updateAdminHeaderHeight() {

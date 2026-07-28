@@ -34,7 +34,7 @@ function statusBadge(status) {
 
 function fmtDate(d) {
   if (!d) return '—';
-  return new Date(d).toLocaleDateString('en-GB', { day:'numeric', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' });
+  return new Date(d).toLocaleString('en-GB', { day:'numeric', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:false });
 }
 
 // ── Tab content builders ───────────────────────────────────
@@ -144,7 +144,7 @@ function buildChatTab(sessions) {
 
 function _escH(s) { return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 function _escV(s) { return String(s==null?'':s).replace(/"/g,'&quot;'); }
-function _fmtDS(v) { return v ? new Date(v).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'}) : '—'; }
+function _fmtDS(v) { return v ? new Date(v).toLocaleString('en-GB',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}) : '—'; }
 
 function buildProfileTab() {
   const user = ApiService.getCurrentUser() || {};

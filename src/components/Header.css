@@ -316,57 +316,26 @@
   display: block;
 }
 
-/* ── Hover Dropdowns (Account + Notifications) ────────── */
-#header-user-dropdown,
-.notifications-panel {
+/* ── Hover Dropdowns (Account) ────────────────────────── */
+#header-user-dropdown {
   display: block !important;
   opacity: 0;
   pointer-events: none;
   transform: translateY(6px);
   transition: opacity 0.15s ease, transform 0.15s ease;
 }
-#header-user-dropdown.open,
-.notifications-panel.open {
+#header-user-dropdown.open {
   opacity: 1;
   pointer-events: all;
   transform: translateY(0);
 }
 
-/* ── Notifications Panel ──────────────────────────────── */
-.notifications-panel {
-  position: absolute;
-  top: calc(100% + 10px);
-  right: 0;
-  width: 360px;
-  max-height: 460px;
-  overflow-y: auto;
-  background: white;
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-xl);
-  border: 1px solid var(--border-dark);
-  z-index: 1000;
+/* ── Bell dot ─────────────────────────────────────────── */
+/* .nd-bell-dot lives in NotifDrawer.css — just ensure the
+   wrapper has the right positioning context */
+#notif-bell-wrapper {
+  position: relative;
 }
-.notif-panel-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 14px 16px;
-  border-bottom: 1px solid var(--border);
-  position: sticky;
-  top: 0;
-  background: white;
-}
-.notif-item {
-  padding: 14px 16px;
-  border-bottom: 1px solid var(--slate-100);
-  cursor: pointer;
-  transition: background 0.15s;
-}
-.notif-item.unread { background: #fff7f0; }
-.notif-item:hover { background: var(--slate-50); }
-.notif-item-title { font-weight: 600; font-size: 13.5px; color: var(--text-dark); }
-.notif-item-msg { font-size: 12.5px; color: var(--slate-500); margin-top: 3px; }
-.notif-item-time { font-size: 11px; color: var(--text-light); margin-top: 4px; }
 
 /* ── Search Dropdown ──────────────────────────────────── */
 .search-dropdown {

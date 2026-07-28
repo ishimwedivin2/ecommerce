@@ -35,7 +35,7 @@ function renderCard(p, hideCart = false) {
   const vatPrice = Math.round(Number(p.priceIncludingTax ?? price));
   const vatDiscounted = Math.round(Number(p.discountedPriceIncludingTax ?? baseDiscounted ?? vatPrice));
   const hasDiscount = !!baseDiscounted;
-  const taxBadge = Number(p.taxRate || 0) > 0 ? `<div style="color:#10b981;font-size:11px;font-weight:700;margin-top:4px;">✓ VAT Included</div>` : '';
+  const taxBadge = Number(p.taxRate || 0) > 0 ? `<div style="color:#94A3B8;font-size:11px;font-weight:600;margin-top:4px;">✓ VAT Included</div>` : '';
 
   return `
     <div class="sp-card" data-id="${p.id}">

@@ -132,7 +132,7 @@ export async function render(state) {
         <p class="detail-desc">${p.description}</p>
         <div class="detail-price-box">
           <span class="price-current" style="font-size:32px;">RWF ${Math.round(Number(p.discountedPriceIncludingTax ?? p.priceIncludingTax ?? p.price ?? 0)).toLocaleString('en-US')}</span>
-          ${Number(p.taxRate || 0) > 0 ? `<div style="color:#10b981;font-size:13px;font-weight:700;margin-top:6px;">✓ VAT Included</div>` : ''}
+          ${Number(p.taxRate || 0) > 0 ? `<div style="color:#94A3B8;font-size:13px;font-weight:600;margin-top:6px;">✓ VAT Included</div>` : ''}
         </div>
         <div class="detail-actions">
           <div class="quantity-control">

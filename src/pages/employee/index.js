@@ -20,7 +20,7 @@ const ORDER_STATUSES = ['PENDING','CONFIRMED','PROCESSING','SHIPPED','DELIVERED'
 function fmtMoney(n) { return 'RWF ' + Math.round(Number(n||0)).toLocaleString('en-US'); }
 function fmtDate(d) {
   if (!d) return '—';
-  return new Date(d).toLocaleDateString('en-GB', { day:'numeric', month:'short', year:'numeric' });
+  return new Date(d).toLocaleString('en-GB', { day:'numeric', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:false });
 }
 function statusBadge(s) {
   const map = { PENDING:'#f59e0b', CONFIRMED:'#3b82f6', PROCESSING:'#8b5cf6', SHIPPED:'#0ea5e9', DELIVERED:'#10b981', CANCELLED:'#ef4444' };
@@ -98,7 +98,7 @@ function buildReturnsTab(returns) {
 
 function escH(s) { return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 function escV(s) { return String(s==null?'':s).replace(/"/g,'&quot;'); }
-function fmtDateShortEmp(v) { return v ? new Date(v).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'}) : '—'; }
+function fmtDateShortEmp(v) { return v ? new Date(v).toLocaleString('en-GB',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}) : '—'; }
 
 function buildProfileTab() {
   const user = ApiService.getCurrentUser() || {};
