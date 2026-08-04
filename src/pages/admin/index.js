@@ -1983,15 +1983,10 @@ TAB.shipments = async () => {
 TAB.fulfillment = async () => {
   let orders = [];
   try {
-    // Fetch PAID and PROCESSING orders — same calls the orders page uses
-    const [paidRes, procRes] = await Promise.allSettled([
-      ApiService.getOrders({ page:0, size:100, status:'PAID' }),
-      ApiService.getOrders({ page:0, size:100, status:'PROCESSING' }),
-    ]);
-    const paid = paidRes.status === 'fulfilled' ? extractList(paidRes.value) : [];
-    const proc = procRes.status === 'fulfilled' ? extractList(procRes.value) : [];
-    const seen = new Set();
-    orders = [...paid, ...proc].filter(o => { if (seen.has(o.id)) return false; seen.add(o.id); return true; });
+    // Fetch all orders and exclude CANCELLED
+    const res = await ApiService.getOrders({ page:0, size:200 });
+    const all = extractList(res);
+    orders = all.filter(o => o.status !== 'CANCELLED');
   } catch(_){}
 
   const getName = o => o.customerName || o.userName
@@ -5697,8 +5692,8 @@ function bindTab(tab) {
               row.dataset.status = newStatus;
               const statusCell = row.querySelector('.ful-status-cell');
               if (statusCell) statusCell.innerHTML = statusBdg(newStatus);
-              // Remove row if no longer PAID/PROCESSING
-              if (newStatus !== 'PAID' && newStatus !== 'PROCESSING') {
+              // Remove row if status is updated to CANCELLED
+              if (newStatus === 'CANCELLED') {
                 row.remove();
                 const remaining = document.querySelectorAll('.ful-row').length;
                 const countEl = document.getElementById('ful-count');

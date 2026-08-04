@@ -48,28 +48,102 @@
 }
 
 .detail-info { display: flex; flex-direction: column; gap: 16px; }
-.detail-sku-rating { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
-.detail-title { font-size: 26px; font-weight: 800; color: var(--text-dark); line-height: 1.25; }
-.detail-desc { font-size: 14px; color: var(--text-medium); line-height: 1.65; }
 
-.detail-price-box { display: flex; align-items: baseline; gap: 10px; }
-.detail-actions { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.detail-sku-rating {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.product-sku {
+  font-size: 12px;
+  color: var(--text-light);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.detail-title {
+  margin: 0;
+  font-size: 26px;
+  font-weight: 800;
+  color: var(--text-dark);
+  line-height: 1.25;
+}
+.detail-desc {
+  font-size: 14px;
+  color: var(--text-medium);
+  line-height: 1.65;
+  margin: 0;
+}
 
-/* ── Product Rating Stars ─────────────────────────────── */
-.product-rating { color: #f59e0b; font-size: 14px; display: flex; align-items: center; gap: 5px; }
-.product-rating span { color: var(--text-light); font-size: 12px; }
+/* Product Rating Stars */
+.product-rating {
+  font-size: 13px;
+  color: #F59E0B;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.product-rating span {
+  color: var(--text-light);
+  font-size: 12px;
+}
+
+/* ── Detail Price Box ─────────────────────────────────── */
+.detail-price-box {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.detail-price-badge-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.price-current {
+  font-size: 28px;
+  font-weight: 900;
+  color: var(--text-dark);
+}
+.detail-sale-expiry {
+  font-size: 12px;
+  font-weight: 700;
+  color: #F59E0B;
+  background: #FEF3C7;
+  border: 1px solid #FDE68A;
+  border-radius: 6px;
+  padding: 3px 8px;
+}
+
+/* Shared with shop — redefine here so detail page has them */
+.sp-price-orig {
+  text-decoration: line-through;
+  color: var(--text-light);
+  font-weight: 500;
+}
+.sp-card-badge {
+  background: var(--danger, #EF4444);
+  color: white;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  border-radius: 6px;
+  padding: 3px 8px;
+}
 
 /* ── Quantity Control ─────────────────────────────────── */
 .quantity-control {
   display: flex;
-  align-items: center;
+  align-items: stretch;
   border: 1.5px solid var(--border);
   border-radius: var(--radius-md);
   overflow: hidden;
+  width: fit-content;
 }
 .quantity-btn {
-  width: 36px; height: 36px;
-  display: flex; align-items: center; justify-content: center;
+  width: 36px;
   background: var(--bg-main);
   border: none;
   font-size: 18px;
@@ -92,6 +166,29 @@
   outline: none;
   background: white;
 }
+
+/* ── Detail Actions Row ───────────────────────────────── */
+.detail-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.wishlist-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  border-radius: var(--radius-md);
+  background: white;
+  color: var(--text-light);
+  cursor: pointer;
+  transition: color 0.2s, border-color 0.2s;
+  flex-shrink: 0;
+}
+.wishlist-toggle.active,
+.wishlist-toggle:hover { color: #EF4444; border-color: #EF4444; }
 
 /* ── Detail Tabs ──────────────────────────────────────── */
 .detail-tabs-container {

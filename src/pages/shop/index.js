@@ -29,12 +29,10 @@ function renderStars(rating) {
 
 function renderCard(p, hideCart = false) {
   const img = getPrimaryImage(p);
-  const price = parseFloat(p.price) || 0;
-  const baseDiscounted = p.discountPercentage
-    ? price * (1 - parseFloat(p.discountPercentage) / 100) : null;
-  const vatPrice = Math.round(Number(p.priceIncludingTax ?? price));
-  const vatDiscounted = Math.round(Number(p.discountedPriceIncludingTax ?? baseDiscounted ?? vatPrice));
-  const hasDiscount = !!baseDiscounted;
+  const vatPrice      = Math.round(Number(p.priceIncludingTax ?? p.price ?? 0));
+  const vatDiscounted = Math.round(Number(p.discountedPriceIncludingTax ?? vatPrice));
+  // Only show discount UI if the server confirms a discount percentage AND the price is actually lower
+  const hasDiscount   = !!(p.discountPercentage && Number(p.discountPercentage) > 0 && vatDiscounted < vatPrice);
   const taxBadge = Number(p.taxRate || 0) > 0 ? `<div style="color:#94A3B8;font-size:11px;font-weight:600;margin-top:4px;">✓ VAT Included</div>` : '';
 
   return `

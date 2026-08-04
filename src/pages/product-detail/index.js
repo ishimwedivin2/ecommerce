@@ -131,8 +131,41 @@ export async function render(state) {
         <h1 class="detail-title">${p.name}</h1>
         <p class="detail-desc">${p.description}</p>
         <div class="detail-price-box">
-          <span class="price-current" style="font-size:32px;">RWF ${Math.round(Number(p.discountedPriceIncludingTax ?? p.priceIncludingTax ?? p.price ?? 0)).toLocaleString('en-US')}</span>
-          ${Number(p.taxRate || 0) > 0 ? `<div style="color:#94A3B8;font-size:13px;font-weight:600;margin-top:6px;">✓ VAT Included</div>` : ''}
+          ${(() => {
+            const originalPrice   = Math.round(Number(p.priceIncludingTax ?? p.price ?? 0));
+            const discountedPrice = Math.round(Number(p.discountedPriceIncludingTax ?? p.priceIncludingTax ?? p.price ?? 0));
+            const hasDiscount     = !!(p.discountPercentage && Number(p.discountPercentage) > 0 && discountedPrice < originalPrice);
+            const savings         = originalPrice - discountedPrice;
+
+            // Countdown chip: show if sale ends within 7 days
+            let expiryChip = '';
+            if (hasDiscount && p.discount?.endDate) {
+              const msLeft   = new Date(p.discount.endDate) - Date.now();
+              const daysLeft = Math.ceil(msLeft / 86400000);
+              if (daysLeft > 0 && daysLeft <= 7) {
+                expiryChip = `<div class="detail-sale-expiry">⏱ Sale ends in ${daysLeft} day${daysLeft === 1 ? '' : 's'}</div>`;
+              }
+            }
+
+            if (hasDiscount) {
+              return `
+                <div class="detail-price-badge-row">
+                  <span class="sp-card-badge" style="position:static;font-size:13px;padding:4px 10px;">-${p.discountPercentage}% OFF</span>
+                  ${expiryChip}
+                </div>
+                <div class="detail-price-row" style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;">
+                  <span class="price-current" style="font-size:32px;">RWF ${discountedPrice.toLocaleString('en-US')}</span>
+                  <span class="sp-price-orig" style="font-size:18px;">RWF ${originalPrice.toLocaleString('en-US')}</span>
+                </div>
+                <div style="color:#10B981;font-size:13px;font-weight:600;margin-top:4px;">You save RWF ${savings.toLocaleString('en-US')}</div>
+                ${Number(p.taxRate || 0) > 0 ? `<div style="color:#94A3B8;font-size:13px;font-weight:600;margin-top:4px;">✓ VAT Included</div>` : ''}
+              `;
+            }
+            return `
+              <span class="price-current" style="font-size:32px;">RWF ${discountedPrice.toLocaleString('en-US')}</span>
+              ${Number(p.taxRate || 0) > 0 ? `<div style="color:#94A3B8;font-size:13px;font-weight:600;margin-top:6px;">✓ VAT Included</div>` : ''}
+            `;
+          })()}
         </div>
         <div class="detail-actions">
           <div class="quantity-control">

@@ -711,8 +711,10 @@ export const ApiService = {
 
   // COUPONS / FINANCE
   finance: {
-    async validateCoupon(code) {
-      return await request(`/api/finance/coupons/validate?code=${encodeURIComponent(code)}`, { method: 'POST' });
+    async validateCoupon(code, cartTotal) {
+      const params = new URLSearchParams({ code: encodeURIComponent(code) });
+      if (cartTotal != null) params.append('cartTotal', cartTotal);
+      return await request(`/api/finance/coupons/validate?${params}`, { method: 'POST' });
     },
     async getAll() {
       return await request('/api/finance/coupons');
