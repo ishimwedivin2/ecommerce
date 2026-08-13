@@ -1057,6 +1057,9 @@ export const ApiService = {
   async assignTicket(id, agentId) {
     return await request(`/api/support/tickets/${id}/assign`, { method: 'PATCH', body: JSON.stringify({ agentId }) });
   },
+  async escalateTicket(id) {
+    return await request(`/api/support/tickets/${id}/escalate`, { method: 'PATCH' });
+  },
 
   // ── FAQ Admin ────────────────────────────────────────────
   async getAllFaqs() {
@@ -1172,6 +1175,9 @@ export const ApiService = {
   },
   async createDiscount(data) {
     return await request('/api/products/discounts', { method: 'POST', body: JSON.stringify(data) });
+  },
+  async updateDiscount(id, data) {
+    return await request(`/api/products/discounts/${id}`, { method: 'PUT', body: JSON.stringify(data) });
   },
   async toggleDiscount(id) {
     return await request(`/api/products/discounts/${id}/toggle`, { method: 'PATCH' });

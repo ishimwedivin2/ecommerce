@@ -17,17 +17,20 @@ let _activeTab = 'tickets';
 let _ticketCache = [];
 let _chatCache = [];
 let _customerCache = [];
+let _faqCache = [];
 
 // ── Icons ──────────────────────────────────────────────────
 const ICONS = {
   tickets:   `<svg class="dash-nav-icon" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>`,
   chat:      `<svg class="dash-nav-icon" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>`,
   customers: `<svg class="dash-nav-icon" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>`,
+  payments:  `<svg class="dash-nav-icon" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"></rect><line x1="1" y1="10" x2="23" y2="10"></line></svg>`,
+  faqs:      `<svg class="dash-nav-icon" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 016.5 17H20V4H6.5A2.5 2.5 0 004 6.5v13z"/><path d="M4 19.5A2.5 2.5 0 006.5 22H20v-5H6.5A2.5 2.5 0 014 19.5z"/></svg>`,
   profile:   `<svg class="dash-nav-icon" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>`,
 };
 
 function statusBadge(status) {
-  const map = { OPEN:'#3b82f6', PENDING:'#f59e0b', CLOSED:'#6b7280', RESOLVED:'#10b981', IN_PROGRESS:'#8b5cf6' };
+  const map = { OPEN:'#3b82f6', PENDING:'#f59e0b', CLOSED:'#6b7280', RESOLVED:'#10b981', IN_PROGRESS:'#8b5cf6', SUCCESSFUL:'#10b981', FAILED:'#ef4444' };
   const color = map[status] || '#6b7280';
   return `<span style="background:${color}22;color:${color};padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">${status}</span>`;
 }
@@ -75,7 +78,7 @@ function buildTicketRows(tickets) {
     const isOpen = t.status !== 'CLOSED' && t.status !== 'RESOLVED';
     return `
     <tr>
-      <td style="font-size:11px;color:#94a3b8;">#${(t.id||'').toString().slice(0,8)}</td>
+      <td style="font-size:11px;color:#94a3b8;">#${(t.id||'').toString()}</td>
       <td style="font-weight:500;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${t.title || t.subject || '—'}</td>
       <td>${t.customerName || t.customer?.firstName || '—'}</td>
       <td><span style="font-size:11px;font-weight:600;color:${t.priority==='HIGH'?'#ef4444':t.priority==='MEDIUM'?'#f59e0b':'#6b7280'}">${t.priority||'—'}</span></td>
@@ -84,6 +87,7 @@ function buildTicketRows(tickets) {
       <td style="display:flex;gap:4px;flex-wrap:wrap;">
         <button class="dash-action-btn" data-action="sa-view-ticket" data-id="${t.id}">View & Reply</button>
         ${isOpen && !isAssignedToMe ? `<button class="dash-action-btn" data-action="sa-assign-self" data-id="${t.id}">Assign to Me</button>` : ''}
+        ${isOpen && t.priority !== 'HIGH' ? `<button class="dash-action-btn" data-action="sa-escalate-ticket" data-id="${t.id}" style="background:#ef444422;color:#ef4444;border:1px solid #ef4444;">Escalate</button>` : ''}
         ${isOpen ? `<button class="dash-action-btn" data-action="sa-resolve-ticket" data-id="${t.id}" style="background:#10b98122;color:#10b981;border:1px solid #10b981;">Resolve</button>` : ''}
         ${isOpen ? `<button class="dash-action-btn danger" data-action="sa-close-ticket" data-id="${t.id}">Close</button>` : ''}
       </td>
@@ -145,6 +149,36 @@ function buildChatTab(sessions) {
 function _escH(s) { return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 function _escV(s) { return String(s==null?'':s).replace(/"/g,'&quot;'); }
 function _fmtDS(v) { return v ? new Date(v).toLocaleString('en-GB',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}) : '—'; }
+
+function buildPaymentsTab(payments) {
+  if (!payments || !payments.length) return `<div class="dash-empty">No payments found.</div>`;
+  return `
+    <div class="dash-section-header">
+      <h3>Payments</h3>
+    </div>
+    <div class="dash-table-wrap">
+      <table class="dash-table">
+        <thead><tr>
+          <th>Transaction ID</th><th>Order #</th><th>Provider</th><th>Reference</th><th>Amount</th><th>Status</th><th>Type</th><th>Date</th>
+        </tr></thead>
+        <tbody>
+          ${payments.map(p => `
+            <tr>
+              <td style="font-size:11px;color:#94a3b8;">#${(p.id||'').toString().slice(0,8)}</td>
+              <td>${p.order?.orderNumber || p.order?.id ? '#' + (p.order.orderNumber || p.order.id).toString() : '—'}</td>
+              <td style="font-weight:600;">${(p.provider || '').toLowerCase() === 'stripe' ? 'Bank Card' : (p.provider || '—')}</td>
+              <td style="font-size:11px;">${p.paymentReference || '—'}</td>
+              <td style="font-weight:700;">${p.amount ? Number(p.amount).toLocaleString('en-US') + ' RWF' : '—'}</td>
+              <td>${statusBadge(p.status)}</td>
+              <td><span style="font-size:11px;background:#f1f5f9;padding:2px 6px;border-radius:4px;">${p.transactionType || '—'}</span></td>
+              <td style="font-size:12px;color:#64748b;">${fmtDate(p.createdAt)}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
 
 function buildProfileTab() {
   const user = ApiService.getCurrentUser() || {};
@@ -414,6 +448,7 @@ async function openTicketModal(ticketId) {
         <div class="sa-modal-header-actions">
           <span class="sa-modal-status-badge" style="color:${statusColor}">${ticket.status || 'OPEN'}</span>
           ${ticket.priority ? `<span class="sa-modal-status-badge" style="color:${ticket.priority==='HIGH'||ticket.priority==='CRITICAL'?'#ef4444':'#f59e0b'}">${ticket.priority}</span>` : ''}
+          ${!isClosed && ticket.priority !== 'HIGH' ? `<button class="dash-action-btn danger" id="sa-ticket-escalate-btn" style="padding:4px 8px;font-size:11px;">Escalate to Admin</button>` : ''}
           <button class="sa-modal-close-btn" id="sa-ticket-modal-close" title="Close">
             <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
           </button>
@@ -466,7 +501,7 @@ async function openTicketModal(ticketId) {
         return `
           <div class="sa-ctx-order-row">
             <div>
-              <div style="font-size:12px;font-weight:700;">#${(o.orderNumber||o.id||'').toString().slice(0,8)}</div>
+              <div style="font-size:12px;font-weight:700;">#${(o.orderNumber||o.id||'').toString()}</div>
               <div style="font-size:11px;color:#94a3b8;">${fmtDate(o.createdAt)}</div>
             </div>
             <span class="sa-chat-status-badge" style="background:${statusColor}22;color:${statusColor};font-size:10px;">${o.status}</span>
@@ -477,15 +512,17 @@ async function openTicketModal(ticketId) {
         btn.addEventListener('click', async () => {
           const trackEl = document.getElementById('sa-ticket-tracking');
           if (trackEl) trackEl.innerHTML = '<span style="color:#94a3b8;font-size:12px;">Loading…</span>';
+          const orderId = btn.dataset.id;
+          const orderObj = orders.find(o => o.id == orderId) || {};
           const [trackRes, shipRes] = await Promise.all([
-            api(`/api/orders/${btn.dataset.id}/tracking`).catch(() => ({})),
-            api(`/api/shipments/order/${btn.dataset.id}`).catch(() => ({})),
+            api(`/api/orders/${orderId}/tracking`).catch(() => ({})),
+            api(`/api/shipments/order/${orderId}`).catch(() => ({})),
           ]);
           const t = trackRes.data || {};
           const s = shipRes.data || {};
           if (trackEl) trackEl.innerHTML = `
             <div class="sa-cp-tracking-card" style="margin-top:0;">
-              <div class="sa-cp-info-row"><span>Status</span><strong>${t.orderStatus||s.status||'—'}</strong></div>
+              <div class="sa-cp-info-row"><span>Status</span><strong>${t.orderStatus||s.status||orderObj.status||'—'}</strong></div>
               <div class="sa-cp-info-row"><span>Tracking #</span><strong>${_esc(s.trackingNumber||t.trackingNumber||'—')}</strong></div>
               <div class="sa-cp-info-row"><span>Carrier</span><strong>${_esc(s.carrier||'—')}</strong></div>
               <div class="sa-cp-info-row"><span>Est. Delivery</span><strong>${fmtDate(s.estimatedDeliveryDate||t.estimatedDelivery)}</strong></div>
@@ -495,6 +532,22 @@ async function openTicketModal(ticketId) {
     }).catch(() => {
       const el = document.getElementById('sa-ticket-orders-list');
       if (el) el.textContent = 'Could not load orders';
+    });
+  }
+
+  const escBtn = overlay.querySelector('#sa-ticket-escalate-btn');
+  if (escBtn) {
+    escBtn.addEventListener('click', async () => {
+      escBtn.disabled = true;
+      try {
+        await ApiService.escalateTicket(ticket.id);
+        document.body.removeChild(overlay);
+        loadTab('tickets');
+      } catch (e) {
+        console.error(e);
+        alert('Failed to escalate ticket');
+        escBtn.disabled = false;
+      }
     });
   }
 
@@ -721,11 +774,36 @@ function bindCustomerTabEvents() {
 
 function bindCustomerCardClicks() {
   document.querySelectorAll('[data-action="sa-view-customer"]').forEach(el => {
-    el.addEventListener('click', () => openCustomerPanel(el.dataset.id));
+    el.addEventListener('click', async e => {
+      e.stopPropagation();
+      // Remove any existing modal first, to be safe
+      document.querySelectorAll('.sa-chat-modal-backdrop').forEach(m => m.remove());
+      
+      const btn = el.tagName === 'BUTTON' ? el : el.querySelector('button');
+      const originalText = btn ? btn.innerHTML : '';
+      if (btn) {
+        btn.innerHTML = 'Loading...';
+        btn.disabled = true;
+      }
+      
+      await openCustomerPanel(el.dataset.id);
+      
+      if (btn) {
+        btn.innerHTML = originalText;
+        btn.disabled = false;
+      }
+    });
   });
 }
 
 async function openCustomerPanel(customerId) {
+  // Load all data in parallel before rendering to avoid "Loading..." state
+  const [summaryRes, ordersRes, returnsRes] = await Promise.all([
+    api(`/api/crm/customers/${customerId}/summary`).catch(() => ({})),
+    api(`/api/orders/customer/${customerId}`).catch(() => ({})),
+    api(`/api/returns`).catch(() => ({})),
+  ]);
+
   const overlay = document.createElement('div');
   overlay.className = 'sa-chat-modal-backdrop';
   overlay.innerHTML = `
@@ -777,13 +855,6 @@ async function openCustomerPanel(customerId) {
   document.getElementById('sa-cp-close').onclick = () => overlay.remove();
   overlay.onclick = e => { if (e.target === overlay) overlay.remove(); };
 
-  // Load all data in parallel
-  const [summaryRes, ordersRes, returnsRes] = await Promise.all([
-    api(`/api/crm/customers/${customerId}/summary`).catch(() => ({})),
-    api(`/api/orders/customer/${customerId}`).catch(() => ({})),
-    api(`/api/returns`).catch(() => ({})),
-  ]);
-
   const summary = summaryRes.data || {};
   const customer = summary.customer || _customerCache.find(c => c.id === customerId) || {};
   const orders = Array.isArray(ordersRes.data) ? ordersRes.data : [];
@@ -814,17 +885,23 @@ async function openCustomerPanel(customerId) {
       return `
         <div class="sa-cp-order-row" data-order-id="${o.id}">
           <div class="sa-cp-order-left">
-            <div class="sa-cp-order-num">#${(o.orderNumber || o.id || '').toString().slice(0,8)}</div>
+            <div class="sa-cp-order-num">#${(o.orderNumber || o.id || '').toString()}</div>
             <div class="sa-cp-order-date">${fmtDate(o.createdAt)}</div>
           </div>
           <div>
             <span class="sa-chat-status-badge" style="background:${statusColor}22;color:${statusColor}">${o.status || '—'}</span>
           </div>
           <div class="sa-cp-order-total">${total}</div>
-          <button class="sa-chat-btn" data-action="sa-track-order" data-id="${o.id}" title="View tracking">
-            <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/><path stroke-linecap="round" stroke-linejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
-            Track
-          </button>
+          <div style="display:flex;gap:4px;">
+            <button class="sa-chat-btn" data-action="sa-track-order" data-id="${o.id}" title="View tracking">
+              <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/><path stroke-linecap="round" stroke-linejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+              Track
+            </button>
+            <button class="sa-chat-btn" data-action="sa-download-receipt" data-id="${o.id}" title="Download Receipt">
+              <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              Receipt
+            </button>
+          </div>
         </div>`;
     }).join('');
 
@@ -834,9 +911,43 @@ async function openCustomerPanel(customerId) {
     createBtn.dataset.customerId = customerId;
     createBtn.addEventListener('click', () => openCreateReturnModal(orders, customerId, overlay));
 
-    // Track order clicks
-    overlay.querySelectorAll('[data-action="sa-track-order"]').forEach(btn => {
-      btn.addEventListener('click', () => loadOrderTracking(btn.dataset.id));
+    // Event delegation for Track and Receipt buttons
+    document.getElementById('sa-cp-orders').addEventListener('click', async e => {
+      const trackBtn = e.target.closest('[data-action="sa-track-order"]');
+      if (trackBtn) {
+        loadOrderTracking(trackBtn.dataset.id, orders);
+        return;
+      }
+      
+      const receiptBtn = e.target.closest('[data-action="sa-download-receipt"]');
+      if (receiptBtn) {
+        const originalHtml = receiptBtn.innerHTML;
+        receiptBtn.textContent = 'Downloading...';
+        receiptBtn.disabled = true;
+        try {
+          const res = await fetch(`${BASE}/api/receipts/orders/${receiptBtn.dataset.id}/pdf`, {
+            headers: { 'Authorization': 'Bearer ' + localStorage.getItem('luz_jwt') }
+          });
+          if (!res.ok) throw new Error('Failed to fetch receipt');
+          const blob = await res.blob();
+          const url = window.URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `Receipt_${receiptBtn.dataset.id}.pdf`;
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          window.URL.revokeObjectURL(url);
+        } catch(err) {
+          console.error('Receipt download error (or intercepted by IDM):', err);
+          if (err.message === 'Failed to fetch receipt') {
+            alert('Could not download receipt.');
+          }
+        } finally {
+          receiptBtn.innerHTML = originalHtml;
+          receiptBtn.disabled = false;
+        }
+      }
     });
   }
 
@@ -849,7 +960,7 @@ async function openCustomerPanel(customerId) {
       return `
         <div class="sa-cp-return-row">
           <div>
-            <div style="font-size:12px;font-weight:600;color:#1e293b;">Order #${(r.orderId || r.order?.id || '').toString().slice(0,8)}</div>
+            <div style="font-size:12px;font-weight:600;color:#1e293b;">Order #${(r.orderId || r.order?.id || '').toString()}</div>
             <div style="font-size:11px;color:#64748b;">${_esc(r.reason || '—')}</div>
           </div>
           <span class="sa-chat-status-badge" style="background:${statusColor}22;color:${statusColor}">${r.status}</span>
@@ -858,10 +969,11 @@ async function openCustomerPanel(customerId) {
   }
 }
 
-async function loadOrderTracking(orderId) {
+async function loadOrderTracking(orderId, orders = []) {
   const trackingEl = document.getElementById('sa-cp-tracking');
   if (!trackingEl) return;
   trackingEl.innerHTML = `<p style="color:#94a3b8;font-size:12px;">Loading…</p>`;
+  const selectedOrder = orders.find(o => o.id == orderId) || {};
   try {
     const [trackRes, shipRes] = await Promise.all([
       api(`/api/orders/${orderId}/tracking`).catch(() => ({})),
@@ -917,7 +1029,7 @@ function openCreateReturnModal(orders, customerId, parentOverlay) {
           <select class="sa-cp-select" id="sa-crm-order-select">
             <option value="">— choose order —</option>
             ${orders.filter(o => o.status !== 'CANCELLED').map(o =>
-              `<option value="${o.id}">#${(o.orderNumber || o.id).toString().slice(0,8)} — ${o.status} — RWF ${o.totalAmount ? Number(o.totalAmount).toLocaleString('en-US') : '—'}</option>`
+              `<option value="${o.id}">#${(o.orderNumber || o.id).toString()} — ${o.status} — RWF ${o.totalAmount ? Number(o.totalAmount).toLocaleString('en-US') : '—'}</option>`
             ).join('')}
           </select>
         </div>
@@ -975,6 +1087,8 @@ export async function render(state) {
           <button class="dash-nav-item ${_activeTab==='tickets'?'active':''}" data-sa-tab="tickets">${ICONS.tickets}<span class="dash-nav-label">Tickets</span></button>
           <button class="dash-nav-item ${_activeTab==='chat'?'active':''}" data-sa-tab="chat">${ICONS.chat}<span class="dash-nav-label">Live Chat</span></button>
           <button class="dash-nav-item ${_activeTab==='customers'?'active':''}" data-sa-tab="customers">${ICONS.customers}<span class="dash-nav-label">Customers</span></button>
+          <button class="dash-nav-item ${_activeTab==='payments'?'active':''}" data-sa-tab="payments">${ICONS.payments}<span class="dash-nav-label">Payments</span></button>
+          <button class="dash-nav-item ${_activeTab==='faqs'?'active':''}" data-sa-tab="faqs">${ICONS.faqs}<span class="dash-nav-label">Knowledge Base</span></button>
           <button class="dash-nav-item ${_activeTab==='profile'?'active':''}" data-sa-tab="profile">${ICONS.profile}<span class="dash-nav-label">My Profile</span></button>
         </div>
         <div style="margin-top:auto;padding:12px 14px;">
@@ -1038,6 +1152,15 @@ async function loadTab(tab) {
       _customerCache = (res.data || []);
       body.innerHTML = buildCustomersTab(_customerCache);
       bindCustomerTabEvents();
+    } else if (tab === 'payments') {
+      const res = await api('/api/payments/reconciliation/transactions?page=0&size=100');
+      const payments = res.data?.content || res.data || [];
+      body.innerHTML = buildPaymentsTab(payments);
+    } else if (tab === 'faqs') {
+      const res = await ApiService.getAllFaqs();
+      _faqCache = (res.data || []);
+      body.innerHTML = buildFaqsTab(_faqCache);
+      bindFaqTabEvents();
     } else if (tab === 'profile') {
       body.innerHTML = buildProfileTab();
       bindSaProfileEvents();
@@ -1087,6 +1210,20 @@ function bindTicketRowActions() {
         body: JSON.stringify({ agentId: me.id })
       }).catch(console.error);
       loadTab('tickets');
+    });
+  });
+
+  document.querySelectorAll('[data-action="sa-escalate-ticket"]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      try {
+        await ApiService.escalateTicket(btn.dataset.id);
+        loadTab('tickets');
+      } catch(e) {
+        console.error(e);
+        alert('Failed to escalate ticket');
+        btn.disabled = false;
+      }
     });
   });
 
@@ -1180,6 +1317,204 @@ function bindChatTabEvents() {
       }
     });
   });
+}
+
+function buildFaqsTab(faqs) {
+  return `
+    <div class="dash-section-header">
+      <h3>Knowledge Base (FAQs)</h3>
+      <div style="display:flex;gap:8px;">
+        <input id="sa-faq-search" class="dash-search-input" placeholder="Search FAQs..." style="width:240px;">
+        <button class="dash-btn dash-btn-primary" id="sa-create-faq-btn">
+          <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" style="margin-right:6px;"><path d="M12 5v14M5 12h14"/></svg>
+          Create FAQ
+        </button>
+      </div>
+    </div>
+    <div class="dash-table-wrap">
+      <table class="dash-table">
+        <thead><tr>
+          <th style="width:50px;">Order</th>
+          <th>Question</th>
+          <th>Category</th>
+          <th>Status</th>
+          <th style="text-align:right;">Actions</th>
+        </tr></thead>
+        <tbody id="sa-faqs-tbody">
+          ${buildFaqRows(faqs)}
+        </tbody>
+      </table>
+    </div>
+
+    <!-- FAQ Modal (Hidden) -->
+    <div id="sa-faq-modal" class="rp-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:9999;align-items:center;justify-content:center;">
+      <div class="rp-modal-content" style="background:#fff;border-radius:12px;width:100%;max-width:500px;box-shadow:0 10px 25px rgba(0,0,0,0.1);display:flex;flex-direction:column;max-height:90vh;">
+        <div style="padding:20px 24px;border-bottom:1px solid #e2e8f0;display:flex;justify-content:space-between;align-items:center;">
+          <h3 id="sa-faq-modal-title" style="margin:0;font-size:18px;font-weight:600;color:#0f172a;">Create FAQ</h3>
+          <button id="sa-faq-modal-close" style="background:none;border:none;color:#64748b;cursor:pointer;padding:4px;">
+            <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+          </button>
+        </div>
+        <div style="padding:24px;overflow-y:auto;display:flex;flex-direction:column;gap:16px;">
+          <input type="hidden" id="sa-faq-id">
+          <div>
+            <label style="display:block;font-size:13px;font-weight:500;color:#334155;margin-bottom:6px;">Question <span style="color:#ef4444;">*</span></label>
+            <input id="sa-faq-q" type="text" class="dash-input" style="width:100%;padding:8px 12px;border:1px solid #cbd5e1;border-radius:6px;font-family:inherit;">
+          </div>
+          <div>
+            <label style="display:block;font-size:13px;font-weight:500;color:#334155;margin-bottom:6px;">Answer <span style="color:#ef4444;">*</span></label>
+            <textarea id="sa-faq-a" rows="4" class="dash-input" style="width:100%;padding:8px 12px;border:1px solid #cbd5e1;border-radius:6px;font-family:inherit;resize:vertical;"></textarea>
+          </div>
+          <div>
+            <label style="display:block;font-size:13px;font-weight:500;color:#334155;margin-bottom:6px;">Category</label>
+            <input id="sa-faq-cat" type="text" class="dash-input" placeholder="e.g. Shipping, Account..." style="width:100%;padding:8px 12px;border:1px solid #cbd5e1;border-radius:6px;font-family:inherit;">
+          </div>
+          <div style="display:flex;gap:16px;">
+            <div style="flex:1;">
+              <label style="display:block;font-size:13px;font-weight:500;color:#334155;margin-bottom:6px;">Order Index</label>
+              <input id="sa-faq-order" type="number" class="dash-input" value="0" style="width:100%;padding:8px 12px;border:1px solid #cbd5e1;border-radius:6px;font-family:inherit;">
+            </div>
+            <div style="flex:1;display:flex;align-items:center;margin-top:24px;">
+              <label style="display:flex;align-items:center;gap:8px;font-size:14px;color:#334155;cursor:pointer;">
+                <input id="sa-faq-pub" type="checkbox" checked style="width:16px;height:16px;cursor:pointer;">
+                Published
+              </label>
+            </div>
+          </div>
+        </div>
+        <div style="padding:16px 24px;border-top:1px solid #e2e8f0;background:#f8fafc;display:flex;justify-content:flex-end;gap:12px;border-radius:0 0 12px 12px;">
+          <button id="sa-faq-modal-cancel" class="dash-btn" style="background:#fff;border:1px solid #cbd5e1;color:#475569;font-weight:500;">Cancel</button>
+          <button id="sa-faq-modal-save" class="dash-btn dash-btn-primary" style="font-weight:500;">Save FAQ</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function buildFaqRows(faqs) {
+  if (!faqs || faqs.length === 0) return `<tr><td colspan="5" style="text-align:center;padding:24px;color:#64748b;">No FAQs found.</td></tr>`;
+  return faqs.sort((a,b) => (a.orderIndex||0) - (b.orderIndex||0)).map(f => `
+    <tr>
+      <td style="color:#64748b;font-weight:500;">${f.orderIndex || 0}</td>
+      <td style="font-weight:500;color:#0f172a;">${_escH(f.question)}</td>
+      <td><span style="background:#f1f5f9;padding:2px 8px;border-radius:12px;font-size:12px;color:#475569;">${_escH(f.category || 'General')}</span></td>
+      <td>
+        ${f.published 
+          ? `<span style="color:#10b981;background:#dcfce7;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600;">PUBLISHED</span>` 
+          : `<span style="color:#64748b;background:#f1f5f9;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600;">DRAFT</span>`}
+      </td>
+      <td style="text-align:right;">
+        <button class="dash-action-btn sa-faq-edit-btn" data-id="${f.id}" style="margin-right:4px;">Edit</button>
+        <button class="dash-action-btn danger sa-faq-del-btn" data-id="${f.id}">Delete</button>
+      </td>
+    </tr>
+  `).join('');
+}
+
+function bindFaqTabEvents() {
+  const modal = document.getElementById('sa-faq-modal');
+  const closeBtn = document.getElementById('sa-faq-modal-close');
+  const cancelBtn = document.getElementById('sa-faq-modal-cancel');
+  const saveBtn = document.getElementById('sa-faq-modal-save');
+  const searchInput = document.getElementById('sa-faq-search');
+
+  function bindFaqRowActions() {
+    document.querySelectorAll('.sa-faq-edit-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const faq = _faqCache.find(f => f.id === btn.dataset.id);
+        if (faq) openModal(faq);
+      });
+    });
+
+    document.querySelectorAll('.sa-faq-del-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        if (btn.dataset.confirming === 'true') {
+          btn.dataset.confirming = 'false';
+          clearTimeout(btn._confirmTimer);
+          try {
+            await ApiService.deleteFaq(btn.dataset.id);
+            loadTab('faqs');
+          } catch(e) {
+            alert('Failed to delete: ' + e.message);
+          }
+        } else {
+          btn.dataset.confirming = 'true';
+          btn.textContent = 'Sure?';
+          btn.style.background = '#fef2f2';
+          btn.style.borderColor = '#ef4444';
+          btn._confirmTimer = setTimeout(() => {
+            btn.dataset.confirming = 'false';
+            btn.textContent = 'Delete';
+            btn.style.background = '';
+            btn.style.borderColor = '';
+          }, 3000);
+        }
+      });
+    });
+  }
+
+  searchInput?.addEventListener('input', (e) => {
+    const q = e.target.value.toLowerCase();
+    const filtered = _faqCache.filter(f => 
+      (f.question || '').toLowerCase().includes(q) || 
+      (f.answer || '').toLowerCase().includes(q) ||
+      (f.category || '').toLowerCase().includes(q)
+    );
+    document.getElementById('sa-faqs-tbody').innerHTML = buildFaqRows(filtered);
+    bindFaqRowActions();
+  });
+
+  const openModal = (faq = null) => {
+    document.getElementById('sa-faq-id').value = faq ? faq.id : '';
+    document.getElementById('sa-faq-q').value = faq ? faq.question || '' : '';
+    document.getElementById('sa-faq-a').value = faq ? faq.answer || '' : '';
+    document.getElementById('sa-faq-cat').value = faq ? faq.category || '' : '';
+    document.getElementById('sa-faq-order').value = faq ? faq.orderIndex || 0 : 0;
+    document.getElementById('sa-faq-pub').checked = faq ? faq.published : true;
+    document.getElementById('sa-faq-modal-title').textContent = faq ? 'Edit FAQ' : 'Create FAQ';
+    modal.style.display = 'flex';
+  };
+
+  const closeModal = () => { modal.style.display = 'none'; };
+  closeBtn?.addEventListener('click', closeModal);
+  cancelBtn?.addEventListener('click', closeModal);
+
+  document.getElementById('sa-create-faq-btn')?.addEventListener('click', () => openModal(null));
+
+  saveBtn?.addEventListener('click', async () => {
+    const id = document.getElementById('sa-faq-id').value;
+    const data = {
+      question: document.getElementById('sa-faq-q').value,
+      answer: document.getElementById('sa-faq-a').value,
+      category: document.getElementById('sa-faq-cat').value,
+      orderIndex: parseInt(document.getElementById('sa-faq-order').value) || 0,
+      published: document.getElementById('sa-faq-pub').checked
+    };
+
+    if (!data.question || !data.answer) {
+      alert("Question and Answer are required.");
+      return;
+    }
+
+    try {
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'Saving...';
+      if (id) {
+        await ApiService.updateFaq(id, data);
+      } else {
+        await ApiService.createFaq(data);
+      }
+      closeModal();
+      loadTab('faqs'); // Reload
+    } catch (e) {
+      alert("Failed to save FAQ: " + e.message);
+    } finally {
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Save FAQ';
+    }
+  });
+
+  bindFaqRowActions();
 }
 
 export async function bindEvents(state, helpers) {

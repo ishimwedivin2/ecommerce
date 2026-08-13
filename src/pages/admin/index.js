@@ -96,7 +96,6 @@ function navItems() {
     { id:'procurement',  label:'Procurement',  icon:I.truck },
     { id:'returns',      label:'Returns',     icon:I.rotate,  badge:'returns' },
     { id:'fulfillment',  label:'Fulfillment', icon:I.pkg },
-    { id:'shipments',    label:'Shipments',   icon:I.truck },
     { id:'locations',    label:'Locations',   icon:I.truck },
     { section: 'Sales' },
     { id:'pos',      label:'Point of Sale', icon:I.pos },
@@ -413,6 +412,44 @@ function dateInputValue(v) {
 
 function endOfDayDateTime(v) {
   return v ? `${String(v).slice(0, 10)}T23:59:59` : null;
+}
+
+function normalizeCoupon(c = {}) {
+  return {
+    ...c,
+    discountType: c.discountType ?? c.type,
+    discountValue: c.discountValue ?? c.amount,
+    minimumPurchase: c.minimumPurchase ?? c.minimumOrderAmount,
+    usageCount: c.usageCount ?? c.currentUsage,
+  };
+}
+
+function isDiscountCurrentlyApplicable(d = {}) {
+  if (d.active === false) return false;
+  const now = Date.now();
+  if (d.startDate && new Date(d.startDate).getTime() > now) return false;
+  if (d.endDate && new Date(d.endDate).getTime() < now) return false;
+  return true;
+}
+
+function discountAvailabilityReason(d = {}) {
+  if (d.active === false) return 'inactive';
+  const now = Date.now();
+  if (d.startDate && new Date(d.startDate).getTime() > now) return 'starts ' + fmt.date(d.startDate);
+  if (d.endDate && new Date(d.endDate).getTime() < now) return 'expired ' + fmt.date(d.endDate);
+  return '';
+}
+
+function buildDiscountOptions(selectedId = '') {
+  const discounts = _discountCache || [];
+  if (!discounts.length) return '<option value="" disabled>No discounts found</option>';
+  return discounts.map(d => {
+    const unavailable = discountAvailabilityReason(d);
+    const selected = selectedId === d.id;
+    const disabled = unavailable && !selected;
+    const label = `${esc(d.name)} (${Number(d.discountPercentage || 0)}%)${unavailable ? ' - ' + unavailable : ''}`;
+    return `<option value="${d.id}" ${selected?'selected':''} ${disabled?'disabled':''}>${label}</option>`;
+  }).join('');
 }
 
 function statusBdg(status) {
@@ -1110,7 +1147,7 @@ TAB.orders = async () => {
       <td>
         <button class="btn-d btn-d-sec btn-d-sm btn-d-ico" data-action="view-order" data-id="${o.id||o.orderId}" title="View Details">${I.eye}</button>
         ${!supportView ? `<button class="btn-d btn-d-sec btn-d-sm btn-d-ico" data-action="delivery-note" data-id="${o.id||o.orderId}" title="Delivery Note">${I.download}</button>` : ''}
-        ${!supportView ? `<button class="btn-d btn-d-sec btn-d-sm btn-d-ico" data-action="edit-order" data-id="${o.id||o.orderId}" title="Update Status">${I.edit}</button>` : ''}
+        <button class="btn-d btn-d-sec btn-d-sm btn-d-ico" data-action="edit-order" data-id="${o.id||o.orderId}" title="Update Status">${I.edit}</button>
       </td>
     </tr>`).join('') :
     `<tr><td colspan="8"><div class="d-empty"><div class="d-empty-ico">📦</div><div class="d-empty-ttl">No orders yet</div></div></td></tr>`;
@@ -1144,7 +1181,7 @@ TAB.orders = async () => {
   const roleBanner = adminView
     ? `<div class="ord-role-banner ord-role-admin"><span class="ord-role-ico">👑</span><span><b>Admin View</b> — Full access: payment details, revenue data, status edits, export</span></div>`
     : supportView
-    ? `<div class="ord-role-banner ord-role-emp"><span class="ord-role-ico">🎧</span><span><b>Support View</b> — Read-only order history. Contact your manager to change order statuses.</span></div>`
+    ? `<div class="ord-role-banner ord-role-emp"><span class="ord-role-ico">🎧</span><span><b>Support View</b> — Customer contact info, order history, and operational status updates.</span></div>`
     : `<div class="ord-role-banner ord-role-emp"><span class="ord-role-ico">👤</span><span><b>Employee View</b> — Customer contact info and order status. Revenue analytics are admin-only.</span></div>`;
 
   return `
@@ -1218,6 +1255,7 @@ TAB.orders = async () => {
 TAB.payments = async () => {
   const adminView   = isAdmin();
   const supportView = isSupportAgent();
+  const detailsView = adminView || supportView;
   let txns = [], summary = {};
   try {
     const [txRes, sumRes] = await Promise.all([
@@ -1284,7 +1322,7 @@ TAB.payments = async () => {
     const custName = (order.customer?.firstName||'') + ' ' + (order.customer?.lastName||'');
     const provider = (t.provider||'—').replace(/_/g,' ');
 
-    if (adminView) {
+    if (detailsView) {
       return `<tr>
         <td><span class="td-m">#${orderNum}</span></td>
         <td class="td-b">${esc(custName.trim()||'Customer')}</td>
@@ -1294,11 +1332,11 @@ TAB.payments = async () => {
         <td>${txnStatusBdg(t.status)}</td>
         <td>${reconBdg(t.reconciliationStatus)}</td>
         <td class="td-sm">${fmt.date(t.createdAt)}</td>
-        <td>
+        ${adminView ? `<td>
           <button class="btn-d btn-d-sec btn-d-sm" data-action="reconcile-txn" data-id="${t.id}" title="Reconcile">
             ${I.refresh} Reconcile
           </button>
-        </td>
+        </td>` : ''}
       </tr>`;
     } else {
       /* Employee: no reference, no reconcile action */
@@ -1312,7 +1350,7 @@ TAB.payments = async () => {
       </tr>`;
     }
   }).join('') :
-  `<tr><td colspan="${adminView?9:6}"><div class="d-empty">
+  `<tr><td colspan="${adminView?9:(detailsView?8:6)}"><div class="d-empty">
     <div class="d-empty-ico">💳</div>
     <div class="d-empty-ttl">No payment transactions yet</div>
     <div class="d-empty-txt">Transactions are created automatically when customers pay.</div>
@@ -1321,11 +1359,13 @@ TAB.payments = async () => {
   const roleBanner = adminView
     ? `<div class="ord-role-banner ord-role-admin"><span class="ord-role-ico">👑</span><span><b>Admin View</b> — Payment references, reconciliation controls, and revenue totals visible.</span></div>`
     : supportView
-    ? `<div class="ord-role-banner ord-role-emp"><span class="ord-role-ico">🎧</span><span><b>Support View</b> — Read-only payment history. Reconciliation is admin/employee only.</span></div>`
+    ? `<div class="ord-role-banner ord-role-emp"><span class="ord-role-ico">🎧</span><span><b>Support View</b> — Payment references and statuses visible. Reconciliation is admin/employee only.</span></div>`
     : `<div class="ord-role-banner ord-role-emp"><span class="ord-role-ico">👤</span><span><b>Employee View</b> — Payment gateway references and reconciliation tools are admin-only.</span></div>`;
 
   const thead = adminView
     ? `<tr><th>Order #</th><th>Customer</th><th>Amount</th><th>Provider</th><th>Reference</th><th>Status</th><th>Reconciliation</th><th>Date</th><th>Actions</th></tr>`
+    : detailsView
+    ? `<tr><th>Order #</th><th>Customer</th><th>Amount</th><th>Provider</th><th>Reference</th><th>Status</th><th>Reconciliation</th><th>Date</th></tr>`
     : `<tr><th>Order #</th><th>Customer</th><th>Amount</th><th>Provider</th><th>Status</th><th>Date</th></tr>`;
 
   return `
@@ -1347,7 +1387,7 @@ TAB.payments = async () => {
           <option value="">All Statuses</option>
           <option>PAID</option><option>INITIATED</option><option>FAILED</option><option>REFUNDED</option>
         </select>
-        ${adminView ? `<select class="dash-sel" id="pay-recon-filter">
+        ${detailsView ? `<select class="dash-sel" id="pay-recon-filter">
           <option value="">All Reconciliation</option>
           <option>MATCHED</option><option>MISMATCH</option><option>PENDING</option>
         </select>` : ''}
@@ -1464,7 +1504,7 @@ TAB.products = async () => {
       <div class="f-field"><label class="f-lbl">Select Discount</label>
         <select class="dash-sel" id="da-discount-sel" style="width:100%">
           <option value="">— No discount —</option>
-          ${_discountCache.filter(d=>d.active).map(d=>`<option value="${d.id}">${escAttr(d.name)} (${d.discountPercentage}%)</option>`).join('')}
+          ${buildDiscountOptions()}
         </select>
       </div>
       <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
@@ -2058,7 +2098,7 @@ TAB.coupons = async () => {
   let coupons = []; let total = 0;
   try {
     const res = await ApiService.getCoupons({ page:0, size:20 });
-    coupons = extractList(res);
+    coupons = extractList(res).map(normalizeCoupon);
     total   = extractTotal(res, coupons);
     _couponCache = coupons;
   } catch(_){}
@@ -3665,6 +3705,13 @@ function drawerBody(type, data) {
     </div>
     <div class="f-field"><label class="f-lbl">Tax Rule</label><select class="f-sel" id="d-prod-tax"><option value="">No VAT / Tax exempt</option></select></div>
     <div class="f-field">
+      <label class="f-lbl">Discount</label>
+      <select class="f-sel" id="d-prod-discount">
+        <option value="">No discount</option>
+        ${buildDiscountOptions(data?.discountId || '')}
+      </select>
+    </div>
+    <div class="f-field">
       <label class="f-lbl">Product Image</label>
       <div id="d-prod-img-wrap" style="border:2px dashed #e2e8f0;border-radius:10px;padding:16px;text-align:center;cursor:pointer;background:#fafafa;transition:border-color .2s;" onclick="document.getElementById('d-prod-img-file').click()">
         ${data?.imageUrl ? `<img id="d-prod-img-preview" src="${data.imageUrl.startsWith('/uploads/') ? 'http://localhost:8080' + data.imageUrl : data.imageUrl}" style="max-height:120px;max-width:100%;border-radius:6px;display:block;margin:0 auto 8px;">` : `<div id="d-prod-img-preview" style="font-size:32px;margin-bottom:6px;">📷</div>`}
@@ -4128,6 +4175,7 @@ async function saveDrawer(type, data) {
       const file       = fileInput?.files?.[0];
       const categoryId = document.getElementById('d-prod-cat')?.value || null;
       const taxRateId  = document.getElementById('d-prod-tax')?.value || null;
+      const discountId = document.getElementById('d-prod-discount')?.value || null;
       const status     = document.getElementById('d-prod-status')?.value || 'ACTIVE';
       const name       = document.getElementById('d-prod-name')?.value || '';
       const sku        = document.getElementById('d-prod-sku')?.value || '';
@@ -4143,7 +4191,8 @@ async function saveDrawer(type, data) {
         imageUrl: document.getElementById('d-prod-img-url')?.value,
         status, featured,
         category: categoryId ? { id: categoryId } : null,
-        taxRate: taxRateId ? { id: taxRateId } : null
+        taxRate: taxRateId ? { id: taxRateId } : null,
+        discount: discountId ? { id: discountId } : null
       };
 
       if (data) {
@@ -4180,6 +4229,8 @@ async function saveDrawer(type, data) {
             body: fd
           }).then(r => r.json());
           if (!res.success) throw new Error(res.message || 'Failed to create product');
+          const createdId = res.data?.id || res.id;
+          if (discountId && createdId) await ApiService.applyProductDiscount(createdId, discountId);
         } else {
           await ApiService.createProduct(payload);
         }
@@ -4196,7 +4247,11 @@ async function saveDrawer(type, data) {
       if (!payload.name) throw new Error('Name is required');
       if (!payload.description) throw new Error('Description is required');
       if (!payload.discountPercentage || payload.discountPercentage <= 0) throw new Error('Enter a valid percentage');
-      await ApiService.createDiscount(payload);
+      if (data?.id) {
+        await ApiService.updateDiscount(data.id, payload);
+      } else {
+        await ApiService.createDiscount(payload);
+      }
     } else if (type === 'coupon') {
       const payload = {
         code:            (document.getElementById('d-coup-code')?.value||'').toUpperCase(),
@@ -4607,6 +4662,9 @@ function bindTab(tab) {
       if (!modal) return;
       document.getElementById('da-product-id').value = id;
       document.getElementById('da-product-name').textContent = el.dataset.name || id;
+      const product = _productCache.find(p => p.id === id);
+      const discountSelect = document.getElementById('da-discount-sel');
+      if (discountSelect) discountSelect.value = product?.discountId || '';
       modal.style.display = 'flex';
       document.getElementById('btn-da-cancel')?.addEventListener('click', () => { modal.style.display = 'none'; }, { once: true });
       document.getElementById('btn-da-save')?.addEventListener('click', async () => {
@@ -4692,9 +4750,7 @@ function bindTab(tab) {
     else if (action === 'edit-coupon') {
       try {
         const raw = await ApiService.getCoupon(id).then(r => r.data || r);
-        // Map entity field names to the frontend form field names
-        const c = { ...raw, discountType: raw.type, discountValue: raw.amount, minimumPurchase: raw.minimumOrderAmount };
-        openDrawer('coupon', c);
+        openDrawer('coupon', normalizeCoupon(raw));
       } catch(_) {
         const c = _couponCache.find(x => x.id === id) || { id };
         openDrawer('coupon', c);
@@ -5863,6 +5919,7 @@ function bindTab(tab) {
       });
 
       const adminView = isAdmin();
+      const detailsView = adminView || isSupportAgent();
       const reconBdg  = s => {
         const map = { MATCHED:'bdg-green', MISMATCH:'bdg-red', PENDING:'bdg-yellow', UNRECONCILED:'bdg-gray' };
         return `<span class="bdg ${map[s]||'bdg-gray'}">${s||'—'}</span>`;
@@ -5877,7 +5934,7 @@ function bindTab(tab) {
         const orderNum = o.orderNumber||(o.id||'').toString().slice(-8)||'—';
         const custName = ((o.customer?.firstName||'')+' '+(o.customer?.lastName||'')).trim()||'Customer';
         const provider = (t.provider||'—').replace(/_/g,' ');
-        if (adminView) return `<tr>
+        if (detailsView) return `<tr>
           <td><span class="td-m">#${orderNum}</span></td>
           <td class="td-b">${esc(custName)}</td>
           <td>${fmt.money(t.amount||0)}</td>
@@ -5886,7 +5943,7 @@ function bindTab(tab) {
           <td>${txnStatusBdg(t.status)}</td>
           <td>${reconBdg(t.reconciliationStatus)}</td>
           <td class="td-sm">${fmt.date(t.createdAt)}</td>
-          <td><button class="btn-d btn-d-sec btn-d-sm" data-action="reconcile-txn" data-id="${t.id}">${I.refresh} Reconcile</button></td>
+          ${adminView ? `<td><button class="btn-d btn-d-sec btn-d-sm" data-action="reconcile-txn" data-id="${t.id}">${I.refresh} Reconcile</button></td>` : ''}
         </tr>`;
         return `<tr>
           <td><span class="td-m">#${orderNum}</span></td>
@@ -5897,7 +5954,7 @@ function bindTab(tab) {
           <td class="td-sm">${fmt.date(t.createdAt)}</td>
         </tr>`;
       }).join('') :
-      `<tr><td colspan="${adminView?9:6}"><div class="d-empty"><div class="d-empty-ico">💳</div><div class="d-empty-ttl">No matching transactions</div></div></td></tr>`;
+      `<tr><td colspan="${adminView?9:(detailsView?8:6)}"><div class="d-empty"><div class="d-empty-ico">💳</div><div class="d-empty-ttl">No matching transactions</div></div></td></tr>`;
       tbody.innerHTML = rows;
     }
 
