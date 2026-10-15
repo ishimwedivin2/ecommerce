@@ -2975,6 +2975,7 @@ TAB.reports = async () => {
     { id:'finance-tax',   title:'Tax Records Export',    desc:'Tax collected, rates and filing status',             icon:'🧾', formats:['CSV'],    dateRange: true  },
     { id:'inventory',     title:'Inventory Report',      desc:'Current stock levels, thresholds and status',        icon:'📦', formats:['Excel'],  dateRange: false },
     { id:'orders',        title:'Orders Report',         desc:'Full order history with customer and payment info',  icon:'🛒', formats:['Excel'],  dateRange: true  },
+    ...(isAdmin() ? [{ id:'users', title:'User Report', desc:'All registered users with role, status and last login', icon:'👥', formats:['PDF'], dateRange: true }] : []),
   ];
 
   return `
@@ -3052,6 +3053,7 @@ TAB.users = async () => {
     <div><div class="dash-page-title">User Management</div><div class="dash-page-sub">${fmt.num(total)} registered users</div></div>
     <div class="dash-page-acts">
       <button class="btn-d btn-d-sec" id="btn-export-users">${I.download} Export CSV</button>
+      <button class="btn-d btn-d-sec" id="btn-pdf-users">${I.download} PDF Report</button>
       <button class="btn-d btn-d-primary" id="btn-add-user">${I.plus} Add User</button>
     </div>
   </div>
@@ -5530,6 +5532,23 @@ function bindTab(tab) {
   if (tab === 'users') {
     document.getElementById('btn-add-user')?.addEventListener('click', () => openDrawer('user', null));
 
+    // PDF Report
+    document.getElementById('btn-pdf-users')?.addEventListener('click', async (e) => {
+      const btn = e.currentTarget;
+      btn.disabled = true;
+      btn.textContent = 'Preparing…';
+      showToast('Generating User Report PDF…');
+      try {
+        await ApiService.downloadUserReport({});
+        showToast('Download started', 'success');
+      } catch(err) {
+        showToast(err.message || 'Download failed', 'error');
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = `${I.download} PDF Report`;
+      }
+    });
+
     // Export CSV
     document.getElementById('btn-export-users')?.addEventListener('click', () => {
       if (!_userCache.length) { showToast('No users loaded to export', 'error'); return; }
@@ -7265,6 +7284,8 @@ async function downloadReport(type, format, btn) {
       await ApiService.downloadInventoryReport();
     } else if (type === 'orders') {
       await ApiService.downloadOrdersReport({ startDate: from, endDate: to });
+    } else if (type === 'users') {
+      await ApiService.downloadUserReport({ startDate: from, endDate: to });
     } else {
       showToast(`${type} export not available`, 'error');
       return;

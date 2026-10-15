@@ -1348,4 +1348,12 @@ export const ApiService = {
   async downloadDeliveryNote(orderId) {
     return await this._downloadBlob(`/api/reports/delivery-notes/${orderId}`, `delivery-note-${orderId}.pdf`);
   },
+  async downloadUserReport({ startDate, endDate } = {}) {
+    const today = new Date().toISOString().slice(0, 10);
+    const params = startDate && endDate
+      ? `?startDate=${startDate}&endDate=${endDate}`
+      : '';
+    const suffix = startDate && endDate ? `${startDate}_to_${endDate}` : today;
+    return await this._downloadBlob(`/api/reports/users${params}`, `User_Report_${suffix}.pdf`);
+  },
 };
